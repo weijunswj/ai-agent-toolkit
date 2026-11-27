@@ -23,7 +23,7 @@ const green = [{ id: 1, name: 'validate', status: 'completed', conclusion: 'succ
 const running = [{ id: 9, name: 'validate', status: 'in_progress', conclusion: null }];
 
 // find's --live facts: ready pull requests at their real heads, and any open train pull requests.
-function facts(f, { ready = [], trains = [], main = [] }) {
+function facts(f, { ready = [], trains = [], main = [], committedAt = undefined }) {
   const pulls = ready.map(([number, head]) => ({ number, draft: false, base: { ref: 'main' }, head: { sha: head }, body: `Change ${number}.\n\n${G1_STAMP}\nBump: patch\nUAT: NOT_REQUIRED (internal)\n\nRefs #${number + 100}` }));
   for (const entry of trains) {
     const table = entry.members.map(([pr, sha]) => `| #${pr} | \`${sha}\` | NORMAL | patch | x |`).join('\n');
@@ -31,7 +31,7 @@ function facts(f, { ready = [], trains = [], main = [] }) {
   }
   const file = path.join(f.root, `facts-${Math.random().toString(16).slice(2)}.json`);
   fs.writeFileSync(file, JSON.stringify({
-    default_branch: 'main', pulls, main_checks: main,
+    default_branch: 'main', pulls, main_checks: main, ...(committedAt ? { main_committed_at: committedAt } : {}),
     comments: Object.fromEntries(ready.map(([number, head]) => [number, [{ body: `Toolkit-G2: PASS ${head} tier=NORMAL\n${G2_STAMP}`, author_association: 'OWNER', created_at: at(1) }]])),
     checks: Object.fromEntries(ready.map(([, head]) => [head, green])),
     files: Object.fromEntries(ready.map(([number]) => [number, [`f${number}.txt`]])),
@@ -191,4 +191,38 @@ test('land waits while main\'s required checks run: the train still takes joiner
   assert.ok(busy.problems.some(problem => /^main's required checks are still running at [0-9a-f]{12}: the train takes joiners until they finish \(find, then join\), then lands$/.test(problem)), busy.problems.join('\n'));
   const done = train.run(['land', '--manifest', first.out, '--pr', '50', '--head', first.result.head, '--main', 'main', '--live', live(green)], f.repo, f.opts);
   assert.ok(!done.problems.some(problem => /main's required checks/.test(problem)), done.problems.join('\n'));
+});
+
+// G2 Low: right after a merge GitHub has not made main's check runs yet. A required check with no run at
+// main's head counts as running for ten minutes after that head was committed, in find and in land; after
+// that, a check that never ran on main (one that runs on pull requests only) holds nothing.
+test('a required check with no run yet at a new main head counts as running, until the head is ten minutes old', t => {
+  const f = fixture(t);
+  const one = f.branch('pr-1', { 'b.txt': 'b\n' });
+  const two = f.branch('pr-2', { 'c.txt': 'c\n' });
+  const fresh = new Date(Date.now() - 60000).toISOString();
+  const old = new Date(Date.now() - 11 * 60000).toISOString();
+  // find: a lone ready pull request starts a train instead of merging alone, and an open front train
+  // still takes joiners.
+  const alone = find(f, facts(f, { ready: [[2, two]], main: [], committedAt: fresh }));
+  assert.equal(alone.result.written, true, JSON.stringify(alone.result));
+  assert.equal(alone.result.main_ci, 'running');
+  assert.match(find(f, facts(f, { ready: [[2, two]], main: [], committedAt: old })).result.next[0], /merge #2 alone/);
+  const train1 = { pr: 50, branch: 'toolkit-train/one', head: one, members: [[1, one]] };
+  assert.match(find(f, facts(f, { ready: [[2, two]], trains: [train1], main: [], committedAt: fresh })).result.next[0], /^join #2 to train #50 /);
+  // land: the front train waits for the check that has not started yet.
+  const first = built(f, [f.member(1, one)]);
+  const live = at => {
+    const file = path.join(f.root, `land-${Date.parse(at)}.json`);
+    fs.writeFileSync(file, JSON.stringify({ 50: { state: 'OPEN', head: first.result.head, body: '' }, 1: { state: 'OPEN', head: one, body: 'Change.\n\nBump: patch\nUAT: NOT_REQUIRED (internal)\n' }, main_checks: [], main_committed_at: at }));
+    return file;
+  };
+  const waits = train.run(['land', '--manifest', first.out, '--pr', '50', '--head', first.result.head, '--main', 'main', '--live', live(fresh)], f.repo, f.opts);
+  assert.ok(waits.problems.some(problem => /^main's required checks are still running at /.test(problem)), waits.problems.join('\n'));
+  const lands = train.run(['land', '--manifest', first.out, '--pr', '50', '--head', first.result.head, '--main', 'main', '--live', live(old)], f.repo, f.opts);
+  assert.ok(!lands.problems.some(problem => /main's required checks/.test(problem)), lands.problems.join('\n'));
+  // G2 round 1, L-a: with no required check listed and no run at all yet, a new head counts as running too.
+  f.governed(null, { required_checks: [] });
+  assert.equal(find(f, facts(f, { ready: [[2, two]], main: [], committedAt: fresh })).result.main_ci, 'running');
+  assert.match(find(f, facts(f, { ready: [[2, two]], main: [], committedAt: old })).result.next[0], /merge #2 alone/);
 });

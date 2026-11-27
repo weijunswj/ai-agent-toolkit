@@ -100,14 +100,23 @@ function context(t) {
   return ctx;
 }
 
-// GitHub as the land check reads it: one open refresh pull request at `head`, its checks and the
-// TOOLKIT_REF variable. Every call is recorded with its method, so a test can show it only reads.
-function github(ctx, head, { checks = [['validate', 'completed', 'success']], pin = null, open = true } = {}) {
+// GitHub as the land check reads it: one open refresh pull request at `head` in a repository `owner`
+// owns (a User, an Organization, or unreadable), its checks, the TOOLKIT_REF variable and, for an
+// organization, the organization variables shared with the repository (null: that read is refused).
+// Every call is recorded with its method, so a test can show it only reads.
+function github(ctx, head, { checks = [['validate', 'completed', 'success']], pin = null, open = true, owner = 'User', shared = [] } = {}) {
   const calls = [];
   const read = (endpoint, options = {}) => {
     calls.push({ endpoint, method: options.method || 'GET' });
-    if (endpoint.startsWith(`repos/${SLUG}/pulls?state=open`)) return open ? [{ number: 7, head: { ref: refresh.BRANCH, sha: head, repo: { full_name: SLUG } }, base: { ref: 'main' } }] : [];
+    if (endpoint.startsWith(`repos/${SLUG}/pulls?state=open`)) return open ? [{ number: 7, head: { ref: refresh.BRANCH, sha: head, repo: { full_name: SLUG, ...(owner ? { owner: { type: owner } } : {}) } }, base: { ref: 'main' } }] : [];
     if (endpoint === `repos/${SLUG}/actions/variables/TOOLKIT_REF`) return pin;
+    const sharedPage = new RegExp(`^repos/${SLUG}/actions/organization-variables\\?per_page=30&page=(\\d+)$`).exec(endpoint);
+    if (sharedPage) {
+      // GitHub refuses this read for a user's repository (HTTP 422).
+      if (owner !== 'Organization' || shared === null) throw new Error('GitHub refused GET (HTTP 422).');
+      const variables = shared.map(name => ({ name, value: 'x' }));
+      return { total_count: variables.length, variables: variables.slice((Number(sharedPage[1]) - 1) * 30, Number(sharedPage[1]) * 30) };
+    }
     const page = new RegExp(`^repos/${SLUG}/commits/${head}/check-runs\\?per_page=100&page=(\\d+)$`).exec(endpoint);
     if (page) {
       const runs = checks.map(([name, status, conclusion], id) => ({ id: id + 1, name, status, conclusion }));
@@ -158,6 +167,12 @@ test('closure matrix: a proved refresh lands pinned with a notice; everything el
     ['6', 'the named Toolkit commit is not on Toolkit main', () => ctx.refreshHead({ commit: ctx.toolkit.off }), {}, 'owner', /is not on Toolkit main/],
     ['7', 'the named Toolkit commit is not in this computer\'s Toolkit checkout', () => ctx.refreshHead({ commit: UNKNOWN }), {}, 'hold', /not in this computer's Toolkit checkout/],
     ['10', 'TOOLKIT_REF is set', () => head, { pin: { name: 'TOOLKIT_REF', value: ctx.toolkit.main } }, 'owner', /TOOLKIT_REF variable is set/],
+    // G2 L4: an organization's TOOLKIT_REF shared with the repository pins it too (vars.TOOLKIT_REF reads it).
+    ['10', 'an organization\'s TOOLKIT_REF shared with the repository', () => head, { owner: 'Organization', shared: ['OTHER', 'TOOLKIT_REF'] }, 'owner', /its organization's TOOLKIT_REF variable is shared with it/],
+    ['10', 'TOOLKIT_REF as the 31st variable shared, one page on', () => head, { owner: 'Organization', shared: [...Array.from({ length: 30 }, (_, i) => `VAR_${i}`), 'toolkit_ref'] }, 'owner', /its organization's TOOLKIT_REF variable is shared with it/],
+    ['1', 'an organization\'s repository with no TOOLKIT_REF shared', () => head, { owner: 'Organization', shared: ['OTHER'] }, 'land', /is proved/],
+    ['10', 'the organization variables cannot be read', () => head, { owner: 'Organization', shared: null }, 'hold', /organization variables shared with the repository could not be read/],
+    ['10', 'the repository\'s owner cannot be read', () => head, { owner: null }, 'hold', /Who owns owner\/a could not be read/],
     // G2 round 1, L3: a busy head's required check on the second page of check runs still counts.
     ['1', 'the required check on the second page of 150 check runs', () => head, { checks: [...Array.from({ length: 149 }, (_, i) => [`sweep-${i}`, 'completed', 'success']), ['validate', 'completed', 'success']] }, 'land', /is proved/],
     ['18', 'another actor\'s commit with any other message, the same files', () => ctx.refreshHead({ text: 'Update workflows\n' }), {}, 'owner', /message is not exactly the refresh's/],
@@ -259,6 +274,10 @@ test('the merge scope the hold reads: a proved refresh is in scope; an unproved 
   // and --land-refresh is the controller's route for a refresh.
   const out = { text: '', write(chunk) { this.text += chunk; } };
   assert.equal(eligible.main(['--base', ctx.main, '--head', head, '--scope-only'], { cwd: ctx.repo, stdout: out, stderr: out }), 1, out.text);
+  // The gate rules say the same where they list what that exit 1 sends to the typed merge, so a
+  // controller reading them lands a proved refresh by --land-refresh instead of waiting.
+  const rules = fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'agent-rules', 'gate-rules.md'), 'utf8');
+  assert.match(rules, /Those wait for the owner's typed `merge N` \(a proved refresh lands by `--land-refresh`\)/);
   // One differing byte: the CI workflow reasons stay, with why the proof failed.
   const edited = ctx.refreshHead({ change: repo => fs.appendFileSync(path.join(repo, '.github', 'workflows', 'personal-data-guard.yml'), '#\n') });
   const failed = scopeWithProof(ctx.repo, ctx.main, edited, { prove });

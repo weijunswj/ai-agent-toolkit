@@ -55,8 +55,11 @@
 //     "checks": { "<sha>": [ { "name": "validate", "status": "completed", "conclusion": "success", "id": 1 } ] },
 //     "files": { "12": ["path/a.txt"] },
 //     "merge_bases": { "main...<sha>": "<sha>" }, "contents": { "<sha>:<path>": "<text>" },
-//     "main_checks": [ { "name": "validate", "status": "in_progress", "conclusion": null, "id": 2 } ] }
-// ("main_checks" are the check runs at the default branch's head; none listed means none running).
+//     "main_checks": [ { "name": "validate", "status": "in_progress", "conclusion": null, "id": 2 } ],
+//     "main_committed_at": "<ISO>" }
+// ("main_checks" are the check runs at the default branch's head and "main_committed_at" when that head
+// was committed: a required check with none listed counts as running for ten minutes after it, and with
+// no time given the head is old, so none listed means none running).
 
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
@@ -65,7 +68,7 @@ const { uatVerdict } = require('./toolkit-auto-merge-eligible.cjs');
 const riskTier = require('./toolkit-risk-tier.cjs');
 const gateRoute = require('./toolkit-gate-route.cjs');
 const carry = require('./toolkit-review-carry.cjs');
-const { mergeTrainMembers } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
+const { mergeTrainMembers, mainCheckMayStart } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
 const g2 = require('../../skills/github-program-reconciler/scripts/g2-verdict.cjs');
 
 const { VERDICT } = g2;
@@ -97,6 +100,13 @@ class GitHubFacts {
   }
   // The check runs at the default branch's head.
   mainChecks(branch) { return this.checks(encodeURIComponent(branch)); }
+  // When the default branch's head was committed (an ISO time).
+  mainCommittedAt(branch) {
+    const result = spawnSync('gh', ['api', `repos/${this.repository}/commits/${encodeURIComponent(branch)}`, '--jq', '.commit.committer.date'], { encoding: 'utf8', windowsHide: true });
+    const at = String(result.stdout || '').trim();
+    if (result.error || result.status !== 0 || !Number.isFinite(Date.parse(at))) throw new Error(`could not read when ${branch}'s head was committed`);
+    return at;
+  }
   files(number) { return this.#api(`repos/${this.repository}/pulls/${number}/files?per_page=100`).map(file => file.filename); }
   mergeBase(base, head) {
     const result = spawnSync('gh', ['api', `repos/${this.repository}/compare/${base}...${head}`, '--jq', '.merge_base_commit.sha'], { encoding: 'utf8', windowsHide: true });
@@ -122,6 +132,7 @@ class LiveFacts {
   comments(number) { return (this.facts.comments || {})[String(number)] || []; }
   checks(sha) { return (this.facts.checks || {})[sha] || []; }
   mainChecks() { return this.facts.main_checks || []; }
+  mainCommittedAt() { return this.facts.main_committed_at || null; }
   files(number) { return (this.facts.files || {})[String(number)] || []; }
   mergeBase(base, head) { return (this.facts.merge_bases || {})[`${base}...${head}`] || base; }
   text(ref, file) { const value = (this.facts.contents || {})[`${ref}:${file}`]; return typeof value === 'string' ? value : null; }
@@ -142,12 +153,16 @@ function missingChecks(runs, required) {
 }
 
 // Whether main's CI is still running: a required check (every check when none is required) whose
-// latest run at the default branch's head has not completed.
-function mainRunning(runs, required) {
+// latest run at the default branch's head has not completed, or that has no run there yet while main's
+// head is new (mainCheckMayStart, issue-closure.cjs). With none required and no run at all yet, a new
+// head counts as running too.
+function mainRunning(runs, required, { committedAt = null, now = Date.now() } = {}) {
   const names = required.length ? required : [...new Set(runs.map(run => run.name))];
+  const mayStart = mainCheckMayStart(committedAt, now);
+  if (!names.length) return mayStart;
   return names.some(name => {
     const latest = runs.filter(run => run.name === name).sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0];
-    return Boolean(latest) && latest.status !== 'completed';
+    return latest ? latest.status !== 'completed' : mayStart;
   });
 }
 
@@ -319,7 +334,7 @@ function find(cwd, options, maxMembers) {
   }
   // The queue: the last train takes joiners while it waits behind another, or, at the front, while
   // main's checks run; otherwise the ready ones start the next train behind it.
-  const running = mainRunning(facts.mainChecks(branch), required);
+  const running = mainRunning(facts.mainChecks(branch), required, { committedAt: facts.mainCommittedAt(branch) });
   const open = Boolean(tip) && !options.nextTrain && (tip.base !== branch || running);
   const aboard = open ? (mergeTrainMembers(pulls.find(pull => pull.number === tip.pr)?.body) || []).length : 0;
   const room = Math.max(0, maxMembers - aboard);

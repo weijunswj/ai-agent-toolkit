@@ -449,10 +449,11 @@ class FakeGitHub {
         .map(([file, entry]) => ({ name: file.slice(prefix.length), oid: entry.sha, type: 'blob', object: { text: entry.text, isTruncated: false } }));
       return ok(200, { data: { repository: { snapshot: entries.length ? { entries } : null } } });
     }
-    // The boarding read: the default branch's head and its checks (mainHead, mainContexts), and each
+    // The boarding read: the default branch's head, when it was committed (mainCommittedAt, else long
+    // ago) and its checks (mainHead, mainContexts), and each
     // pull request's head, base, draft flag, newest twenty comments and checks.
     if (/p\d+: pullRequest/.test(body.query) && body.query.includes('comments(last:20)')) {
-      const repository = { defaultBranchRef: { name: 'main', target: { oid: this.mainHead || 'f'.repeat(40), statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: this.mainContexts || [] } } } } };
+      const repository = { defaultBranchRef: { name: 'main', target: { oid: this.mainHead || 'f'.repeat(40), committedDate: this.mainCommittedAt || '2026-01-01T00:00:00Z', statusCheckRollup: { contexts: { pageInfo: { hasNextPage: false }, nodes: this.mainContexts || [] } } } } };
       for (const match of body.query.matchAll(/p(\d+): pullRequest/g)) {
         const pr = this.prs.get(Number(match[1]));
         repository[`p${match[1]}`] = pr ? { number: pr.number, isDraft: pr.isDraft, headRefOid: pr.head, baseRefName: pr.base || 'main',
