@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { fetchedState } = require('./support/fetched-default-branch.cjs');
 const { spawnSync } = require('node:child_process');
 
 const ROOT = process.env.A2A_SOURCE_ROOT || path.resolve(__dirname, '../..');
@@ -65,7 +66,7 @@ function repository(t, { installed = false, shards = true } = {}) {
 const turnOn = (dir, ciShards = 'yes') => proposal.cloudWorkflowFiles(dir, { root: ROOT, commit: COMMIT, ciShards });
 const plan = dir => workflows.plan({ repo: dir, root: ROOT, commit: COMMIT, ciShards: 'yes' });
 const YES = () => ({ ci_shards: { answer: 'yes' }, required_checks: ['Toolkit test shards'] });
-const findings = dir => conformance.cloudWorkflowFindings({ root: dir }, ROOT, { cloudWorkflowsCommit: COMMIT, mergedBinding: YES });
+const findings = dir => conformance.cloudWorkflowFindings(fetchedState(dir), ROOT, { cloudWorkflowsCommit: COMMIT, mergedBinding: YES });
 const drift = dir => findings(dir).filter(entry => entry.severity === 'drift').map(entry => entry.message);
 
 test('the one list names every Toolkit cloud workflow, and turn-on, check and refresh read only it', t => {
@@ -215,7 +216,8 @@ test('conflicting repositories: a file Toolkit did not write is never overwritte
     ['the check\'s text in the sweep\'s place', dir => put(dir, SWEEP, require(path.join(ROOT, 'skills/secure-ci-cd/scripts/install-personal-data-guard.cjs')).workflowText('personal-data-guard')), SWEEP, 'personal-data-guard'],
     ['the guard script path', dir => put(dir, SCRIPT, '// my own script\n'), SCRIPT, 'personal-data-guard'],
     ['the auto-merge path', dir => put(dir, AUTO_MERGE, mine), AUTO_MERGE, 'dependency-auto-merge'],
-    ['a folder in the settings file\'s place', dir => fs.mkdirSync(path.join(dir, CONFIG), { recursive: true }), CONFIG, 'personal-data-guard'],
+    // Git keeps no empty folder, so the folder holds a file, as it would on the default branch.
+    ['a folder in the settings file\'s place', dir => put(dir, `${CONFIG}/notes.txt`, 'mine\n'), CONFIG, 'personal-data-guard'],
   ];
   for (const [name, change, file, id] of cases) {
     const dir = repository(t);
@@ -270,7 +272,7 @@ test('owner choices: governance off reports no missing workflow and its pull req
   const off = { state: 'DISABLED', root: dir };
   assert.deepEqual(conformance.cloudSweepReachFindings(off, { mergedBinding: () => null }), []);
   const bare = repository(t);
-  const never = conformance.cloudWorkflowFindings({ root: bare }, ROOT, { cloudWorkflowsCommit: COMMIT, mergedBinding: () => ({ ci_shards: { answer: 'never' } }) });
+  const never = conformance.cloudWorkflowFindings(fetchedState(bare), ROOT, { cloudWorkflowsCommit: COMMIT, mergedBinding: () => ({ ci_shards: { answer: 'never' } }) });
   assert.deepEqual(never.filter(entry => /shard/i.test(entry.message)), []);
   assert.ok(never.some(entry => entry.message.startsWith(CHECK)));
 });
@@ -285,6 +287,6 @@ test('unreadable: a Toolkit checkout that cannot give the copies carries none, s
   assert.deepEqual(carried.files, {});
   assert.equal(carried.added, undefined);
   assert.match(carried.warning, /the cloud workflow copies were not refreshed in this pull request \(.* is missing at Toolkit commit /);
-  const found = conformance.cloudWorkflowFindings({ root: dir }, empty, { toolkitRoot: empty, cloudWorkflowsCommit: git(empty, ['rev-parse', 'HEAD']), mergedBinding: YES });
+  const found = conformance.cloudWorkflowFindings(fetchedState(dir), empty, { toolkitRoot: empty, cloudWorkflowsCommit: git(empty, ['rev-parse', 'HEAD']), mergedBinding: YES });
   assert.deepEqual(found.map(entry => `${entry.id}:${entry.severity}`), ['CLOUD_WORKFLOWS_UNCHECKED:info']);
 });

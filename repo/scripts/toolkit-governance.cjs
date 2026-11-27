@@ -11,6 +11,7 @@ const ownerTerminal = require('./owner-terminal.cjs');
 const { AGENT_SHELL_MARKERS } = require('./agent-shell-markers.cjs');
 
 const fs = require('node:fs');
+const os = require('node:os');
 const crypto = require('node:crypto');
 const util = require('node:util');
 const { GovernanceProposals, GitHubProposalTransport, BANK_ONLY } = require('./toolkit-governance-proposal.cjs');
@@ -90,24 +91,25 @@ const RULES_TEXT = Object.freeze({
   UNDECIDED: `GitHub governance is not decided yet, so it counts as off: work continues under the global rules, without governance effects or standing task auto-merge, and nothing waits on the answer. Toolkit asks once per session. An account that can write decides by answering yes, no or later when Toolkit asks, or by saying toolkit governance and answering its question bank.`,
 });
 
-// The fixed summary of a bank turn-on pull request: what merging it does, what it holds and what
-// Toolkit finishes after the merge. The closing line follows the owner's commands (#applyBank).
-// `binding` is the binding the pull request proposes: with no required checks, protection waits.
-// `storeNote` says how the store was chosen (found, created or named), or null.
+// The fixed summary of a bank turn-on pull request: what merging it does, what it holds, the checks it
+// requires and what Toolkit finishes after the merge. The closing line follows the owner's commands
+// (#applyBank). It gives the owner no step of their own: Toolkit sets the required checks, and the
+// checkout holds nothing the merge brings in, so the session-start catch-up moves it.
+// `binding` is the binding the pull request proposes, and `storeNote` says how the store was chosen
+// (found, created or named), or null.
 function turnOnSummary(result, binding, storeNote = null) {
   const url = result.proposal.url;
-  const noChecks = Array.isArray(binding?.required_checks) && binding.required_checks.length === 0;
   return [
     result.reused ? (result.updated ? `Toolkit: updated the open governance turn-on pull request with these answers: ${url}.` : `Toolkit: the open governance turn-on pull request already holds these answers: ${url}.`)
       : `Toolkit: prepared the governance turn-on pull request: ${url}.`,
     'Merging it turns governance on for this repository on every computer. It changes no credentials or deployment. Anything listed above as made on GitHub was made now; everything else applies only after you merge it.',
     ...(binding?.store?.repository ? [`Store: ${binding.store.repository}, a private GitHub repository${storeNote ? ` (${storeNote})` : ''}, for programme records and evidence.`] : []),
     ...(result.files?.length ? [`It holds: ${result.files.join(', ')}.`] : []),
+    ...(result.requiredChecks?.length ? [`Required checks: ${result.requiredChecks.join(', ')}. Toolkit sets them in the programme file, so every pull request passes them before it lands.`] : []),
     ...(result.added?.includes('personal-data-guard') ? ['Personal data guard: checks each pull request and push on GitHub (on a private repository that uses Actions minutes), with no hooks on any computer. It never scans commit author or committer addresses, and it passes images and fonts unread and names each one.'] : []),
     ...(result.notes || []),
     `After the merge, the next session here finishes on its own: ${finishing.WHAT}. On a private repository on GitHub Free, GitHub cannot enforce the protection or the rulesets; that session says so and the local guards stay the fallback.`,
-    ...(noChecks ? [`This repository has no required checks yet, so default-branch protection waits: once a pull request adds the check names to required_checks in ${governance.BINDING_FILE} and merges, run ${CMD('migrate')} in your own terminal to add it.`] : []),
-    'After the merge, before pulling, compare any prepared untracked files with the merged copies; keep local differences and clear only verified duplicates.',
+    'Nothing was written to your checkout, so after the merge the next session here can bring your local default branch up to date on its own.',
   ];
 }
 
@@ -424,7 +426,7 @@ class ToolkitGovernanceCli {
     // setup governance asks the switch with yes; it joins the same proposal, never a local file.
     if (switches && binding && typeof binding === 'object') binding = { ...binding, task_prs: { ...(binding.task_prs || {}), ...switches } };
     if (shards && binding && typeof binding === 'object') binding = { ...binding, ci_shards: shards };
-    const result = this.#proposals.publish(this.#cwd, run, binding, bank);
+    const result = this.#proposals.publish(this.#cwd, run, binding, bank, bank ? this.#rendered : null);
     // A bank turn-on is finished after its merge: protection, rulesets and security settings.
     if (bank && result.proposal?.answer === 'yes') {
       try { finishing.markPending(this.#registryOptions, this.#state().repository_id, { proposal: result.proposal.number, firstSweep: result.added ? result.added.includes('personal-data-guard') : null }); } catch { /* the owner can run migrate */ }
@@ -683,6 +685,9 @@ class ToolkitGovernanceCli {
   #storeNote = null;
   // The turn-on pull request the bank published in this run, for its closing line.
   #turnOnUrl = null;
+  // The scratch folder outside the checkout a bank turn-on renders its missing CI files and first shard
+  // list into, for its one pull request; removed when the answer is done. Never the owner's checkout.
+  #rendered = null;
 
   // The cleanup route (toolkit-governance-cleanup.cjs), reading governance the way this command does.
   // A preview writes nothing; it never runs git. The catch is the last resort for a failure the route
@@ -832,11 +837,17 @@ class ToolkitGovernanceCli {
       // A store that cannot be used is refused before anything is written here, the shard list included.
       const problem = plan && !plan.blocked ? adopt.storeProblem(plan) : null;
       if (problem) { this.#adoptStopped(problem, []); return 2; }
-      // A shards yes or never joins the one turn-on pull request.
-      const shards = ['yes', 'never'].includes(chosen.ciShards) ? this.#turnOnShards(state.root, chosen.ciShards) : null;
-      shardsDone = Boolean(shards);
-      code = plan && !plan.blocked ? this.#adoptAndPropose(state, plan, enabling, shards, app)
-        : !found && adopt.adoptionPrepared(state.root) ? this.#preparedAndPropose(state, enabling, shards, app) : this.#prepareOn(enabling, null, shards, app);
+      this.#rendered = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-turn-on-'));
+      try {
+        // A shards yes or never joins the one turn-on pull request.
+        const shards = ['yes', 'never'].includes(chosen.ciShards) ? this.#turnOnShards(state.root, chosen.ciShards) : null;
+        shardsDone = Boolean(shards);
+        code = plan && !plan.blocked ? this.#adoptAndPropose(state, plan, enabling, shards, app)
+          : !found && adopt.adoptionPrepared(state.root) ? this.#preparedAndPropose(state, enabling, shards, app) : this.#prepareOn(enabling, null, shards, app);
+      } finally {
+        fs.rmSync(this.#rendered, { recursive: true, force: true });
+        this.#rendered = null;
+      }
       acted = true;
     } else if (chosen.governance === 'off' && state.state !== 'DISABLED') {
       code = this.#prepareOff();
@@ -903,9 +914,9 @@ class ToolkitGovernanceCli {
     return code;
   }
 
-  // The ci_shards value a turn-on answer records, or null when it is held. For yes it adds a first shard
-  // list to the working tree where there is none, so the list and the shard workflows rendered from it
-  // travel in the same turn-on pull request (as the plain-text check files do).
+  // The ci_shards value a turn-on answer records, or null when it is held. For yes it renders a first
+  // shard list where the checkout has none, into the turn-on's scratch folder, so the list and the shard
+  // workflows rendered from it travel in the same turn-on pull request (as the plain-text check files do).
   #turnOnShards(root, answer) {
     const ready = this.#ciReaders(root);
     if (!ready.ok) {
@@ -913,14 +924,14 @@ class ToolkitGovernanceCli {
       return null;
     }
     const lines = [];
-    const manifest = path.join(root, ...governedShards.MANIFEST_REL.split('/'));
-    if (answer === 'yes' && fs.existsSync(manifest)) lines.push(`Parallel CI shards: ${governedShards.MANIFEST_REL} is already here, so the turn-on pull request carries it.`);
+    if (answer === 'yes' && fs.existsSync(path.join(root, ...governedShards.MANIFEST_REL.split('/')))) lines.push(`Parallel CI shards: ${governedShards.MANIFEST_REL} is already here, so the turn-on pull request carries it.`);
     else if (answer === 'yes') {
       const first = ciOffer.firstList(root, this.#lastCiEstimate);
       if (first.ok) {
+        const manifest = path.join(this.#rendered, ...governedShards.MANIFEST_REL.split('/'));
         fs.mkdirSync(path.dirname(manifest), { recursive: true });
         fs.writeFileSync(manifest, first.text);
-        lines.push(`Parallel CI shards: a first ${governedShards.MANIFEST_REL} with ${first.shards} Linux shards running node --test was added to the working tree and travels in the turn-on pull request with the shard workflows; Shard Timings rebalances them from measured times.`);
+        lines.push(`Parallel CI shards: a first ${governedShards.MANIFEST_REL} with ${first.shards} Linux shards running node --test travels in the turn-on pull request with the shard workflows; Shard Timings rebalances them from measured times.`);
       } else lines.push(`Parallel CI shards: yes is recorded, but no shard list was added: ${first.reason}. The shard workflows are copied only once a usable ${governedShards.MANIFEST_REL} is merged, and only Node tests are supported for now.`);
     } else lines.push('Parallel CI shards: never ask is recorded in the turn-on pull request.');
     this.#print(false, {}, lines);
@@ -936,7 +947,7 @@ class ToolkitGovernanceCli {
     }
     let adopted;
     try {
-      adopted = adopt.adopt({ root: state.root, plan, writer: this.#adoptionWriter, switches, ...(this.#plainTextInstaller ? { plainText: () => this.#plainTextInstaller(state.root) } : {}) });
+      adopted = adopt.adopt({ root: state.root, into: this.#rendered, plan, writer: this.#adoptionWriter, switches, ...(this.#plainTextInstaller ? { plainText: into => this.#plainTextInstaller(state.root, into) } : {}) });
     } catch (error) {
       if (!(error instanceof adopt.AdoptError)) throw error;
       this.#adoptStopped(error.message, error.made);
@@ -960,7 +971,7 @@ class ToolkitGovernanceCli {
   #preparedAndPropose(state, switches, shards = null, app = null) {
     let ready;
     try {
-      ready = adopt.prepared({ root: state.root, ...(this.#plainTextInstaller ? { plainText: () => this.#plainTextInstaller(state.root) } : {}) });
+      ready = adopt.prepared({ root: state.root, into: this.#rendered, ...(this.#plainTextInstaller ? { plainText: into => this.#plainTextInstaller(state.root, into) } : {}) });
     } catch (error) {
       if (!(error instanceof adopt.AdoptError)) throw error;
       this.#print(false, {}, [`${error.message} No pull request was prepared.`]);
@@ -1103,9 +1114,9 @@ function copiesRow(copies) {
 }
 
 // The owner's governance App setup command (it refuses under an agent).
-// A command for the owner to run, in Toolkit's own code block: the app shows it as typed (straight
-// quotes, never curly ones) with a copy button.
-const fenced = command => ['```', command, '```'];
+// A command for the owner to run, in Toolkit's own PowerShell block: the app shows it as typed (straight
+// quotes, never curly ones) with a copy button, and a Run button where it offers one.
+const fenced = command => ['```powershell', command, '```'];
 
 function label(state) {
   return state.state.replace(/_/g, ' ');

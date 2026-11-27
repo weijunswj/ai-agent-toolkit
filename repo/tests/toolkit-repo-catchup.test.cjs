@@ -395,6 +395,82 @@ test('20: a move that changes AGENTS.md, CLAUDE.md or a file CLAUDE.md imports a
   f.behind(1, ['docs/other.md']);
   assert.ok(!run(f).line.endsWith(REREAD), 'a file it does not import');
 });
+// A setup whose pull request holds files it also wrote into the checkout (an older governance turn-on):
+// origin gains the files in one commit while the clone keeps the same bytes untracked.
+const LEFTOVERS = Object.freeze({
+  '.github/plain-text.json': '{\n  "schema": "fixture"\n}\n',
+  '.github/scripts/plain-text-check.cjs': '#!/usr/bin/env node\nconsole.log("fixture");\n',
+  '.github/dependabot.yml': 'version: 2\nupdates: []\n',
+});
+function setupLeftovers(f, files = LEFTOVERS) {
+  for (const [file, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(f.seed, file)), { recursive: true });
+    fs.writeFileSync(path.join(f.seed, file), text);
+    git(f.seed, ['add', '--', file]);
+  }
+  git(f.seed, [...ID, 'commit', '--quiet', '-m', 'governance setup']);
+  git(f.seed, ['push', '--quiet', f.origin, 'main']);
+  git(f.clone, ['fetch', '--quiet', f.origin, '+refs/heads/main:refs/remotes/origin/main']);
+  for (const [file, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(f.clone, file)), { recursive: true });
+    fs.writeFileSync(path.join(f.clone, file), text);
+  }
+  return git(f.origin, ['rev-parse', 'main']);
+}
+const bytesOf = (root, files) => Object.fromEntries(Object.keys(files).map(file => [file, fs.readFileSync(path.join(root, file), 'utf8')]));
+
+test('24: untracked files the move adds with the same bytes are cleared and the checkout moves', t => {
+  const f = fixture(t);
+  const before = head(f.clone);
+  const target = setupLeftovers(f);
+  const { line } = run(f);
+  assert.equal(head(f.clone), target);
+  assert.equal(line, `Toolkit: brought local main up to date with origin/main (${before.slice(0, 7)} to ${target.slice(0, 7)}, 1 commit). Untracked copies of 3 files it adds, identical to the merged ones, were replaced by the tracked files: ${Object.keys(LEFTOVERS).sort().join(', ')}.`);
+  assert.equal(git(f.clone, ['status', '--porcelain', '--untracked-files=all']), '');
+  assert.deepEqual(bytesOf(f.clone, LEFTOVERS), LEFTOVERS);
+});
+
+test('25: one differing or one extra untracked file keeps the checkout, and every file stays as it was', t => {
+  for (const [label, change] of [
+    ['differs', clone => fs.writeFileSync(path.join(clone, '.github', 'plain-text.json'), '{ "local": true }\n')],
+    ['extra', clone => fs.writeFileSync(path.join(clone, '.github', 'notes.md'), 'mine\n')],
+    ['tracked edit', clone => fs.writeFileSync(path.join(clone, 'README.md'), 'local edit\n')],
+  ]) {
+    const f = fixture(t);
+    const before = head(f.clone);
+    setupLeftovers(f);
+    change(f.clone);
+    const kept = Object.fromEntries(git(f.clone, ['ls-files', '--others', '--exclude-standard']).split('\n').map(file => [file, fs.readFileSync(path.join(f.clone, file), 'utf8')]));
+    const { line } = run(f);
+    assert.equal(head(f.clone), before, label);
+    assert.deepEqual(NOT_MOVED.exec(line).slice(1), ['1', 'uncommitted changes'], label);
+    for (const [file, text] of Object.entries(kept)) assert.equal(fs.readFileSync(path.join(f.clone, file), 'utf8'), text, `${label}: ${file}`);
+  }
+});
+
+test('26: an untracked file the move does not add keeps the checkout, even with the bytes of a tracked file', t => {
+  const f = fixture(t);
+  const before = head(f.clone);
+  // The same bytes as a file already in the clone's commit: the move does not add it, so it is not a leftover.
+  fs.writeFileSync(path.join(f.clone, 'copy-of-readme.md'), 'one\n');
+  f.behind(1);
+  assert.deepEqual(NOT_MOVED.exec(run(f).line).slice(1), ['1', 'uncommitted changes']);
+  assert.equal(head(f.clone), before);
+  assert.equal(fs.readFileSync(path.join(f.clone, 'copy-of-readme.md'), 'utf8'), 'one\n');
+});
+
+test('27: a move that fails after the leftovers were cleared puts them back exactly', t => {
+  const f = fixture(t);
+  const before = head(f.clone);
+  setupLeftovers(f);
+  const spy = recorder();
+  const failing = (args, options) => args.includes('merge') && args.includes('--ff-only') ? { status: 1, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) } : spy.runGit(args, options);
+  const line = catchup.catchUp(f.read(), { runGit: failing, controlRoot: f.control, environment: { ...process.env } });
+  ALL_CALLS.push(...spy.calls);
+  assert.deepEqual(NOT_MOVED.exec(line).slice(1), ['1', 'git was busy or the move failed']);
+  assert.equal(head(f.clone), before);
+  assert.deepEqual(bytesOf(f.clone, LEFTOVERS), LEFTOVERS);
+});
 
 // Runs after every row above: the catch-up only ever ran the allowed read verbs and one fast-forward.
 test('21: every git call the catch-up made used only the allowed verbs, and never a moving or forcing one', () => {
@@ -413,7 +489,8 @@ test('21: every git call the catch-up made used only the allowed verbs, and neve
     if (verb === 'config') assert.equal(args[1], '--get');
   }
   assert.ok(verbs.has('merge'), 'the rows include real moves');
-  assert.deepEqual([...catchup.ALLOWED_VERBS].sort(), ['check-attr', 'config', 'diff', 'merge', 'merge-base', 'rev-list', 'rev-parse', 'status', 'symbolic-ref']);
+  assert.deepEqual([...catchup.ALLOWED_VERBS].sort(), ['cat-file', 'check-attr', 'config', 'diff', 'merge', 'merge-base', 'rev-list', 'rev-parse', 'status', 'symbolic-ref']);
+  assert.ok(verbs.has('cat-file'), 'the rows include a leftover comparison');
 });
 
 test('22: the Codex session start puts the catch-up line before the governance line, and a throwing catch-up drops only its line', () => {

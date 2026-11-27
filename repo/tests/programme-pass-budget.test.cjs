@@ -784,32 +784,37 @@ test('reads: the parent list replaces a read per child, and empty lists are not 
   assert.equal(f.gets(third.calls, new RegExp(`^${APP}/issues/103/comments`)) >= 1, true, 'a child with a comment has its list read');
 });
 
-test('reads: open pull requests cost one store list a pass, and one check batch per twenty no task owns', t => {
+test('reads: open pull requests cost one store list a pass, one check batch per twenty no task owns, and one boarding read per twenty open', t => {
   const f = readFixture(t, { count: 4, groups: ['NOW'] });
   assert.equal(f.run().code, 0);
-  const reads = calls => [f.gets(calls, /^repos\/example\.test\/store\/pulls\?state=open/), calls.filter(call => /p9\d{3}: pullRequest/.test(call.body?.query || '')).length];
+  // The boarding read (comments and checks of every open pull request, for TRAIN_BOARD_DUE) is counted apart.
+  const boarding = call => (call.body?.query || '').includes('comments(last:20)');
+  const reads = calls => [f.gets(calls, /^repos\/example\.test\/store\/pulls\?state=open/), calls.filter(call => /p9\d{3}: pullRequest/.test(call.body?.query || '') && !boarding(call)).length, calls.filter(boarding).length];
   const open = (number, body = '') => f.github.addPr(number, { head: 'c'.repeat(40), body });
   const settled = f.run();
-  assert.deepEqual(reads(settled.calls), [1, 0], 'none unowned: one request');
+  assert.deepEqual(reads(settled.calls), [1, 0, 0], 'none unowned: one request');
   // Owned by a task in progress: its own checks are not read for this.
   open(9000, 'Refs #100');
   f.store.mutate('child', 100, { writer: f.writer, parentDoc: f.parent(), change: doc => ({ ...doc, candidate: { ...doc.candidate, branch: 'feature/other' } }) });
   const owned = f.run();
   assert.equal(owned.code, 0, JSON.stringify(owned.report.holds));
-  assert.deepEqual(reads(owned.calls), [1, 0]);
+  assert.deepEqual(reads(owned.calls), [1, 0, 1], 'an owned one is still read for boarding');
   open(9001);
   const some = f.run();
-  assert.deepEqual(reads(some.calls), [1, 1], 'some unowned: two requests');
+  assert.deepEqual(reads(some.calls), [1, 1, 1], 'some unowned: two requests, and one boarding read');
   for (let n = 9002; n <= 9021; n += 1) open(n);
-  assert.deepEqual(reads(f.run().calls), [1, 2], 'twenty-one unowned: one batch more');
+  assert.deepEqual(reads(f.run().calls), [1, 2, 2], 'twenty-one unowned: one batch more; twenty-two open: two boarding reads');
   // No separate GitHub store: nothing to list. An issue-scoped or plain pass reads neither.
   const same = { ...f.binding, store: { ...f.binding.store, repository: f.binding.repository } };
   const counted = (make, options) => { const at = f.github.calls.length; make.plan(options); return reads(f.github.calls.slice(at)); };
   const writer = state.refreshWriter(f.parent());
-  assert.deepEqual(counted(f.make({ refreshFacts: true, writer }), {}), [1, 2]);
-  assert.deepEqual(counted(f.make({ refreshFacts: true, writer, binding: same }), {}), [0, 2]);
-  assert.deepEqual(counted(f.make({ refreshFacts: true, writer }), { issue: 100 }), [0, 0]);
-  assert.deepEqual(counted(f.make(), {}), [0, 0]);
+  assert.deepEqual(counted(f.make({ refreshFacts: true, writer }), {}), [1, 2, 2]);
+  assert.deepEqual(counted(f.make({ refreshFacts: true, writer, binding: same }), {}), [0, 2, 2]);
+  assert.deepEqual(counted(f.make({ refreshFacts: true, writer }), { issue: 100 }), [0, 0, 0]);
+  assert.deepEqual(counted(f.make(), {}), [0, 0, 0]);
+  // Merge trains off: no boarding read.
+  const off = { ...f.binding, task_prs: { merge_train: 'off' } };
+  assert.deepEqual(counted(f.make({ refreshFacts: true, writer, binding: off }), {}), [1, 2, 0]);
 });
 
 test('reads: settled children are reused, and the oldest share is read again each pass', t => {

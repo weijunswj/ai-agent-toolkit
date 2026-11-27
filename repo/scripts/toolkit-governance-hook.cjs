@@ -47,12 +47,14 @@ const CLOUD_LINE = "Toolkit governance (cloud session): the merge hold runs as o
 
 // How to ask the owner in the Claude desktop app. The failure it prevents: the app shows only a turn's
 // closing message in full and cuts text written earlier in the turn to one line, so a card opened in the
-// same turn as its context reaches the owner without it (25 November 2026, twice). Wording confirmed by
-// the owner. It is a note to the agent: no card is refused. The terminal and the IDE extensions show a
+// same turn as its context reaches the owner without it (25 November 2026, twice). And nothing gives a
+// chat its next turn on its own, so a card promised "on your next turn" never came (27 November 2026):
+// the line has the agent start one short background wait before it ends the turn, whose automatic turn
+// opens the card. Wording confirmed by the owner. It is a note to the agent: no card is refused. The terminal and the IDE extensions show a
 // turn's text as it is written, so only the desktop app's own entry points get it; the host names the
 // entry point in CLAUDE_CODE_ENTRYPOINT. Cloud sessions and SSH sessions are left out until they are
 // checked live (an accepted gap).
-const ASKING_LINE = 'Asking the owner (the Claude desktop app; this stands over your own notes and memories): 1. Put the full context, options and your pick in your closing message and end the turn. 2. A simple question may use the app\'s end-of-turn box in that turn. 3. A merge or three or more choices uses the question card, on your next turn. 4. A card holds only the question and its choices, clear alone, with your recommended option marked. 5. Never write the context and open a card in the same turn: the app cuts it short. Toolkit\'s exact merge card keeps its own text.';
+const ASKING_LINE = 'Asking the owner (the Claude desktop app; this stands over your own notes and memories): 1. Put the full context, options and your pick in your closing message and end the turn. 2. A simple question may use the app\'s end-of-turn box in that turn. 3. A merge or three or more choices uses the question card on the next turn, which nothing else starts: right before you end the turn with the closing message, start one short background wait (a background command of about 30 seconds), then on the automatic turn it brings open the card first, with no text before it. 4. A card holds only the question and its choices, clear alone, with your recommended option marked. 5. Never write the context and open a card in the same turn: the app cuts it short. Toolkit\'s exact merge card keeps its own text.';
 const DESKTOP_APP = /^claude-desktop(?:-3p)?$/;
 const asksHere = environment => DESKTOP_APP.test(String(environment.CLAUDE_CODE_ENTRYPOINT || ''));
 // The host's limit on one hook's session-start text (gate.SESSION_TEXT_LIMIT), spelled out because the
@@ -92,7 +94,9 @@ function respond(event, input, options = {}) {
   if (cloud) options = { ...options, cloud: true };
   // The merge hold runs first and on its own, so an error in the governance check never skips it.
   if (event === 'PreToolUse') {
-    options = { ...options, evidenceResponses: new Map() };
+    // scopeProofs: one merge scope (a refresh's copy proof included) per call, shared by both passes
+    // under the one invocation deadline.
+    options = { ...options, evidenceResponses: new Map(), scopeProofs: options.scopeProofs || new Map() };
     const merge = mergeDecision(input, { ...options, consume: false });
     if (merge) return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: merge.deny } };
     // A gate session off its stack-registry pin, or a verdict or G1 body with the wrong route stamp.
@@ -230,7 +234,7 @@ function closureDecision(input, options) {
 // The merge hold's decision (toolkit-merge-hold.cjs), failing closed for a call that may merge
 // when the module cannot run.
 function mergeDecision(input, options = {}) {
-  try { return (options.mergeHold || mergeHold()).decide(input, { registryOptions: options.registryOptions, now: options.now, environment: options.environment || process.env, host: 'claude', consume: options.consume !== false, readEvidenceGitHub: options.readEvidenceGitHub, evidenceResponses: options.evidenceResponses, closureGuard: options.closureGuard, transport: options.transport, deadline: options.deadline }); } catch {
+  try { return (options.mergeHold || mergeHold()).decide(input, { registryOptions: options.registryOptions, now: options.now, environment: options.environment || process.env, host: 'claude', consume: options.consume !== false, readEvidenceGitHub: options.readEvidenceGitHub, evidenceResponses: options.evidenceResponses, scopeProofs: options.scopeProofs, closureGuard: options.closureGuard, transport: options.transport, deadline: options.deadline }); } catch {
     let mayMerge = true;
     try { mayMerge = (options.mergeHold || mergeHold()).mayMerge(input); } catch { mayMerge = STATE_CHANGING_TOOLS.test(String(input && input.tool_name || '')) && /merge|push/i.test(JSON.stringify(input || {})); }
     return mayMerge ? { deny: MERGE_CHECK_FAILED } : null;

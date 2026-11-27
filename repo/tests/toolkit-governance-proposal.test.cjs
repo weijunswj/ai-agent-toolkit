@@ -358,9 +358,14 @@ test('first yes opens the governance bank, a hand-built yes is refused, and the 
   assert.match(published.pr.body, /<!-- toolkit-governance-decision -->/);
   const { REQUIRED_FILES } = require('../scripts/toolkit-governance-proposal.cjs');
   assert.deepEqual(Object.keys(published.files).sort(), ['.github/plain-text-baseline.json', '.github/dependabot.yml', ...REQUIRED_FILES].sort(), 'the binding, the CI checks and the Dependabot settings, and nothing else (no cloud copies are rendered here)');
-  for (const name of ['.github/plain-text.json', '.github/workflows/plain-text.yml']) assert.equal(published.files[name], fs.readFileSync(path.join(f.cwd, name), 'utf8').replace(/\r\n/g, '\n'), name);
-  // The bank writes both switches off with the turn-on, as it showed them.
-  assert.deepEqual(JSON.parse(published.files[governance.BINDING_FILE]), { ...binding, task_prs: { auto_merge: 'off', merge_train: 'off' } });
+  // The installer's own files travel, rendered outside the checkout: none of them is written to it.
+  const installer = require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs');
+  assert.equal(published.files['.github/plain-text.json'], `${JSON.stringify(installer.STARTING_CONFIG, null, 2)}\n`);
+  assert.equal(published.files['.github/workflows/plain-text.yml'], fs.readFileSync(path.join(__dirname, '..', '..', 'skills', 'secure-ci-cd', 'templates', 'github-actions', 'plain-text.yml'), 'utf8').replace(/\r\n/g, '\n'));
+  for (const name of [...REQUIRED_FILES.filter(entry => entry !== governance.BINDING_FILE), '.github/plain-text-baseline.json', '.github/dependabot.yml']) assert.equal(fs.existsSync(path.join(f.cwd, name)), false, `not in the checkout: ${name}`);
+  // The bank writes both switches off with the turn-on, as it showed them, and requires the plain-text
+  // check its own workflow adds next to the check the prepared binding names.
+  assert.deepEqual(JSON.parse(published.files[governance.BINDING_FILE]), { ...binding, required_checks: ['plain-text', 'validate'], task_prs: { auto_merge: 'off', merge_train: 'off' } });
   // The fixed summary: what merging does, what the pull request holds and what finishes after the merge,
   // then one closing line after the owner's commands.
   const said = stdout.join('');
@@ -369,7 +374,8 @@ test('first yes opens the governance bank, a hand-built yes is refused, and the 
   assert.doesNotMatch(said, /It holds: .*(AGENTS|CLAUDE)\.md/, 'no instruction copies');
   assert.match(said, /the next session here finishes on its own: default-branch protection/);
   assert.doesNotMatch(said, /no required checks yet/, 'a binding with required checks has no protection wait line');
-  assert.match(said, /before pulling, compare any prepared untracked files/);
+  assert.match(said, /^Nothing was written to your checkout, so after the merge the next session here can bring your local default branch up to date on its own\.$/m);
+  assert.doesNotMatch(said, /before pulling|untracked files/, 'no pull step for the owner');
   assert.match(said, /Run the command above, then merge https:\/\/github\.com\/example-owner\/example-repo\/pull\/1\. Nothing else is needed from you\.\n*$/);
   assert.match(said, /already holds these answers/, 'the same answers again leave the open pull request as it is');
   // The bank's App row recommends Set up, so the owner gets the App setup command instead of the by-hand steps.
@@ -838,7 +844,7 @@ test('recovering an interrupted off branch needs every listed removal done, and 
   assert.equal(extra.writes, 0);
 });
 
-test('a disabled repository turned on through the bank: the bank shown before the answer names the post-merge settings, and a binding with no required checks says protection waits', async t => {
+test('a disabled repository turned on through the bank: the bank shown before the answer names the post-merge settings, and a binding with no required checks gives the owner no required_checks edit or migrate step', async t => {
   const f = fixture(t);
   recordMerged(f.cwd, { registryPath: f.registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'example-owner/example-repo', governance: 'disabled' }) });
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).state, 'DISABLED');
@@ -860,5 +866,5 @@ test('a disabled repository turned on through the bank: the bank shown before th
   const id = governance.readIdentity(f.cwd).repository_id;
   assert.equal(finishing.entryFor(f.registryOptions, id)?.status, 'pending', 'the turn-on is marked for the post-merge finish');
   const after = stdout.join('').slice(shown[0].length);
-  assert.match(after, /This repository has no required checks yet, so default-branch protection waits: once a pull request adds the check names to required_checks in \.github\/toolkit-programme\.json and merges, run `node ".*toolkit-governance\.cjs" migrate` in your own terminal to add it\./);
+  assert.doesNotMatch(after, /required_checks|migrate|no required checks yet/, 'Toolkit sets the checks; the owner edits nothing and runs no migrate');
 });

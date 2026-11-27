@@ -46,7 +46,6 @@ test('a build on main beside an open train refuses, names how to stack, and --se
   const fork = openTrainFacts(f, { number: 60, branch: 'toolkit-train/fork', head: first.result.head, members: [[1, one]], repo: 'someone/fork' });
   const beside = train.run(['build', '--manifest', manifest, '--branch', 'toolkit-train/fork-check', '--main', 'main', '--live', fork], f.repo, f.opts);
   assert.equal(beside.ok, true, JSON.stringify(beside));
-  f.git('switch', '--quiet', 'toolkit-train/one');
 
   // Rebuilding the open train's own branch on main (main moved) is not beside it.
   const rebuilt = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)] }, 'again.json'), '--branch', 'toolkit-train/one', '--main', 'main', '--live', open], f.repo, f.opts);

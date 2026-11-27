@@ -79,7 +79,7 @@ Maintainers start with [AGENTS.md](AGENTS.md). There is no repo-wide MCP server;
 
 ## Appendix: Source-of-Truth Contract
 
-<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.198.0 sha256=2123e2d616c4 -->
+<!-- AI-AGENT-TOOLKIT:repo/contracts/source-of-truth-contract.md:BEGIN SOURCE-OF-TRUTH-CONTRACT v2 toolkit=3.199.0 sha256=2123e2d616c4 -->
 ## Source-of-Truth Contract
 
 - `skills/**` is the canonical product surface; each skill folder is the install unit and is edited directly. Portable skills may be copied into other agents; Toolkit's own skills ship in the plugin and are not for copying. `skills/controller-bootstrap/` is an explicit-only re-entry procedure for an assigned Toolkit controller; it depends on the live `repo/CONTROLLER.md` and `repo/contracts/controller-kernel/stack-registry-v3.json` and is not a policy copy, role assignment or permission.

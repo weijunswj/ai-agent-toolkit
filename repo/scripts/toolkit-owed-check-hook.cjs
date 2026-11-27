@@ -3,8 +3,9 @@
 
 // Turn-end (Stop) owed check for Claude Code: the controller's session in a governed repository is
 // stopped once, with the exact steps, when this turn leaves owed work behind:
-// - findings due: open programme findings new for 4 hours or more, or acknowledged past their due time,
-//   from this computer's attention cache;
+// - findings due: open programme findings new for 4 hours or more (at once for those due the same turn:
+//   a pull request ready to board a train while a landing is in flight, a bot's pull request), or
+//   acknowledged past their due time, from this computer's attention cache;
 // - gate sessions due: open CLOSE_DUE findings (a finished gate whose session close is not recorded);
 // - finished side sessions: sessions this one started in the Claude desktop app that are not archived,
 //   not running, have every pull request merged or closed and no step waiting on the owner;

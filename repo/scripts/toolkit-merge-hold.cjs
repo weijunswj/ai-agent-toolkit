@@ -63,8 +63,11 @@ const STOP_PARSING = /(^|\s)--%(?=\s|$)/g;
 // character head SHA: `gh pr merge N --merge --match-head-commit <sha>`, or a connector merge tool
 // call with merge_method "merge" and the head SHA field, and only when the merge-scope check
 // (toolkit-auto-merge-eligible.cjs), run here on that head against this folder's copy of the
-// remote's default branch, finds nothing on the merge-authority list. A head this computer does not
-// have, or a scope it cannot read, needs a typed approval. --auto, --admin, --squash, --rebase,
+// remote's default branch, finds nothing on the merge-authority list, or only CI workflow copies a
+// Toolkit refresh's copy proof shows are Toolkit main's own render (scopeWithProof,
+// toolkit-copies-proof.cjs). A head this computer does not have, or a scope it cannot read, needs a
+// typed approval. Accepted gap: the hold does not read the repository's TOOLKIT_REF pin or its checks;
+// the controller checks both before it merges (`toolkit-cloud-workflows.cjs --land-refresh`). --auto, --admin, --squash, --rebase,
 // --delete-branch, the API endpoint, connector auto-merge and any other repository still need a typed
 // approval. The other gate conditions (review, CI, testing) are the controller's to check before it
 // merges; this hold cannot read them.
@@ -1671,7 +1674,7 @@ function judge(merge, approvals, standing = null, evidence = null) {
     if (problem) return { refusal: deny(`task auto-merge is on for ${standing.repository}, but this merge of ${name} ${problem}, so it needs the user's typed approval. A merge without one must be exactly \`gh pr merge ${merge.pr} --merge --match-head-commit <full head sha>\` from this repository's folder, or the connector's merge tool with merge_method "merge" and its head SHA field, once the gate rules' task auto-merge conditions hold.`) };
     const scope = standing.scope(merge.sha);
     if (!scope) return { refusal: deny(`task auto-merge is on for ${standing.repository}, but Toolkit cannot read the changes of ${name} at ${merge.sha} on this computer (fetch the pull request's head and the default branch first), so its merge scope is unknown and it waits for the user's typed merge.`) };
-    if (!scope.eligible) return { refusal: deny(`${name} changes the merge rules (${scope.reasons.map(entry => `${entry.path}: ${entry.why}`).join('; ')}), so it waits for the user's typed merge whatever the task auto-merge answer says.`) };
+    if (!scope.eligible) return { refusal: deny(`${name} changes the merge rules (${scope.reasons.map(entry => `${entry.path}: ${entry.why}`).join('; ')})${scope.proof ? ` and is not a proved Toolkit refresh (${scope.proof})` : ''}, so it waits for the user's typed merge whatever the task auto-merge answer says.`) };
     return { standing: true };
   }
   // Connector auto-merge cannot name a head commit, so it is refused; gh can.
@@ -2015,7 +2018,7 @@ function nestedRefusal(text) {
 // started this session;
 // otherwise a structured failure. `scope(head)` is the merge-scope verdict against this folder's copy of
 // the remote's default branch, or null when git cannot read it.
-function standingAnswer(input, cwd, { environment = process.env, registryOptions = {}, now, host = null } = {}) {
+function standingAnswer(input, cwd, { environment = process.env, registryOptions = {}, now, host = null, deadline = Infinity, scopeProofs = new Map() } = {}) {
   const repository = typeof cwd === 'string' && cwd ? repositoryOf(cwd) : null;
   let root;
   try { root = repository ? governance.findGitRoot(cwd) : null; } catch { root = null; }
@@ -2046,13 +2049,23 @@ function standingAnswer(input, cwd, { environment = process.env, registryOptions
   // a cloud thread, which approves through the Projects card, or with no native session context).
   const typedBlock = cloud || !checks.nativeSessionContext ? null : sessionBlock(checks);
   if (reason) return { eligible: false, reason, checks, typedBlock };
+  // One scope per repository, base and head for the whole hook call (`scopeProofs`, which the hook
+  // shares between its pre-pass and final pass), so a refresh's copy proof runs once; the proof stops
+  // short of the call's deadline, leaving time for the closure reads after it.
   const scope = head => {
     const branch = pushTarget(root, 'origin', registryOptions)?.default;
     const base = branch ? mergeScope.commitOf(root, `refs/remotes/origin/${branch}`) : null;
-    return base ? mergeScope.eligibilityOf(root, base, head) : null;
+    if (!base) return null;
+    const key = `${root}\n${base}\n${head}`;
+    if (!scopeProofs.has(key)) scopeProofs.set(key, require('./toolkit-copies-proof.cjs').scopeWithProof(root, base, head, { registryOptions, deadline: deadline - PROOF_RESERVE_MS }));
+    return scopeProofs.get(key);
   };
   return { eligible: true, reason: null, checks, repository, scope };
 }
+
+// The part of a hook call's deadline a copy proof leaves for the reads after it (the pull request and
+// issue closure reads of the final pass).
+const PROOF_RESERVE_MS = 2500;
 
 const RECORD_LOST = "at a later start of this chat, Toolkit's record of how it started was missing or could not be read, so nothing shows the user started it";
 
@@ -2250,7 +2263,7 @@ function readClosureFile(file) {
   return fs.readFileSync(file, 'utf8');
 }
 
-function decide(input, { registryOptions = {}, now, environment = process.env, host = null, consume = true, readEvidenceGitHub, refreshEvidenceBinding, evidenceResponses, closureGuard, transport, deadline, timeoutMs = 30000, deadlineMs = 120000, maxRequests = 500 } = {}) {
+function decide(input, { registryOptions = {}, now, environment = process.env, host = null, consume = true, readEvidenceGitHub, refreshEvidenceBinding, evidenceResponses, scopeProofs, closureGuard, transport, deadline, timeoutMs = 30000, deadlineMs = 120000, maxRequests = 500 } = {}) {
   deadline ??= globalThis.performance.now() + (host === 'claude' ? 7500 : host === 'codex' ? 50000 : deadlineMs);
   const tool = String(input && (input.tool_name || input.toolName) || '');
   let merges;
@@ -2298,7 +2311,7 @@ function decide(input, { registryOptions = {}, now, environment = process.env, h
   else return null;
   if (merges.length === 0) return null;
   const approvals = new MergeApprovals({ registryOptions, now });
-  const standing = standingAnswer(input, cwd, { environment: environment || {}, registryOptions, now, host });
+  const standing = standingAnswer(input, cwd, { environment: environment || {}, registryOptions, now, host, deadline, scopeProofs });
   const evidence = new EvidenceStoreMerges(cwd, { registryOptions, now, environment: environment || {}, readEvidenceGitHub, refreshEvidenceBinding, evidenceResponses, deadline });
   const used = [];
   for (const merge of merges) {

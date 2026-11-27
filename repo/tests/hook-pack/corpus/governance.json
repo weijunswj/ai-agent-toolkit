@@ -14,6 +14,17 @@
       "status": "pass"
     },
     {
+      "id": "GOV.stale-copies-origin-ahead",
+      "source": "owner test 27 Nov 2026 (B1) and G2 round 1 of the proved-refresh landing (M1): a checkout two commits behind origin was told its Toolkit copies were missing; origin's default branch, as the binding read fetched it, holds every copy current, so the session start names none",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "event": "SessionStart",
+      "payload": {"source":"startup"},
+      "fixture": {"repo":{"governance":"enabled","origin_copies":true}},
+      "expect": {"decision":"allow","context_contains":["Toolkit governance: ENABLED for this repository."],"context_excludes":["Stale Toolkit copies"]},
+      "status": "pass"
+    },
+    {
       "id": "GOV.repo-check-enabled-no-block",
       "source": "plug-and-play S2 review: an enabled repository with no Toolkit block still has its vendored checks compared at session start",
       "kind": "benign",
@@ -1937,6 +1948,106 @@
       "status": "pass"
     },
     {
+      "id": "GOV.owed-check-train-board-due-blocks-at-once",
+      "source": "owner decision INT-TK421-1381 and G2 round 1 of the train queue (M2): a pull request ready to board while a landing is in flight stops the controller's turn at once, not after four hours",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "state",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TRAIN_BOARD_DUE",
+            "state": "new",
+            "age_hours": 0,
+            "issue": 1547
+          }
+        ]
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-bot-pr-blocks-at-once",
+      "source": "owner decision INT-TK421-1380 and G2 round 1 of the train queue (M2): a bot's pull request stops the controller's turn on the first sweep that sees it, not after 24 hours",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "state",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "BOT_PR_OPEN",
+            "state": "new",
+            "age_hours": 0,
+            "issue": 1550
+          }
+        ]
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "status": "pass"
+    },
+    {
       "id": "GOV.owed-check-desktop-top-level-blocks",
       "source": "the turn-end owed check in a top-level desktop chat of the controller: the host-session variable and CLAUDE_CODE_CHILD_SESSION do not decide whether the turn is stopped",
       "hosts": [
@@ -3780,6 +3891,35 @@
         "decision": "allow",
         "context_contains": [
           "Asking the owner (the Claude desktop app; this stands over your own notes and memories): 1. Put the full context, options and your pick in your closing message and end the turn."
+        ]
+      },
+      "status": "pass"
+    },
+    {
+      "id": "ASK.desktop-card-wake",
+      "source": "owner test 27 Nov 2026: a three-choice question got no card, because nothing gave the chat the next turn the asking line promised",
+      "hosts": [
+        "claude"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "kind": "state",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "asking"
+        },
+        "entrypoint": "claude-desktop"
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "right before you end the turn with the closing message, start one short background wait (a background command of about 30 seconds), then on the automatic turn it brings open the card first, with no text before it."
+        ],
+        "context_excludes": [
+          "on your next turn"
         ]
       },
       "status": "pass"

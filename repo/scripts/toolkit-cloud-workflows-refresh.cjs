@@ -27,7 +27,9 @@
 //     is created or moved last (fast-forward, or a merge commit when an older refresh branch is
 //     there), so a failure leaves no partial pull request. An open refresh pull request is updated,
 //     never doubled, and a rerun with nothing new changes nothing, even from a newer Toolkit commit.
-//   - The pull request is read back (head commit, branch and changed files) and never merged.
+//   - The pull request is read back (head commit, branch and changed files) and never merged here. Its
+//     body carries a `UAT: NOT_REQUIRED` line; `--land-refresh` (toolkit-cloud-workflows-land.cjs)
+//     says when it may land under the repository's task auto-merge switch.
 //
 // Exit codes: 0 opened, updated, unchanged or nothing to do (a note says which), 2 no pull request
 // made (one line says why).
@@ -45,6 +47,8 @@ const PLAIN_TEXT = Object.freeze({ file: '.github/scripts/plain-text-check.cjs',
 // The one line naming the Toolkit commit a refresh was rendered from, in its commit message and body.
 const TOOLKIT_COMMIT_LINE = commit => `Toolkit commit: ${commit}`;
 const TOOLKIT_COMMIT_PATTERN = /^Toolkit commit: [0-9a-f]{40}$/m;
+// The owner tries nothing: the text was reviewed on Toolkit main (the auto-merge check reads this line).
+const UAT_LINE = 'UAT: NOT_REQUIRED (Toolkit copies rendered from the Toolkit main commit named below; reviewed there)';
 // The folder a refresh compares, read from the default branch head's git objects.
 const SNAPSHOT_FOLDER = '.github';
 
@@ -128,15 +132,23 @@ function changes({ target, root, commit, ci, ciShards, defaultBranch, workflows 
 // where its settings put it elsewhere), copied out of the checkout's git objects into a scratch folder,
 // so the refresh never depends on the branch the checkout is on or on its local changes. The caller
 // removes the folder. Only regular files and links are written; a link is written as a file holding
-// its target, as git checks links out where it cannot make them.
+// its target, as git checks links out where it cannot make them. The session start's stale-copy check
+// (toolkit-governance-conformance.cjs cloudWorkflowFindings) reads the same snapshot of the commit its
+// binding read fetched, with `fetch: false`: it makes no network read, and a commit the checkout lacks
+// stops it.
 class BranchSnapshot {
   #target;
   #commit;
   #branch;
-  constructor(target, commit, branch) { this.#target = target; this.#commit = commit; this.#branch = branch; }
+  #fetch;
+  #testNames;
+  // `testNames`: write the shard list's test files by name (#testNames); only a repository whose shard
+  // copies render (a yes to parallel CI shards) needs them, and listing them costs a whole-tree read.
+  constructor(target, commit, branch, { fetch = true, testNames = true } = {}) { this.#target = target; this.#commit = commit; this.#branch = branch; this.#fetch = fetch; this.#testNames = testNames; }
 
   // The folder holding the commit's files. The commit is fetched from origin's default branch first
-  // when the checkout does not have it; a fetch only adds objects and moves no local branch.
+  // when the checkout does not have it (unless `fetch` is false); a fetch only adds objects and moves
+  // no local branch.
   write() {
     this.#ensureCommit();
     const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-refresh-snapshot-'));
@@ -144,6 +156,7 @@ class BranchSnapshot {
       this.#copy(folder, [SNAPSHOT_FOLDER]);
       const baseline = baselineFile(folder);
       if (baseline && !baseline.startsWith(`${SNAPSHOT_FOLDER}/`)) this.#copy(folder, [baseline]);
+      if (this.#testNames) this.#listTestNames(folder);
       return folder;
     } catch (error) {
       fs.rmSync(folder, { recursive: true, force: true });
@@ -154,9 +167,31 @@ class BranchSnapshot {
   #ensureCommit() {
     const have = () => git(this.#target, ['cat-file', '-e', `${this.#commit}^{commit}`]).ok;
     if (have()) return;
+    if (!this.#fetch) throw new RefreshError(`${this.#branch}'s head ${this.#commit.slice(0, 7)} is not in this checkout; run git fetch origin in the checkout.`);
     const fetched = spawnSync('git', ['fetch', '--quiet', '--no-tags', 'origin', `refs/heads/${this.#branch}`], { cwd: this.#target, encoding: 'utf8', windowsHide: true, shell: false, timeout: 120000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
     if (!fetched.error && fetched.status === 0 && have()) return;
     throw new RefreshError(`${this.#branch}'s head ${this.#commit.slice(0, 7)} on GitHub is not in this checkout, and fetching ${this.#branch} from origin did not bring it; run git fetch origin in the checkout, then run this again.`);
+  }
+
+  // The shard list's check finds the repository's test files by name (each system's discover glob),
+  // so each file of the commit a glob matches is written as an empty file: names only, no contents.
+  // Without them a valid list would read as finding no test file. No list, or one that does not read,
+  // writes nothing (the shard check then reports the list itself).
+  #listTestNames(folder) {
+    const shards = require('./governed-test-shards.cjs');
+    let manifest;
+    try { manifest = JSON.parse(fs.readFileSync(path.join(folder, ...shards.MANIFEST_REL.split('/')), 'utf8')); } catch { return; }
+    const globs = Object.values(manifest && typeof manifest.systems === 'object' && manifest.systems ? manifest.systems : {})
+      .map(entry => entry && entry.discover).filter(glob => typeof glob === 'string' && !shards.globError(glob)).map(shards.globRegExp);
+    if (!globs.length) return;
+    const listed = spawnSync('git', ['ls-tree', '-r', '-z', '--name-only', '--full-tree', this.#commit], { cwd: this.#target, windowsHide: true, shell: false, maxBuffer: 4 * GITHUB_LIMIT });
+    if (listed.error || listed.status !== 0) throw new RefreshError(`the files of ${this.#commit.slice(0, 7)} could not be read from this checkout's git objects.`);
+    for (const file of listed.stdout.toString('utf8').split('\0')) {
+      if (!file || file.startsWith(`${SNAPSHOT_FOLDER}/`) || file.split('/').some(part => !part || part === '.' || part === '..') || !globs.some(glob => glob.test(file))) continue;
+      const absolute = path.join(folder, ...file.split('/'));
+      fs.mkdirSync(path.dirname(absolute), { recursive: true });
+      fs.writeFileSync(absolute, '');
+    }
   }
 
   #copy(folder, paths) {
@@ -214,13 +249,15 @@ function migratedBaseline(target, root, commit) {
 
 function bodyText(files, commit, notes) {
   return [
-    'Owner: please merge this pull request. It brings this repository\'s Toolkit copies up to date; no agent merges it.',
+    'This pull request brings this repository\'s Toolkit copies up to date. Each file is Toolkit main\'s own render at the Toolkit commit named below. Where this repository\'s task auto-merge is on, the controller lands it once its checks are green, after `toolkit-cloud-workflows.cjs --repo <checkout> --land-refresh` proves every file, and tells the owner after; otherwise the owner merges it.',
     '',
     'Changed files:',
     ...files.map(entry => `- \`${entry.file}\`: ${entry.why}`),
     ...(notes.length ? ['', 'Notes:', ...notes.map(note => `- ${note}`)] : []),
     '',
     'Made by `toolkit-cloud-workflows.cjs --refresh-pr`. It changes only Toolkit-made files. The workflow copies run Toolkit main; to hold this repository on one Toolkit commit, set its TOOLKIT_REF variable to that commit.',
+    '',
+    UAT_LINE,
     '',
     TOOLKIT_COMMIT_LINE(commit),
   ].join('\n');
@@ -250,9 +287,10 @@ function prepare({ target, root, commit, ci, ciShards, workflows, governance, gi
   const branch = repo.default_branch;
   const base = github(`repos/${repository}/git/ref/heads/${encodeURIComponent(branch)}`).object.sha;
   if (!/^[0-9a-f]{40}$/.test(String(base || '')) || !/^[A-Za-z0-9_][A-Za-z0-9._\/-]{0,199}$/.test(String(branch || ''))) throw new RefreshError('the default branch and its head could not be read from GitHub.');
-  const snapshot = new BranchSnapshot(target, base, branch).write();
+  const answer = ciShards !== undefined ? ciShards : mergedCiShards(target);
+  const snapshot = new BranchSnapshot(target, base, branch, { testNames: answer === 'yes' }).write();
   try {
-    const { files, notes } = changes({ target: snapshot, root, commit: at, ci, ciShards: ciShards !== undefined ? ciShards : mergedCiShards(target), defaultBranch: branch, workflows });
+    const { files, notes } = changes({ target: snapshot, root, commit: at, ci, ciShards: answer, defaultBranch: branch, workflows });
     if (!files.length) return { note: `The Toolkit copies in ${repository} are current; no refresh pull request is needed.${notes.length ? ` ${notes.join(' ')}` : ''}` };
     return { repository, base, branch, files, notes, commit: at };
   } finally {
@@ -363,11 +401,11 @@ function refreshPr({ repo, ci = null, root, commit, ciShards, workflows = requir
     if (ready.note) return { code: 0, line: ready.note };
     const result = publish({ ...ready, github, workflows });
     const verb = { opened: 'Opened', updated: 'Updated', unchanged: 'Unchanged' }[result.outcome];
-    return { code: 0, line: `${verb} refresh pull request ${result.url} (${ready.files.length} file${ready.files.length === 1 ? '' : 's'}: ${ready.files.map(entry => entry.file).join(', ')}). Ask the owner to merge it; nothing merges it automatically.`, result };
+    return { code: 0, line: `${verb} refresh pull request ${result.url} (${ready.files.length} file${ready.files.length === 1 ? '' : 's'}: ${ready.files.map(entry => entry.file).join(', ')}). Where task auto-merge is on it lands once its checks are green (--land-refresh); otherwise ask the owner to merge it.`, result };
   } catch (error) {
     if (error instanceof RefreshError || error?.name === 'InstallError') return { code: 2, line: `No refresh pull request: ${error.message}` };
     throw error;
   }
 }
 
-module.exports = Object.freeze({ BRANCH, TITLE, RefreshError, refreshPr, isToolkitFile, pending, vendoredCheck });
+module.exports = Object.freeze({ BRANCH, TITLE, GUARD_CONFIG, ghApi, RefreshError, BranchSnapshot, changes, refreshPr, isToolkitFile, pending, vendoredCheck });

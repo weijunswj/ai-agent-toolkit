@@ -189,7 +189,9 @@ function fixtureErrors(fixture) {
   if (repo !== undefined) {
     if (!repo || typeof repo !== 'object') errors.push('fixture.repo must be an object');
     else {
-      for (const key of Object.keys(repo)) if (!['governance', 'name', 'owner', 'commits', 'worktrees', 'nested_worktrees', 'staged', 'branch', 'task_auto_merge', 'cached_binding_store', 'legacy_answer', 'binding_status', 'can_write', 'remote_main', 'min_toolkit'].includes(key)) errors.push(`fixture.repo has unknown key ${key}`);
+      for (const key of Object.keys(repo)) if (!['governance', 'name', 'owner', 'commits', 'worktrees', 'nested_worktrees', 'staged', 'branch', 'task_auto_merge', 'cached_binding_store', 'legacy_answer', 'binding_status', 'can_write', 'remote_main', 'min_toolkit', 'toolkit_refresh', 'origin_copies'].includes(key)) errors.push(`fixture.repo has unknown key ${key}`);
+      if (repo.origin_copies !== undefined && (repo.origin_copies !== true || repo.governance !== 'enabled')) errors.push('fixture.repo.origin_copies needs governance enabled and is true or left out');
+      if (repo.toolkit_refresh !== undefined && (!['proved', 'edited'].includes(repo.toolkit_refresh) || repo.task_auto_merge === undefined)) errors.push('fixture.repo.toolkit_refresh needs task_auto_merge and is proved or edited');
       if (repo.remote_main !== undefined && repo.remote_main !== true) errors.push('remote_main is true or left out');
       if (repo.can_write !== undefined && (repo.can_write !== false || repo.governance !== 'undecided')) errors.push('fixture.repo.can_write needs governance undecided and is false or left out');
       if (repo.owner !== undefined && (repo.governance !== 'undecided' || !/^[A-Za-z0-9-]+$/.test(repo.owner))) errors.push('fixture.repo.owner needs governance undecided and is a plain owner name');
@@ -554,6 +556,8 @@ class Fixture {
       // branch, so the merge hold's scope check reads the later commits as the pull request.
       if (spec.task_auto_merge && commit === commits[0]) this.#git(this.work, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
     }
+    if (spec.toolkit_refresh) this.#toolkitRefresh(spec.toolkit_refresh);
+    if (spec.origin_copies) this.#originCopies();
     this.head = this.#git(this.work, ['rev-parse', 'HEAD']).trim();
     if (spec.remote_main) {
       if (!this.#git(this.work, ['remote']).trim()) this.#git(this.work, ['remote', 'add', 'origin', `https://github.com/toolkit-test-fixture/${name}.git`]);
@@ -700,6 +704,57 @@ cp.spawnSync = function(file, args, options) {
     delete this.env.Path;
     const quotedPreload = preload.replace(/[\\"]/g, (char) => `\\${char}`);
     this.env.NODE_OPTIONS = [this.env.NODE_OPTIONS, `--require "${quotedPreload}"`].filter(Boolean).join(' ');
+  }
+
+  // A Toolkit refresh pull request's head on top of the fixture's commits, as `--refresh-pr` makes it:
+  // every copy the refresh renders at a Toolkit commit, in one commit whose message names that commit.
+  // The Toolkit checkout the copy proof reads is the home's managed checkout (where a plugin copy finds
+  // it): a git folder sharing this checkout's objects, its origin the Toolkit, with HEAD's commit on its
+  // origin/main. `edited` changes one byte of one copy, so the proof fails.
+  #toolkitRefresh(kind) {
+    const { managed, named } = this.#managedToolkit();
+    const workflows = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-cloud-workflows.cjs'));
+    const refresh = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-cloud-workflows-refresh.cjs'));
+    workflows.apply(workflows.plan({ repo: this.work, root: managed, commit: named, ciShards: null }));
+    if (kind === 'edited') fs.appendFileSync(path.join(this.work, '.github', 'workflows', 'toolkit-programme-sweep-gate.yml'), ' ');
+    this.#git(this.work, ['add', '-A']);
+    this.#git(this.work, ['commit', '--quiet', '-m', refresh.TITLE, '-m', `Toolkit commit: ${named}`]);
+  }
+
+  // The home's managed Toolkit checkout (where a plugin copy finds a git Toolkit to render from): a git
+  // folder sharing this checkout's objects, its origin the Toolkit, with this checkout's HEAD commit on
+  // its main and origin/main. { managed, named }.
+  #managedToolkit() {
+    const named = this.#git(ROOT, ['rev-parse', 'HEAD']).trim();
+    const managed = path.join(this.home, '.ai-agent-toolkit', 'source', 'ai-agent-toolkit');
+    if (!fs.existsSync(path.join(managed, '.git'))) {
+      fs.mkdirSync(managed, { recursive: true });
+      this.#git(managed, ['init', '--quiet']);
+      fs.writeFileSync(path.join(managed, '.git', 'objects', 'info', 'alternates'), `${path.resolve(ROOT, this.#git(ROOT, ['rev-parse', '--git-path', 'objects']).trim())}\n`);
+      this.#git(managed, ['remote', 'add', 'origin', 'https://github.com/weijunswj/ai-agent-toolkit.git']);
+      this.#git(managed, ['update-ref', 'refs/remotes/origin/main', named]);
+      this.#git(managed, ['update-ref', 'refs/heads/main', named]);
+    }
+    return { managed, named };
+  }
+
+  // Origin's default branch ahead of the working folder: one commit on top of the fixture's head
+  // carrying every Toolkit copy, current, on refs/remotes/origin/main only, as this computer's binding
+  // read last fetched it (the merged read records that commit); the working folder stays behind,
+  // without the copies.
+  #originCopies() {
+    const { managed, named } = this.#managedToolkit();
+    const workflows = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-cloud-workflows.cjs'));
+    const start = this.#git(this.work, ['rev-parse', '--abbrev-ref', 'HEAD']).trim();
+    this.#git(this.work, ['checkout', '--quiet', '-b', 'pack-origin-ahead']);
+    workflows.apply(workflows.plan({ repo: this.work, root: managed, commit: named, ciShards: null }));
+    this.#git(this.work, ['add', '-A']);
+    this.#git(this.work, ['commit', '--quiet', '-m', 'origin: Toolkit copies']);
+    const ahead = this.#git(this.work, ['rev-parse', 'HEAD']).trim();
+    this.#git(this.work, ['checkout', '--quiet', start]);
+    this.#git(this.work, ['branch', '--quiet', '-D', 'pack-origin-ahead']);
+    this.#git(this.work, ['update-ref', 'refs/remotes/origin/main', ahead]);
+    require(path.join(ROOT, 'repo', 'tests', 'toolkit-governed-fixture-support.cjs')).recordMerged(this.work, { home: this.home, commit: ahead, now: this.#now() });
   }
 
   // A fresh enabled binding carrying the repository's switch (task_prs) and min_toolkit as the fixture

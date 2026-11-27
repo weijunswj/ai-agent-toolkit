@@ -235,7 +235,7 @@ test('the permissions row: an answer gives the owner one command to run themselv
   const update = await answerBank(ctx, 'all recommended', { missing: 3 });
   assert.equal(update.code, 0, update.err);
   assert.match(update.out, /Toolkit permissions \(Claude Code\): run this once in your own PowerShell or terminal, outside any agent\..*press Enter\./);
-  assert.ok(update.out.includes('\n```\nnode fixture-apply.cjs --apply\n```\n'), 'the command sits in Toolkit\'s own code block, so the app keeps its quotes straight');
+  assert.ok(update.out.includes('\n```powershell\nnode fixture-apply.cjs --apply\n```\n'), 'the command sits in Toolkit\'s own PowerShell block, so the app keeps its quotes straight and gives it a Run button');
   assert.match(update.out, /Add no code block of your own, and never run a command above yourself\./);
   assert.equal(update.out.match(/^Agents: /gm).length, 1, 'one Agents line, the last');
   assert.doesNotMatch(update.out, /Paste into|Next step/);
