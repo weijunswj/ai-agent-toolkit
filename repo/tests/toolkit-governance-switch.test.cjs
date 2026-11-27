@@ -103,9 +103,9 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
     assert.match(result.out, /\| # \| Setting \| Current \| Recommended \| Other choices \|/);
     assert.match(result.out, /\| 1\.1 \| GitHub governance \| On \| A\. Keep current \| B\. Turn off \|/);
     assert.match(result.out, /\| 1\.2 \| Task auto-merge with merge train \| Off \| A\. Keep current \| B\. On \|/);
-    assert.doesNotMatch(result.out, /\| (1\.[7-9]|2\.\d) \|/, 'one table of at most six rows: the two questions and the four parts Toolkit keeps');
+    assert.doesNotMatch(result.out, /\| (1\.[6-9]|2\.\d) \|/, 'one table of at most five rows: the two questions and the three parts Toolkit keeps');
+    assert.doesNotMatch(result.out, /shard/i, 'no parallel CI shards row');
     // The fixture's AGENTS.md is the governed template, a leftover copy, so the cleanup is a Toolkit default.
-    assert.match(result.out, /^\| \d\.\d \| Parallel CI shards \| Ready: Not applicable \|/m);
     assert.match(result.out, /^- Toolkit instruction copies: 1 file left \(Toolkit default: clean up\)\. /m);
     assert.match(result.out, /^\| \d\.\d \| Toolkit permissions \(Claude Code\) \| Not ready: Toolkit lines: 6 missing \| Next step: run the one command Toolkit gives after your answer \| /m);
     assert.match(result.out, /^- Set in \.github\/toolkit-programme\.json: parent #1, required check validate\. To change them, edit that file in a pull request and merge it\.$/m);

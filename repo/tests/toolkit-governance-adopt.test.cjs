@@ -87,7 +87,7 @@ const PROPOSAL = { repository: SLUG, number: 4, head: 'e'.repeat(40), url: `http
 
 // `opened` is what GitHub lists as open governance pull requests when the run starts.
 // `realPlainText` runs the real plain-text installer instead of the fixture's.
-async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false, estimate = null, opened = [], cloudFiles = () => ({ files: {}, warning: null }), realPlainText = false } = {}) {
+async function run(ctx, argv, github, { answers = [], interactive = false, plainTextFails = false, opened = [], cloudFiles = () => ({ files: {}, warning: null }), realPlainText = false } = {}) {
   let out = ''; let err = '';
   const published = [];
   let open = opened;
@@ -104,7 +104,6 @@ async function run(ctx, argv, github, { answers = [], interactive = false, plain
     ...(realPlainText ? {} : { plainTextInstaller: (root, into) => { if (plainTextFails) throw Object.assign(new Error('The plain-text check could not be installed.'), { code: 'FIXTURE' }); plainText.push(root); writePlainText(into); } }),
     proposalTransport: { list: () => open, publish: (repository, binding, files) => { published.push({ binding, files }); open = [{ ...proposal, answer: binding.governance === 'disabled' ? 'no' : 'yes' }]; return open[0]; }, read: () => open[0] || proposal },
     cloudWorkflows: (cwd, options) => { cloud.push(options); return cloudFiles(cwd, options); },
-    ...(estimate ? { ciEstimator: () => estimate } : {}),
   });
   const code = await cli.main(argv);
   return { code, out, err, published, plainText, cloud };
@@ -115,7 +114,7 @@ test('a fresh repository after the card\'s yes asks only task auto-merge, names 
   const github = fakeGitHub();
   const shown = await run(ctx, ['setup', '--json'], github);
   const questions = JSON.parse(shown.out).questions;
-  assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['task-auto-merge', false], ['governance', true], ['ci-shards', true], ['evidence-store', true], ['parent-issue', true], ['required-checks', true], ['governance-app', true], ['permission-blocks', true]]);
+  assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['task-auto-merge', false], ['governance', true], ['evidence-store', true], ['parent-issue', true], ['required-checks', true], ['governance-app', true], ['permission-blocks', true]]);
   assert.deepEqual(questions.filter(spec => !spec.report_only).map(spec => spec.presentation.question_ref), ['1.1'], 'one question: task auto-merge');
   const table = (await run(ctx, ['setup'], github, { interactive: true, answers: [''] })).out;
   assert.match(table, /^\| 1\.1 \| Task auto-merge with merge train \| Off \(needs governance\) \| A\. Keep current/m);
@@ -385,16 +384,6 @@ test('another repository\'s store is never picked on its own: the own TRANSPORT 
   assert.deepEqual(itself.calls, [], 'no parent issue, store or file');
   assert.equal(self.published.length, 0);
   assert.equal(fs.existsSync(path.join(selfCtx.repo, '.github', 'plain-text.json')), false, 'no local write either');
-  // Nor the shard list, which joins the answer by default where CI is slow.
-  fs.mkdirSync(path.join(selfCtx.repo, 'test'), { recursive: true });
-  for (let index = 1; index <= 4; index += 1) fs.writeFileSync(path.join(selfCtx.repo, 'test', `case${index}.test.js`), "require('node:test')('ok', () => {});\n");
-  for (const answer of [`store=${SLUG}`, `store=${SLUG}, shards=yes`]) {
-    const slow = await run(selfCtx, ['setup'], itself, { interactive: true, answers: [answer], estimate: { minutes: 25, workflow: 'CI' } });
-    assert.equal(slow.code, 2, answer);
-    assert.match(slow.out, /is this repository itself/);
-    assert.doesNotMatch(slow.out, /added to the working tree/, answer);
-    assert.equal(fs.existsSync(path.join(selfCtx.repo, '.github', 'toolkit-test-shards.json')), false, answer);
-  }
   // A malformed name is refused as unreadable, nothing written.
   const bad = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: ['store=not a repo', ''] });
   assert.match(bad.out, /store= needs a repository as owner\/name/);
@@ -430,63 +419,28 @@ test('a working tree with a programme file that turns governance on is a prepare
   assert.equal(adopt.adoptionPrepared(ctx.repo), false);
 });
 
-test('parallel CI shards are a Toolkit default by CI time, not a question: slow CI gets them, fast CI and CI that already shards get none', async t => {
-  const PASS = "const test = require('node:test');\ntest('ok', () => {});\n";
-  const withTests = () => {
-    const ctx = fixture(t);
-    for (let index = 1; index <= 4; index += 1) {
-      fs.mkdirSync(path.join(ctx.repo, 'test'), { recursive: true });
-      fs.writeFileSync(path.join(ctx.repo, 'test', `case${index}.test.js`), PASS);
-    }
-    return ctx;
-  };
-  const slow = { minutes: 25, workflow: 'CI' };
-  const ctx = withTests();
-  const shown = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: [''], estimate: slow });
-  assert.match(shown.out, /^\| \d\.\d \| Parallel CI shards \| Yes \(Toolkit default\) \(CI about 25 min\) \| The turn-on pull request also adds a first shard list and the shard workflows, because the last green CI run took 10 minutes or more; the split is then refreshed once a day\. To skip them, add shards=not-now or shards=never to your reply \| shards=not-now or shards=never in your reply \|$/m);
-  assert.doesNotMatch(shown.out, /^\| \d\.\d \| Parallel CI shards \| [^|]*\| [A-C]\. /m, 'never a question: the row has no choice letters');
-  const github = fakeGitHub();
-  const result = await run(ctx, ['setup'], github, { interactive: true, answers: ['all recommended'], estimate: slow });
+// The parallel CI shards offer is retired (INT-TK421-1391): a turn-on carries no shard list (not even
+// one an older Toolkit left in the checkout), records no ci_shards and copies no shard workflow, and a
+// reply that still says shards= is refused with one plain line, so nothing is published.
+test('a turn-on carries no shard list, no ci_shards and no shard workflow, and a shards= reply publishes nothing', async t => {
+  const ctx = fixture(t);
+  fs.mkdirSync(path.join(ctx.repo, 'test'), { recursive: true });
+  for (let index = 1; index <= 4; index += 1) fs.writeFileSync(path.join(ctx.repo, 'test', `case${index}.test.js`), "require('node:test')('ok', () => {});\n");
+  fs.writeFileSync(path.join(ctx.repo, '.github', 'toolkit-test-shards.json'), `${JSON.stringify({ schema: 'toolkit-test-shards/v2', systems: {} }, null, 2)}\n`);
+  const shown = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: [''] });
+  assert.doesNotMatch(shown.out, /shard/i, 'the bank says nothing about shards');
+  const result = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'] });
   assert.equal(result.code, 0, result.err + result.out);
-  assert.equal(result.published.length, 1, 'still one turn-on pull request');
+  assert.equal(result.published.length, 1, 'one turn-on pull request');
   const { binding, files } = result.published[0];
-  assert.equal(binding.ci_shards.answer, 'yes');
-  assert.match(binding.ci_shards.offered_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
-  const list = JSON.parse(files['.github/toolkit-test-shards.json']);
-  assert.equal(list.systems.linux.shards.length, 3, '25 measured minutes: two named shards and the rest');
-  assert.equal(result.cloud.at(-1).ciShards, 'yes', 'the shard copies follow this pull request\'s own answer, not an old read of the merged binding');
-  // The first shard list is rendered outside the checkout, where the shard copies read it.
-  assert.ok(path.relative(ctx.repo, result.cloud.at(-1).overlay).startsWith('..'), 'the render folder is not in the checkout');
-  assert.equal(fs.existsSync(path.join(ctx.repo, '.github', 'toolkit-test-shards.json')), false, 'the shard list is not written to the checkout');
-  assert.equal(fs.existsSync(result.cloud.at(-1).overlay), false, 'the render folder is removed after the answer');
-  assert.match(result.out, /a first \.github\/toolkit-test-shards\.json with 3 Linux shards .*travels in the turn-on pull request with the shard workflows/);
-  // The override skips them, and never records never in the same one pull request.
-  const skipped = await run(withTests(), ['setup'], fakeGitHub(), { interactive: true, answers: ['shards=not-now'], estimate: slow });
-  assert.equal(skipped.code, 0, skipped.err + skipped.out);
-  assert.equal(skipped.published[0].binding.ci_shards, undefined);
-  const never = await run(withTests(), ['setup'], fakeGitHub(), { interactive: true, answers: ['1.1=A, shards=never'], estimate: slow });
-  assert.equal(never.published[0].binding.ci_shards.answer, 'never');
-  assert.equal(never.published[0].files['.github/toolkit-test-shards.json'], undefined);
-
-  // Fast or unknown CI keeps none, so all recommended turns governance on without shards.
-  const fast = await run(withTests(), ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'], estimate: { minutes: 4, workflow: 'CI' } });
-  assert.equal(fast.code, 0, fast.err + fast.out);
-  assert.equal(fast.published[0].binding.ci_shards, undefined);
-  assert.equal(fast.published[0].files['.github/toolkit-test-shards.json'], undefined);
-
-  // CI that already runs its tests in parallel: shown as set, nothing offered or written, even when slow.
-  const sharded = withTests();
-  fs.mkdirSync(path.join(sharded.repo, '.github', 'workflows'), { recursive: true });
-  fs.writeFileSync(path.join(sharded.repo, '.github', 'workflows', 'validate.yml'), 'name: validate\non: [pull_request]\njobs:\n  tests:\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        shard: [1, 2, 3]\n    steps:\n      - run: npm test -- --shard=${{ matrix.shard }}/3\n');
-  const already = await run(sharded, ['setup'], fakeGitHub(), { interactive: true, answers: [''], estimate: slow });
-  assert.match(already.out, /^\| \d\.\d \| Parallel CI shards \| Already in your CI \(\.github\/workflows\/validate\.yml\) \| Keep \| - \|$/m);
-  const kept = await run(sharded, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'], estimate: slow });
-  assert.equal(kept.code, 0, kept.err + kept.out);
-  assert.equal(kept.published[0].binding.ci_shards, undefined);
-  assert.equal(kept.published[0].files['.github/toolkit-test-shards.json'], undefined);
-  const refused = await run(sharded, ['setup'], fakeGitHub(), { interactive: true, answers: ['shards=yes', ''], estimate: slow });
-  assert.match(refused.out, /Parallel CI shards have no Toolkit default to change in this bank/);
-  assert.equal(refused.published.length, 0);
+  assert.equal(binding.ci_shards, undefined);
+  assert.deepEqual(Object.keys(files).filter(name => /shard/i.test(name)), [], 'no shard list or shard workflow travels');
+  assert.doesNotMatch(result.out, /shard/i);
+  for (const answer of ['shards=yes', 'all recommended, shards=never']) {
+    const refused = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: [answer, ''] });
+    assert.match(refused.out, /^Toolkit no longer sets up CI shards; the CI check-up flags when they would pay\. Leave shards= out of your reply\./m, answer);
+    assert.equal(refused.published.length, 0, answer);
+  }
 });
 
 test('the bank reads the open governance pull requests again: one closed outside Toolkit no longer holds the turn-on, and an open one is named', async t => {
