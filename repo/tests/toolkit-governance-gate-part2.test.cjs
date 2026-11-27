@@ -19,7 +19,7 @@ test('non-GitHub identities pass the first prompt and ordinary tools on both hos
     }
     for (const host of ['claude', 'codex']) for (const launched of [false, true]) {
       const environment = launched ? { TOOLKIT_GATE_ROLE: 'G1' } : {};
-      const options = { registryOptions: ctx.options, environment, picker: host === 'claude', host };
+      const options = { registryOptions: ctx.options, environment, host };
       const prompts = new gate.PromptHold(options);
       for (const prompt of ['Please inspect this folder.', 'yes', projects.wake('ur rec')]) {
         assert.deepEqual(prompts.decide({ cwd: repo, prompt, sessionId: `${host}-${launched}` }), { action: 'pass' }, `${name}/${host}/${launched}`);
@@ -42,7 +42,7 @@ test('non-GitHub identities pass the first prompt and ordinary tools on both hos
 test('adding a GitHub origin brings the question once on both hosts, and a "no" typed before it answers nothing', t => {
   for (const host of ['claude', 'codex']) {
     const f = answerFixture(t, { remote: null });
-    const prompts = new gate.PromptHold({ ...f.options, picker: host === 'claude' });
+    const prompts = new gate.PromptHold({ ...f.options });
     const say = prompt => prompts.decide({ cwd: f.cwd, prompt, sessionId: 'owner' });
     assert.deepEqual(say('no'), { action: 'pass' });
     git(f.target, ['remote', 'add', 'origin', REMOTE]);
@@ -51,7 +51,7 @@ test('adding a GitHub origin brings the question once on both hosts, and a "no" 
     const first = say('no');
     assert.equal(first.action, 'pass', 'nothing is held on either host');
     assert.equal(noticeOf(first.context), gate.QUESTION.join('\n').replace('TRANSPORT-<repository name>', 'TRANSPORT-example-repo'));
-    assert.equal(first.context.includes(JSON.stringify(gate.PICKER_INPUT)), host === 'claude');
+    assert.equal(first.context.includes('AskUserQuestion'), false, `${host}: the same text question, never a forced card (INT-TK421-1389)`);
     assert.equal(replyTicket(first), undefined, 'a pre-question no gets no ticket');
     assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED', 'a pre-question no cannot answer');
     assert.doesNotMatch(gate.sessionLine(f.target, { registryOptions: f.ctx.options, sessionId: 'owner', now: f.now }), /is pending/);
@@ -151,8 +151,8 @@ test('adding a GitHub origin brings the question once on both hosts, and a "no" 
   });
 }
 
-for (const picker of [false, true]) {
-  test(`closure initial receipt errors never stop the first message: undecided / picker ${picker}`, t => {
+{
+  test('closure initial receipt errors never stop the first message: undecided', t => {
     for (const failure of ['damaged', 'full']) {
       const f = answerFixture(t);
       const file = path.join(path.dirname(f.ctx.registryPath), gate.TICKETS_BASENAME);
@@ -164,15 +164,12 @@ for (const picker of [false, true]) {
       });
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, stored);
-      const initial = new gate.PromptHold({ ...f.options, picker }).decide({
+      const initial = new gate.PromptHold({ ...f.options }).decide({
         cwd: f.cwd, prompt: projects.wake('yes', { now: f.now }), sessionId: 'owner',
       });
       assert.equal(initial.action, 'pass', failure);
       assert.equal(noticeOf(initial.context), gate.QUESTION.join('\n').replace('TRANSPORT-<repository name>', 'TRANSPORT-example-repo'));
-      if (picker) {
-        assert.match(initial.notice, /Pick an answer/);
-        assert.ok(initial.context.includes(JSON.stringify(gate.PICKER_INPUT)), 'the same governance card');
-      }
+      assert.equal(initial.notice, undefined, 'no card notice');
       assert.equal(replyTicket(initial), undefined, 'the pre-question yes grants no ticket');
       assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED', 'the pre-question yes records nothing');
       f.tick(1);
@@ -186,7 +183,7 @@ for (const picker of [false, true]) {
       assert.doesNotMatch(line(f), /is pending/);
       const typed = f.say('toolkit governance enable');
       assert.equal(typed.action, 'pass', 'the typed full answer does not use receipts');
-      assert.match(typed.context, /answered yes[\s\S]*question bank/);
+      assert.match(typed.context, /answered yes[\s\S]*guided setup/);
       assert.doesNotMatch(line(f), /is pending/, 'a yes opens the bank and records nothing');
       assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
       assert.equal(fs.readFileSync(file, 'utf8'), stored, 'spent receipts are preserved');
@@ -234,7 +231,7 @@ test('Projects full answers in an asked run still reject deliveries from before 
   assert.doesNotMatch(line(f), /is pending/);
   const current = f.say(projects.wake('toolkit governance enable', { now: f.now }));
   assert.equal(current.action, 'pass');
-  assert.match(current.context, /answered yes[\s\S]*question bank/);
+  assert.match(current.context, /answered yes[\s\S]*guided setup/);
   assert.equal(stateOf(f.ctx, f.target).state, 'UNDECIDED');
 });
 
