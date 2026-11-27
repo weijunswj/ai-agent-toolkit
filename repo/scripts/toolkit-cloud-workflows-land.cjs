@@ -125,7 +125,7 @@ class RefreshLanding {
     const required = this.#requiredChecks();
     if (!required) return done('hold', 'The merged binding\'s required checks could not be read here; try again at a later turn.', facts);
     // With no required check listed, nothing shows the copies pass this repository's CI.
-    if (!required.length) return done('attention', `Refresh pull request #${pr.number}: the merged binding lists no required check, so nothing shows the copies pass this repository's CI. Controller: set the required checks (refresh governance) or ask the owner to merge it.`, facts);
+    if (!required.length) return done('attention', `Refresh pull request #${pr.number}: the merged binding lists no required check, so nothing shows the copies pass this repository's CI. Controller: set the required checks (refresh governance) or run its merge, which the merge hold asks the owner about.`, facts);
     try {
       checks = [];
       // Every page of check runs (a busy head holds more than one page of 100), up to ten.

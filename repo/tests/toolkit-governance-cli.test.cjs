@@ -264,15 +264,15 @@ test('interactive no publishes the off proposal without a laptop decision, decli
       interactive: true, environment: {}, stdout, stderr,
       proposalTransport: { list: () => open, publish() { writes++; open = [proposal]; return proposal; }, read: () => proposal } });
     assert.equal(await cli.main([command]), 0, stderr.text());
-    assert.match(stdout.text(), /decision pending[\s\S]*merge this pull request now/);
+    assert.match(stdout.text(), /decision pending[\s\S]*run its merge in the same turn/);
     assert.equal(governance.governanceState(repo, { registryPath: ctx.registryPath, testOnly: true }).state, 'UNDECIDED');
     assert.equal(writes, 1); assert.equal(fs.existsSync(ctx.registryPath), false);
     const status = JSON.parse((await run(ctx, repo, ['status', '--json'])).stdout);
     assert.equal(status.pending.kind, 'published');
-    assert.match(status.pending.text, /merge this pull request now/);
+    assert.match(status.pending.text, /run its merge in the same turn/);
     assert.equal(status.state, 'UNDECIDED');
     assert.equal(status.programme_records_bind, false);
-    assert.match((await run(ctx, repo, ['status'])).stdout, /decision pending[\s\S]*merge this pull request now/);
+    assert.match((await run(ctx, repo, ['status'])).stdout, /decision pending[\s\S]*run its merge in the same turn/);
   }
   // Yes in the owner's own terminal is the governance question bank, never a bare decision pull request.
   const bank = await run(ctx, repo, ['enable', '--json']);

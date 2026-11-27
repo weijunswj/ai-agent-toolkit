@@ -209,7 +209,7 @@ class GovernanceMaintenance {
     if (result.status === 'conformant') on.push(name);
     else if (result.status === 'not-enforceable' || (rulesetsUnavailable && result.reason === 'binding-has-no-required-checks')) unavailable.push(name);
     else if (result.reason === 'binding-has-no-required-checks') {
-      held.push({ name, step: `the programme file lists no required checks yet, so there is nothing for it to require. Add the check names every pull request must pass to required_checks in ${governance.BINDING_FILE} through a pull request, merge it, ${then} to add the protection.` });
+      held.push({ name, step: `the programme file lists no required checks yet, so there is nothing for it to require. Say toolkit governance: its summary offers one pull request that adds the checks the default branch already requires and Toolkit's own. Merge it, ${then} to add the protection.` });
     } else if (protection.SETTINGS_CHECKS.some(id => result.checks[id]?.status === 'unverified')) retry.push(`${name} could not be read back`);
     else {
       const notes = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'].flatMap(id => (result.checks[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details : []));

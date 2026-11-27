@@ -18,6 +18,8 @@ const PROMPT_INTERVAL_MS = 60000;
 const SHA = /^[a-f0-9]{40}$/;
 const EPOCH = /^[a-f0-9]{32}$/;
 function fail(code) { throw Object.assign(new Error(code), { code }); }
+// The branch a programme file update is prepared on (publishProgrammeUpdate).
+const UPDATE_BRANCH = /^toolkit\/programme-update-[0-9a-f]{32}$/;
 const cloudFiles = () => require('./toolkit-cloud-workflows.cjs').DEFAULT_FILES;
 // The Dependabot settings the turn-on adds where missing (toolkit-governance-adopt.cjs).
 const securityFiles = () => require('./toolkit-governance-security.cjs').DEPENDABOT_NAMES;
@@ -102,7 +104,7 @@ function adoptionFiles(cwd, text, cloud = { files: {} }, rendered = null) {
 }
 function proposalText(proposals) {
   if (proposals.length > 1) return `Toolkit: conflicting governance proposals are waiting: ${proposals.map(item => item.url).join(', ')}. Ask the owner which proposal to keep. None decides governance.`;
-  return `Toolkit: governance decision pending. ${proposals[0].url} changes the repository's governance to ${proposals[0].answer === 'yes' ? 'enabled' : 'disabled'} on every computer once merged. Ask the owner to merge this pull request now, with its external effects and current checks. This answer grants no merge permission.`;
+  return `Toolkit: governance decision pending. ${proposals[0].url} changes the repository's governance to ${proposals[0].answer === 'yes' ? 'enabled' : 'disabled'} on every computer once merged. Show the owner its external effects and current checks, then run its merge in the same turn: Toolkit's merge hold asks the owner, so ask no merge question of your own first. This answer grants no merge permission.`;
 }
 
 // The checks the turn-on pull request's own workflows run, by job name: Toolkit requires them itself,
@@ -196,7 +198,7 @@ class GovernanceProposals {
     const run = sessionId && EPOCH.test(epoch) ? key(`${sessionId}:${epoch}`) : null;
     const request = value.requests.find(item => item.run === run && ['yes', 'no'].includes(item.answer) && this.#now() - new Date(item.at) >= 0 && this.#now() - new Date(item.at) <= cache.FRESH_MS);
     if (!request) return null;
-    return { kind: 'preparing', ...request, text: `Toolkit: the owner's ${request.answer} is pending for this run. ${request.answer === 'yes' ? `${BANK_ONLY} Show the owner the setup questions again with node "${path.join(__dirname, 'toolkit-governance.cjs')}" setup and build nothing by hand.` : `Prepare and publish one governance decision pull request with node "${path.join(__dirname, 'toolkit-governance.cjs')}" publish --run ${request.run}. Then show its external effects and ask the owner to merge it now.`} Governance stays as merged on the default branch.` };
+    return { kind: 'preparing', ...request, text: `Toolkit: the owner's ${request.answer} is pending for this run. ${request.answer === 'yes' ? `${BANK_ONLY} Show the owner the setup questions again with node "${path.join(__dirname, 'toolkit-governance.cjs')}" setup and build nothing by hand.` : `Prepare and publish one governance decision pull request with node "${path.join(__dirname, 'toolkit-governance.cjs')}" publish --run ${request.run}. Then show its external effects and run its merge in the same turn: Toolkit's merge hold asks the owner.`} Governance stays as merged on the default branch.` };
   }
   // A failed query is unknown, never "there are no proposals". Closed unmerged PRs end requests.
   // One PR-state read per minute across chats. Claim before I/O, so even a killed hook is throttled.
@@ -340,6 +342,15 @@ function switchWords(changes) {
     ...(changes.merge_train ? [`merge trains ${changes.merge_train}`] : []),
   ].join(' and ');
 }
+// The owner-facing words for a programme file update (toolkit-governance-summary.cjs programmeUpdate),
+// for the summary's question and the pull request alike.
+function updateWords(update) {
+  const listed = items => (items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}` : items[0] || '');
+  return [
+    update.min_toolkit ? `sets min_toolkit to ${update.min_toolkit.to}${update.min_toolkit.from ? ` (now ${update.min_toolkit.from})` : ''}, so governance waits while a setup part is missing` : '',
+    update.added.length ? `adds ${listed(update.added)} to the required checks${update.required_checks.length > update.added.length ? ', keeping the ones already listed' : ''}` : '',
+  ].filter(Boolean).join(', and ');
+}
 // The retired binding keys (programme-state.cjs) the merged text holds and the new text leaves out,
 // named as one phrase for the pull request text, or null when none goes.
 function retiredDropped(mergedText, text) {
@@ -476,7 +487,9 @@ class GitHubProposalTransport {
   // binding this computer read from the default branch; a default branch that has moved since is
   // refused rather than overwritten. It carries no governance proposal marker, so it is never read
   // as a governance decision, and it merges only by the owner (bindings are never auto-merge eligible).
-  publishSwitch(repository, mergedText, text, changes) {
+  // The default branch and the binding on it, refused when the binding is not `mergedText`: the text
+  // this computer read, which a switch or a programme file update is built from, is never overwritten.
+  #bindingBase(repository, mergedText) {
     this.#auth();
     const repo = this.#api(`repos/${repository}`), branch = repo.default_branch;
     if (!cache.parseSymref(`ref: refs/heads/${branch}\tHEAD`)) fail('PROPOSAL_BASE_INVALID');
@@ -485,6 +498,10 @@ class GitHubProposalTransport {
     const current = this.#api(`repos/${repository}/contents/${cache.BINDING_PATH}?ref=${base.object.sha}`);
     if (current.type !== 'file' || current.encoding !== 'base64' || typeof current.content !== 'string') fail('PROPOSAL_BINDING_INVALID');
     if (Buffer.from(current.content, 'base64').toString('utf8').replace(/\r\n/g, '\n') !== String(mergedText).replace(/\r\n/g, '\n')) fail('SWITCH_BASE_CHANGED');
+    return { branch, base, current };
+  }
+  publishSwitch(repository, mergedText, text, changes) {
+    const { branch, base, current } = this.#bindingBase(repository, mergedText);
     const words = switchWords(changes);
     const head = `toolkit/switches-${words.replace(/[^a-z0-9]+/g, '-')}-${key(text + base.object.sha)}`;
     const owner = repository.split('/')[0];
@@ -498,6 +515,40 @@ class GitHubProposalTransport {
     const meaning = Object.entries(changes).map(([name, value]) => SWITCH_MEANING[name]?.[value]).filter(Boolean).join('\n\n');
     const retired = retiredDropped(mergedText, text);
     const pr = this.#api(`repos/${repository}/pulls`, { title: `Set ${words} for this repository`, head, base: branch, body: `This changes only ${changed} in \`${cache.BINDING_PATH}\`${retired ? `, and deletes ${retired}` : ''}. These are this repository's own switches, read the same way by every app and the Projects controller.\n\n${meaning}\n\nIt applies only after the owner merges it. After the merge, \`refresh governance\` reads it back on each computer.\n\n${require('./toolkit-governance-state.cjs').taskSwitchVersionLine()}` });
+    return { number: pr.number, url: pr.html_url, head: result.commit.sha };
+  }
+  // The open programme file update of this repository's own (publishProgrammeUpdate), or null.
+  openProgrammeUpdate(repository) {
+    this.#auth();
+    const prs = this.#api(`repos/${repository}/pulls?state=open&per_page=100`, undefined, null, 'map({number, url: .html_url, ref: .head.ref, repo: .head.repo.full_name})');
+    if (!Array.isArray(prs) || prs.length === 100) fail('PROPOSAL_LIST_INCOMPLETE');
+    const found = prs.find(pr => String(pr.repo).toLowerCase() === repository.toLowerCase() && UPDATE_BRANCH.test(String(pr.ref)));
+    return found ? { number: found.number, url: found.url } : null;
+  }
+  // One pull request that brings an older governed programme file up to date (`update`, from
+  // toolkit-governance-summary.cjs programmeUpdate): min_toolkit and required_checks only, from the
+  // exact merged text. Like a switch it carries no governance proposal marker and merges only by the owner.
+  publishProgrammeUpdate(repository, mergedText, text, update) {
+    const { branch, base, current } = this.#bindingBase(repository, mergedText);
+    const head = `toolkit/programme-update-${key(text + base.object.sha)}`;
+    const owner = repository.split('/')[0];
+    const same = this.#api(`repos/${repository}/pulls?state=open&head=${encodeURIComponent(`${owner}:${head}`)}`);
+    if (Array.isArray(same) && same[0]?.number) return { number: same[0].number, url: same[0].html_url, head: same[0].head?.sha || null };
+    // Another update still open is the one to merge or close, never a second beside it.
+    const waiting = this.openProgrammeUpdate(repository);
+    if (waiting) throw Object.assign(new Error('UPDATE_PR_OPEN'), { code: 'UPDATE_PR_OPEN', url: waiting.url });
+    if (this.#optional(`repos/${repository}/git/ref/heads/${head}`)) fail('SWITCH_BRANCH_EXISTS');
+    this.#api(`repos/${repository}/git/refs`, { ref: `refs/heads/${head}`, sha: base.object.sha });
+    const title = 'Bring the programme file up to date';
+    const result = this.#api(`repos/${repository}/contents/${cache.BINDING_PATH}`, { message: title, content: Buffer.from(text).toString('base64'), branch: head, sha: current.sha }, 'PUT');
+    if (!SHA.test(result.commit?.sha || '')) fail('PROPOSAL_COMMIT_INVALID');
+    const words = updateWords(update);
+    const why = [
+      update.min_toolkit ? `min_toolkit ${update.min_toolkit.to}: governance holds programme records, gate records and task auto-merge while a part of the setup is missing (no Governance App, an evidence store that cannot be used, or Toolkit permissions never set up on a computer), and every Toolkit copy older than ${update.min_toolkit.to} is asked to update first.` : '',
+      update.added.length ? `Required checks: ${update.added.map(check => `\`${check}\``).join(', ')} ${update.added.length === 1 ? 'is' : 'are'} already required on the default branch or run by Toolkit's own checks; the checks already listed stay. After the merge, Toolkit's default-branch protection requires the whole list.` : '',
+    ].filter(Boolean).join('\n\n');
+    const retired = retiredDropped(mergedText, text);
+    const pr = this.#api(`repos/${repository}/pulls`, { title, head, base: branch, body: `This ${words} in \`${cache.BINDING_PATH}\`${retired ? `, and deletes ${retired}` : ''}. Nothing else changes.\n\n${why}\n\nIt applies only after the owner merges it. After the merge, \`refresh governance\` reads it back on each computer.` });
     return { number: pr.number, url: pr.html_url, head: result.commit.sha };
   }
   publish(repository, binding, wanted = { [cache.BINDING_PATH]: `${JSON.stringify(binding, null, 2)}\n` }) {
@@ -602,4 +653,4 @@ const TURN_ON_NAMES = [name => /^\.github\/workflows\/[A-Za-z0-9][A-Za-z0-9._-]*
 function proposalBody(binding, files, removals, dropped = [], notes = []) {
   return `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled, with its CI checks; the installed Toolkit gives sessions the governed rules'}. Global coding rules still apply. It does not change credentials or deployment.${switchNote(binding)}\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\n${removals.length ? `Removed files (the Toolkit's cloud workflow copies):\n${removals.map(name => `- ${name}`).join('\n')}\n\n` : ''}${dropped.length ? `No longer in this pull request (the latest answers do not make them):\n${dropped.map(name => `- ${name}`).join('\n')}\n\n` : ''}${notes.length ? `Already on GitHub:\n${notes.map(note => `- ${note}`).join('\n')}\n\n` : ''}Please merge this decision now after checking its effects and required checks. Owner merge permission is still required.`;
 }
-module.exports = Object.freeze({ GovernanceProposals, GitHubProposalTransport, validProposal, switchNote, proposalText, bindingV2, cloudWorkflowFiles, missingFiles, REQUIRED_FILES, BANK_ONLY, SCHEMA, MARKER, PROMPT_BUDGET_MS });
+module.exports = Object.freeze({ GovernanceProposals, GitHubProposalTransport, validProposal, switchNote, proposalText, bindingV2, cloudWorkflowFiles, missingFiles, withOwnChecks, OWN_CHECKS, updateWords, REQUIRED_FILES, BANK_ONLY, SCHEMA, MARKER, PROMPT_BUDGET_MS });

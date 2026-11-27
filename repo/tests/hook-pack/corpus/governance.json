@@ -3924,6 +3924,32 @@
       "status": "pass"
     },
     {
+      "id": "ASK.desktop-merge-runs-same-turn-card-only-ask",
+      "source": "owner report 27 Nov 2026: an agent asked its own merge question and showed Toolkit's merge card a turn later, so the owner approved twice",
+      "hosts": [
+        "claude"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "kind": "state",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "asking"
+        },
+        "entrypoint": "claude-desktop"
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "3. A merge is the exception: post its summary and run the merge in the same turn; Toolkit's merge card, in its exact text, is the only ask, never a merge question of your own first."
+        ]
+      },
+      "status": "pass"
+    },
+    {
       "id": "ASK.desktop-form-left-to-app",
       "source": "owner decision 27 Nov 2026 (INT-TK421-1389): how a question shows (card, end-of-turn box or text) is the app's choice; the asking line steers no card",
       "hosts": [

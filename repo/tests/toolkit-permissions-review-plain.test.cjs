@@ -63,3 +63,19 @@ test('show all gives every item its masked raw line, and only the command the ow
   assert.ok(!text.includes('DEPLOY_TOKEN=') || text.includes('DEPLOY_TOKEN=<hidden>'), 'a key in a line stays hidden');
   assert.equal((text.match(/```/g) || []).length, 2, 'one code block: the owner\'s command');
 });
+
+// G2 Low on the plain-word reader: a joined line read as its first command ("Runs the cd command"),
+// and a quoted program path with a space read as a fragment of the path ("Runs the Program command").
+test('a joined line runs several commands, and a quoted program path is read whole, never as a path fragment', () => {
+  for (const [line, words] of [
+    ['Bash(cd /x && python foo.py)', 'Runs several commands'],
+    ['Bash(ls; rm -rf build)', 'Runs several commands'],
+    ['Bash(cat notes.txt | grep secret)', 'Runs several commands'],
+    ['PowerShell(Get-ChildItem || exit 1)', 'Runs several commands (PowerShell)'],
+    ['Bash("C:/Program Files/nodejs/node.exe" run.js)', 'Runs a JavaScript script'],
+    ["Bash('/opt/my tools/git' status:*)", 'Runs a Git command, any arguments'],
+    ['Bash(echo "a && b")', 'Runs the echo command'],
+    ['Bash(FOO=1 python run.py)', 'Runs a Python script'],
+  ]) assert.equal(review.shellWords(line), words, line);
+  assert.doesNotMatch(review.shellWords('Bash("C:/Program Files/tool.exe" go)'), /Program|Files/);
+});

@@ -101,7 +101,10 @@ test('toolkit governance shows the summary where governance is on, and keeps the
   for (const command of ['setup', 'refresh']) {
     const result = await run(ctx, [command], { missing: 6 });
     assert.equal(result.code, 0, result.err);
-    assert.match(result.out, /^\*\*Governance: on, not ready: 1 step left\.\*\*$/m);
+    // Permissions, and this older programme file (no min_toolkit): refresh governance offers its update.
+    assert.match(result.out, /^\*\*Governance: on, not ready: 2 steps left\.\*\*$/m);
+    assert.match(result.out, /^\*\*Programme file:\*\* It is behind this Toolkit: one pull request sets min_toolkit to \d+\.\d+\.\d+, so governance waits while a setup part is missing\./m, command);
+    assert.match(result.out, /^\*\*1\. Question: Bring the programme file up to date\?\*\*$/m, command);
     assert.match(result.out, /^\| Part \| State \| What it does \|$/m);
     assert.equal(row(result.out, 'GitHub governance'), '| GitHub governance | On | Records, decisions and evidence for this repository, the same on every computer |');
     assert.match(row(result.out, 'Task auto-merge with merge train'), /^\| Task auto-merge with merge train \| Off \|/);
@@ -387,6 +390,44 @@ test('the switch transport refuses a moved default branch and opens a pull reque
   assert.ok(!pr.input.body.includes(MARKER), 'never read as a governance decision');
   assert.match(pr.input.body, /changes only `task_prs\.auto_merge`.*It applies only after the owner merges it/s);
   assert.ok(pr.input.body.includes(VERSION_LINE), 'the switch pull request warns about older copies');
+});
+
+test('the programme file update refuses a moved default branch or a second open update, and opens one pull request that is not a governance proposal', () => {
+  const merged = bindingText({ required_checks: [], min_toolkit: '3.137.0' });
+  const update = { min_toolkit: { from: '3.137.0', to: '3.202.0' }, required_checks: ['Quote Basis click budget', 'plain-text'], added: ['Quote Basis click budget', 'plain-text'], branchUnread: false };
+  const text = bindingText({ required_checks: update.required_checks, min_toolkit: '3.202.0' });
+  const base = 'b'.repeat(40);
+  const routes = (current, open = []) => [
+    [/^GET user$/, { login: 'owner' }],
+    [/^GET repos\/toolkit-test-fixture\/switch$/, { default_branch: 'main' }],
+    [/^GET repos\/toolkit-test-fixture\/switch\/git\/ref\/heads\/main$/, { object: { sha: base } }],
+    [/^GET repos\/toolkit-test-fixture\/switch\/contents\/\.github\/toolkit-programme\.json\?ref=/, { type: 'file', encoding: 'base64', content: Buffer.from(current).toString('base64'), sha: 'c'.repeat(40) }],
+    [/^GET repos\/toolkit-test-fixture\/switch\/pulls\?state=open&head=/, []],
+    [/^GET repos\/toolkit-test-fixture\/switch\/pulls\?state=open&per_page=100$/, open],
+    [/^POST repos\/toolkit-test-fixture\/switch\/git\/refs$/, { ref: 'x' }],
+    [/^PUT repos\/toolkit-test-fixture\/switch\/contents\/\.github\/toolkit-programme\.json$/, { commit: { sha: 'd'.repeat(40) } }],
+    [/^POST repos\/toolkit-test-fixture\/switch\/pulls$/, input => ({ number: 8, html_url: `https://github.com/${SLUG}/pull/8`, body: input.body })],
+  ];
+  const wrote = calls => calls.some(call => call.input !== undefined && /git\/refs$|pulls$|contents\//.test(call.args[1] || ''));
+  const moved = fakeGh(routes(bindingText()));
+  assert.throws(() => new GitHubProposalTransport({ run: moved.runner }).publishProgrammeUpdate(SLUG, merged, text, update), { code: 'SWITCH_BASE_CHANGED' });
+  assert.ok(!wrote(moved.calls), 'nothing written over a moved default branch');
+  const waiting = fakeGh(routes(merged, [{ number: 5, url: `https://github.com/${SLUG}/pull/5`, ref: `toolkit/programme-update-${'e'.repeat(32)}`, repo: SLUG }]));
+  assert.throws(() => new GitHubProposalTransport({ run: waiting.runner }).publishProgrammeUpdate(SLUG, merged, text, update), { code: 'UPDATE_PR_OPEN', url: `https://github.com/${SLUG}/pull/5` });
+  assert.ok(!wrote(waiting.calls), 'never a second update beside an open one');
+
+  const gh = fakeGh(routes(merged));
+  const result = new GitHubProposalTransport({ run: gh.runner }).publishProgrammeUpdate(SLUG, merged, text, update);
+  assert.equal(result.number, 8);
+  const put = gh.calls.find(call => call.args.includes('PUT'));
+  assert.equal(Buffer.from(put.input.content, 'base64').toString('utf8'), text);
+  assert.match(put.input.branch, /^toolkit\/programme-update-[0-9a-f]{32}$/);
+  const pr = gh.calls.find(call => /pulls$/.test(call.args[1]) && call.input);
+  assert.equal(pr.input.base, 'main');
+  assert.equal(pr.input.title, 'Bring the programme file up to date');
+  assert.ok(!pr.input.body.includes(MARKER), 'never read as a governance decision');
+  assert.match(pr.input.body, /^This sets min_toolkit to 3\.202\.0 \(now 3\.137\.0\), so governance waits while a setup part is missing, and adds Quote Basis click budget and plain-text to the required checks in `\.github\/toolkit-programme\.json`\. Nothing else changes\./);
+  assert.match(pr.input.body, /the checks already listed stay.*It applies only after the owner merges it\./s);
 });
 
 // schedule_folder is retired: the reader still accepts it, but a switch pull request drops it.

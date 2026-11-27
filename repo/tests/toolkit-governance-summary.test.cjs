@@ -23,7 +23,10 @@ const governanceApp = require(path.join(scripts, 'toolkit-governance-app.cjs'));
 const SESSION = 'session-card-1';
 const SLUG = 'toolkit-test-fixture/card';
 
-function fixture(t, { quiet = false, taskPrs = null } = {}) {
+const RUNNING = require(path.join(scripts, 'toolkit-version.cjs')).readToolkitVersion();
+// `minToolkit` defaults to none for the full summary (an older programme file) and to the running
+// release where every part is in place; `commitFiles` makes the merged commit a real one holding them.
+function fixture(t, { quiet = false, taskPrs = null, minToolkit = quiet ? RUNNING : null, requiredChecks = ['validate'], commitFiles = null } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-governance-summary-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const home = path.join(root, 'home');
@@ -33,11 +36,24 @@ function fixture(t, { quiet = false, taskPrs = null } = {}) {
     schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'enabled',
     parents: [{ issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX' }],
     store: { kind: 'github', repository: 'toolkit-test-fixture/store', branch: 'main', path: 'state/' },
-    required_checks: ['validate'],
+    required_checks: requiredChecks,
     ...(taskPrs ? { task_prs: taskPrs } : {}),
+    ...(minToolkit ? { min_toolkit: minToolkit } : {}),
   }, null, 2)}\n`;
   fs.writeFileSync(path.join(repo, '.github', 'toolkit-programme.json'), text);
-  recordMerged(repo, { registryPath, text });
+  let commit;
+  if (commitFiles) {
+    const git = args => require('node:child_process').execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', windowsHide: true }).trim();
+    git(['init', '--quiet']);
+    for (const [file, body] of Object.entries(commitFiles)) {
+      fs.mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+      fs.writeFileSync(path.join(repo, file), body);
+    }
+    git(['add', '--', ...Object.keys(commitFiles), '.github/toolkit-programme.json']);
+    git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'merged']);
+    commit = git(['rev-parse', 'HEAD']);
+  }
+  recordMerged(repo, { registryPath, text, ...(commit ? { commit } : {}) });
   const registryOptions = { registryPath, testOnly: true };
   new gate.SessionEpochs({ registryOptions }).start(SESSION, 'startup', governance.governanceState(repo, registryOptions).repository_id);
   if (!quiet) return { repo, registryOptions };
@@ -80,7 +96,10 @@ test('a governed repository shows its steps left, Toolkit permissions first with
   const shown = await run(ctx, ['setup']);
   assert.equal(shown.code, 0, shown.err);
   const lines = shown.out.split('\n');
-  assert.equal(lines[0], '**Governance: on, not ready: 2 steps left.**', 'an older programme file (no min_toolkit) is not held: no held sentence');
+  assert.equal(lines[0], '**Governance: on, not ready: 3 steps left.**', 'an older programme file (no min_toolkit) is not held: no held sentence');
+  // The third step: that older programme file is offered its update, asked as the last question.
+  assert.ok(lines.includes(`**Programme file:** It is behind this Toolkit: one pull request sets min_toolkit to ${RUNNING}, so governance waits while a setup part is missing. The default branch's required checks could not be read, so only Toolkit's own are added. Answer question 1 below.`));
+  assert.equal(lines.at(lines.findIndex(line => line.startsWith('Agents:')) - 2), '   - **B. No:** Nothing is written, and Toolkit asks again next time.', 'the question is the last thing before the Agents line');
   const permissions = lines.findIndex(line => line.startsWith('**Toolkit permissions (Claude Code, this computer):**'));
   const app = lines.findIndex(line => line.startsWith('**Governance App:**'));
   assert.ok(permissions > 0 && app > permissions, 'Toolkit permissions first, then the Governance App');
@@ -122,6 +141,87 @@ test('with every part in place the summary says on and ready, with no command an
   assert.ok(table.includes('| Toolkit permissions (Claude Code, this computer) | Up to date | Agents run Toolkit\'s own commands without asking each time |'));
   assert.ok(table.includes('| Governance App | Set up | Lets the cloud workflows act on GitHub |'));
   assert.ok(!table.some(line => line.startsWith('| Toolkit instruction copies')));
+});
+
+// ---- the programme file update ----------------------------------------------------------------
+// An older governed programme file (the SQAG shape: min_toolkit 3.137.0, below the setup hold, and no
+// required checks while a ruleset requires one). Red on main: the summary offered nothing, and the
+// finish told the owner to edit required_checks by hand.
+const PLAIN_TEXT = 'name: plain-text\non: [pull_request]\njobs:\n  plain-text:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n';
+const RULESET_CHECK = 'Quote Basis click budget';
+const protectedBy = (...contexts) => () => ({ ok: true, default_branch: 'main', repository: {}, rules: [{ type: 'required_status_checks', parameters: { required_status_checks: contexts.map(context => ({ context, integration_id: 15368 })) } }], classic: null, toolkit_ruleset: null });
+
+test('an older programme file gets one update pull request on the owner\'s yes: min_toolkit to this release, the ruleset\'s check and Toolkit\'s own; a no writes nothing', async t => {
+  const ctx = fixture(t, { quiet: true, minToolkit: '3.137.0', requiredChecks: [], commitFiles: { '.github/workflows/plain-text.yml': PLAIN_TEXT } });
+  const published = [];
+  const writes = [];
+  ctx.cli = { ...QUIET, protectionReader: protectedBy(RULESET_CHECK), switchTransport: {
+    openProgrammeUpdate: () => null,
+    publishProgrammeUpdate: (...args) => { published.push(args); return { number: 31, url: `https://github.com/${SLUG}/pull/31`, head: 'b'.repeat(40) }; },
+    publishSwitch: (...args) => { writes.push(args); throw new Error('not this one'); },
+  } };
+  const words = `sets min_toolkit to ${RUNNING} (now 3.137.0), so governance waits while a setup part is missing, and adds ${RULESET_CHECK} and plain-text to the required checks`;
+  const shown = await run(ctx, ['setup']);
+  assert.equal(shown.code, 0, shown.err);
+  assert.equal(shown.out.split('\n')[0], '**Governance: on, not ready: 1 step left.**');
+  assert.ok(shown.out.split('\n').includes(`**Programme file:** It is behind this Toolkit: one pull request ${words}. Answer question 1 below.`));
+  assert.match(shown.out, /^\*\*1\. Question: Bring the programme file up to date\?\*\*\n {3}- \*\*A\. Yes \(my pick\):\*\* One pull request [^\n]+ Nothing else changes, and it applies only after you merge it\.\n {3}- \*\*B\. No:\*\* Nothing is written, and Toolkit asks again next time\.$/m);
+  agentsLast(shown.out);
+  assert.deepEqual(published, [], 'nothing is written before the owner\'s yes');
+  const no = await reply(ctx, '1B');
+  assert.equal(no.code, 0, no.err);
+  assert.match(no.out, /^Programme file: not updated\. Nothing was written; Toolkit asks again next time\.$/m);
+  assert.deepEqual(published, [], 'a no writes nothing');
+  // A plain yes after that used answer is never read as a second one.
+  const stray = await reply(ctx, 'yes');
+  assert.match(stray.out, /^Your earlier answer was already used, and this reply changes nothing\. Nothing more was written\.$/m);
+  assert.deepEqual(published, []);
+  const yes = await reply(ctx, '1A');
+  assert.equal(yes.code, 0, yes.err);
+  assert.equal(published.length, 1, 'one pull request');
+  assert.deepEqual(writes, [], 'no other pull request');
+  const [repository, mergedText, text, update] = published[0];
+  assert.equal(repository, SLUG);
+  assert.equal(mergedText, fs.readFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), 'utf8'), 'built from the exact merged text');
+  const before = JSON.parse(mergedText), after = JSON.parse(text);
+  assert.deepEqual(after, { ...before, min_toolkit: RUNNING, required_checks: [RULESET_CHECK, 'plain-text'] }, 'only min_toolkit and required_checks change');
+  assert.deepEqual(text.split('\n').filter(line => !mergedText.split('\n').includes(line)), [`  "required_checks": ["${RULESET_CHECK}", "plain-text"],`, `  "min_toolkit": "${RUNNING}"`], 'the diff shows only those two lines');
+  assert.deepEqual(update.added, [RULESET_CHECK, 'plain-text']);
+  assert.ok(yes.out.split('\n').includes(`Prepared https://github.com/${SLUG}/pull/31: it ${words}, and changes nothing else. It applies only after you merge it.`), yes.out);
+});
+
+test('an update already open is the step to merge, never a second question; a file in step is asked nothing', async t => {
+  const open = fixture(t, { quiet: true, minToolkit: '3.137.0' });
+  open.cli = { ...QUIET, protectionReader: protectedBy('validate'), switchTransport: { openProgrammeUpdate: () => ({ number: 30, url: `https://github.com/${SLUG}/pull/30` }) } };
+  const waiting = await run(open, ['setup']);
+  assert.match(waiting.out, /^\*\*Programme file:\*\* An update waits in https:\/\/github\.com\/toolkit-test-fixture\/card\/pull\/30: merge it, then say toolkit governance\.$/m);
+  assert.doesNotMatch(waiting.out, /Question: Bring the programme file/);
+  const current = fixture(t, { quiet: true });
+  current.cli = { ...QUIET, protectionReader: protectedBy('validate'), switchTransport: { openProgrammeUpdate: () => { throw new Error('not read for a file in step'); } } };
+  const ready = await run(current, ['setup']);
+  assert.equal(ready.out.split('\n')[0], '**Governance: on and ready.**');
+  assert.doesNotMatch(ready.out, /Programme file|Question:/);
+});
+
+test('the update keeps the repository\'s own checks, moves min_toolkit only below the hold, and keeps the file\'s own layout', () => {
+  const binding = { schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'enabled', required_checks: ['own-z', 'own-a'], min_toolkit: '3.137.0' };
+  const update = summary.programmeUpdate({ binding, running: '3.202.0', holdFrom: '3.199.0', branchChecks: ['own-a', 'branch'], ownChecks: ['plain-text'] });
+  assert.deepEqual(update, { min_toolkit: { from: '3.137.0', to: '3.202.0' }, required_checks: ['own-z', 'own-a', 'branch', 'plain-text'], added: ['branch', 'plain-text'], branchUnread: false });
+  assert.equal(summary.programmeUpdate({ binding: { ...binding, min_toolkit: '3.199.0', required_checks: ['branch', 'plain-text'] }, running: '3.202.0', holdFrom: '3.199.0', branchChecks: ['branch'], ownChecks: ['plain-text'] }), null, 'in step: nothing offered');
+  assert.equal(summary.programmeUpdate({ binding: { ...binding, min_toolkit: '3.199.0' }, running: '3.202.0', holdFrom: '3.199.0', branchChecks: null, ownChecks: [] }), null, 'at the hold already, min_toolkit is left as it is');
+  const unread = summary.programmeUpdate({ binding: { ...binding, min_toolkit: undefined }, running: '3.202.0', holdFrom: '3.199.0', branchChecks: null, ownChecks: ['plain-text'], keyReadable: false });
+  assert.deepEqual(unread, { min_toolkit: null, required_checks: ['own-z', 'own-a', 'plain-text'], added: ['plain-text'], branchUnread: true }, 'no min_toolkit added while pinned sweep copies might not read it');
+  assert.equal(summary.programmeUpdate({ binding: { ...binding, governance: 'disabled' }, running: '3.202.0', holdFrom: '3.199.0' }), null);
+  // Layout: CRLF line ends and four-space indent stay; only the two values change.
+  const text = JSON.stringify(binding, null, 4).replace(/\n/g, '\r\n') + '\r\n';
+  const written = summary.programmeUpdateText(text, binding, update);
+  assert.deepEqual(JSON.parse(written), { ...binding, min_toolkit: '3.202.0', required_checks: ['own-z', 'own-a', 'branch', 'plain-text'] });
+  assert.equal(written.replace('"3.202.0"', '"3.137.0"').replace(/"required_checks": \[[^\]]*\]/, 'X'), text.replace(/"required_checks": \[[^\]]*\]/, 'X'));
+  // Default-branch checks: rulesets and classic protection; none on a plan without protection; unknown otherwise.
+  assert.deepEqual(summary.branchRequiredChecks({ ok: true, rules: [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'b' }] } }, { type: 'pull_request' }], classic: { checks: [{ context: 'a' }, { context: 'b' }] } }), ['a', 'b']);
+  assert.deepEqual(summary.branchRequiredChecks({ ok: false, reason: 'plan-has-no-protection' }), []);
+  assert.equal(summary.branchRequiredChecks({ ok: false, reason: 'forbidden' }), null);
+  assert.equal(summary.branchRequiredChecks(null), null);
 });
 
 // The toolkit-uat-v4 values of 27 Nov: private on GitHub Free, the finish wrote what GitHub offers there,
