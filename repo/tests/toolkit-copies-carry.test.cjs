@@ -88,7 +88,7 @@ function context(t) {
   // `commit`, committed with the refresh's own message; `change` edits the files first.
   ctx.refreshHead = ({ from = ctx.main, commit = ctx.toolkit.main, change = null, text = message(commit) } = {}) => {
     git(repo, ['checkout', '-q', '-B', refresh.BRANCH, from]);
-    workflows.apply(workflows.plan({ repo, root: ctx.toolkit.dir, commit: ctx.toolkit.main, ciShards: null }));
+    workflows.apply(workflows.plan({ repo, root: ctx.toolkit.dir, commit: ctx.toolkit.main }));
     if (change) change(repo);
     git(repo, ['add', '-A']);
     git(repo, ['commit', '-q', '-F', '-'], text);
@@ -96,7 +96,7 @@ function context(t) {
     git(repo, ['checkout', '-q', 'feature']);
     return head;
   };
-  ctx.proof = () => new RefreshProof({ root: repo, toolkitRoot: ctx.toolkit.dir, workflows, governance: folder => governance.governanceState(folder, registryOptions), ciShards: null });
+  ctx.proof = () => new RefreshProof({ root: repo, toolkitRoot: ctx.toolkit.dir, workflows, governance: folder => governance.governanceState(folder, registryOptions) });
   return ctx;
 }
 
@@ -194,6 +194,22 @@ test('closure matrix: a proved refresh lands pinned with a notice; everything el
   const row14 = land(ctx, settings);
   assert.equal(row14.route, 'owner', row14.line);
   assert.match(row14.line, /personal-data-guard\.json already existed, so it is the owner's settings file/);
+  git(ctx.repo, ['update-ref', 'refs/remotes/origin/main', ctx.main]);
+  // Row 21: a refresh that removes a retired Toolkit file (an older Toolkit's Shard Timings copy) does
+  // exactly what the refresh writes, but a removal never passes the proof: it waits for the owner.
+  const timings = '.github/workflows/toolkit-shard-timings.yml';
+  git(ctx.repo, ['checkout', '-q', '-B', 'retired', ctx.main]);
+  fs.mkdirSync(path.join(ctx.repo, '.github', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(ctx.repo, ...timings.split('/')), `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED shard-timings toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)} layout=1\nname: x\n`);
+  git(ctx.repo, ['add', '-A']);
+  git(ctx.repo, ['commit', '-q', '-m', 'an older Toolkit left it']);
+  const withRetired = git(ctx.repo, ['rev-parse', 'HEAD']);
+  git(ctx.repo, ['checkout', '-q', 'feature']);
+  git(ctx.repo, ['update-ref', 'refs/remotes/origin/main', withRetired]);
+  const removing = ctx.refreshHead({ from: withRetired, change: repo => fs.rmSync(path.join(repo, ...timings.split('/'))) });
+  const row21 = land(ctx, removing);
+  assert.equal(row21.route, 'owner', row21.line);
+  assert.match(row21.line, /toolkit-shard-timings\.yml is deleted/);
   git(ctx.repo, ['update-ref', 'refs/remotes/origin/main', ctx.main]);
   // Row 8: the switch off, and a binding with no switch.
   for (const value of [bindingFor({ task_prs: { auto_merge: 'off' } }), bindingFor({ task_prs: undefined })]) {
@@ -299,16 +315,13 @@ test('the merge hold lets an owner-started session merge a proved refresh pinned
 // Red on the first round (G2 H1): the hook ran the merge hold twice per call, each pass with its own
 // full copy proof, inside one 7.5-second deadline the proof never looked at, so on a repository with a
 // shard list and 600 test files the pinned merge `--land-refresh` names was refused for lack of time.
-// Now the proof runs once per hook call, stops short of the deadline, and lists test files only where
-// the shard copies render.
+// Now the proof runs once per hook call, stops short of the deadline, and never lists test files.
 test('the hook lets a proved refresh merge through within its own deadline on a large repository, proving it once', t => {
   const ctx = context(t);
   const named = git(ROOT, ['merge-base', 'HEAD', 'refs/remotes/origin/main']);
   ctx.toolkit = { dir: ROOT, main: named };
-  // The reviewer's large fixture: a shard list and 600 test files on the default branch.
+  // The reviewer's large fixture: 600 test files on the default branch.
   git(ctx.repo, ['checkout', '-q', '-B', 'large', ctx.main]);
-  fs.mkdirSync(path.join(ctx.repo, '.github'), { recursive: true });
-  fs.writeFileSync(path.join(ctx.repo, '.github', 'toolkit-test-shards.json'), JSON.stringify({ schema: 'toolkit-test-shards/v2', systems: { linux: { discover: 'tests/**/*.test.js' } } }));
   for (let i = 0; i < 600; i += 1) {
     const folder = path.join(ctx.repo, 'tests', `d${i % 50}`);
     fs.mkdirSync(folder, { recursive: true });

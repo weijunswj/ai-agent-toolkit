@@ -150,28 +150,30 @@ test('min_toolkit goes into the programme file in its own layout, so the pull re
   assert.equal(read(older.root, '.github/toolkit-programme.json'), BINDING.replace('"enabled"', `"enabled",\n  "min_toolkit": "${cleanup.MIN_TOOLKIT}"`), 'an older value is raised in place');
 });
 
-test('setting min_toolkit also deletes the retired schedule_folder line in the file\'s own layout, and the preview says so', t => {
+test('setting min_toolkit also deletes a retired key\'s line (schedule_folder, ci_shards) in the file\'s own layout, and the preview says so', t => {
   const crlf = BINDING.replace(/\n  /g, '\n    ').replace(/\n/g, '\r\n');
   for (const [layout, base, indent, newline] of [['two spaces', BINDING, '  ', '\n'], ['four spaces and CRLF', crlf, '    ', '\r\n']]) {
     const plain = repo(t, { 'AGENTS.md': BLOCK, '.github/toolkit-programme.json': base });
     assert.match(cleanup.run({ root: plain.root, write: false, governance: plain.governance }).lines.join('\n'), /- \.github\/toolkit-programme\.json: set min_toolkit to \d+\.\d+\.\d+\.\n/, 'without the key, the line is as before');
     assert.equal(cleanup.run({ root: plain.root, write: true, governance: plain.governance }).ok, true);
     const expected = read(plain.root, '.github/toolkit-programme.json');
-    const key = `"schedule_folder": "TOOLKIT"`;
-    for (const carried of [base.replace('"enabled"', `"enabled",${newline}${indent}${key}`), base.replace('"governance"', `${key},${newline}${indent}"governance"`)]) {
-      const r = repo(t, { 'AGENTS.md': BLOCK, '.github/toolkit-programme.json': carried });
-      const preview = cleanup.run({ root: r.root, write: false, governance: r.governance });
-      assert.match(preview.lines.join('\n'), /- \.github\/toolkit-programme\.json: set min_toolkit to \d+\.\d+\.\d+, and delete the retired schedule_folder, which nothing reads any more\./);
-      assert.equal(cleanup.run({ root: r.root, write: true, governance: r.governance }).ok, true);
-      assert.equal(read(r.root, '.github/toolkit-programme.json'), expected, `${layout}: the key's line goes and nothing else changes`);
+    // ci_shards is the retired parallel CI shards answer an older Toolkit wrote: an object on one line.
+    for (const [name, key] of [['schedule_folder', '"schedule_folder": "TOOLKIT"'], ['ci_shards', '"ci_shards": { "answer": "yes", "offered_at": "2026-11-01T00:00:00Z" }']]) {
+      for (const carried of [base.replace('"enabled"', `"enabled",${newline}${indent}${key}`), base.replace('"governance"', `${key},${newline}${indent}"governance"`)]) {
+        const r = repo(t, { 'AGENTS.md': BLOCK, '.github/toolkit-programme.json': carried });
+        const preview = cleanup.run({ root: r.root, write: false, governance: r.governance });
+        assert.match(preview.lines.join('\n'), new RegExp(`- \\.github/toolkit-programme\\.json: set min_toolkit to \\d+\\.\\d+\\.\\d+, and delete the retired ${name}, which nothing reads any more\\.`), `${layout}: ${name}`);
+        assert.equal(cleanup.run({ root: r.root, write: true, governance: r.governance }).ok, true);
+        assert.equal(read(r.root, '.github/toolkit-programme.json'), expected, `${layout}: the ${name} line goes and nothing else changes`);
+      }
     }
   }
 });
 
 test('a sweep copy pinned to a Toolkit that does not know min_toolkit holds the cleanup, so the programme board keeps updating', t => {
-  const offer = require('../scripts/toolkit-ci-shards-offer.cjs');
-  // A copy pinned to a commit from before min_toolkit: its validator would read the cleaned binding as invalid.
-  const sweep = `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED programme-sweep toolkit=${offer.CI_SHARDS_READER} sha256=000000000000\nname: Toolkit Programme Sweep\n`;
+  // A copy pinned to a commit from before min_toolkit (Toolkit 3.113.0): its validator would read the
+  // cleaned binding as invalid.
+  const sweep = `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED programme-sweep toolkit=d071a34a5ef47fce2da11608f745191f2ea318e0 sha256=000000000000\nname: Toolkit Programme Sweep\n`;
   const pinned = repo(t, { 'AGENTS.md': `${BLOCK}\n\n# Own\n`, '.github/toolkit-programme.json': BINDING, '.github/workflows/toolkit-programme-sweep.yml': sweep });
   const held = cleanup.run({ root: pinned.root, write: true, governance: pinned.governance });
   assert.equal(held.ok, false);
@@ -280,7 +282,7 @@ test('a governed block edited by hand is named in the preview, because those edi
 // about them, and only the owner's ticketed Clean up writes the cleanup in the working tree.
 const V2_BINDING = `${JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'toolkit-test-fixture/adopter', governance: 'enabled',
   parents: [{ issue: 1, record_prefix: 'INT-FX', writer_prefix: 'FX' }], store: { kind: 'github', repository: 'toolkit-test-fixture/store', branch: 'main', path: 'state/' },
-  required_checks: ['validate'], ci_shards: { answer: 'never' } }, null, 2)}\n`;
+  required_checks: ['validate'] }, null, 2)}\n`;
 const COPIES_ROW = /^- Toolkit instruction copies: (\d+) files? left \(Toolkit default: clean up\)\./m;
 
 // A governed fixture repository with `files` and a working-tree programme file `binding` (the merged

@@ -530,10 +530,10 @@ function openPrsOf(context, parentDoc, docs, deps) {
 
 // The cloud sweep's copy check: CLOUD_LAYOUT_STALE (the id state documents already store) when a refresh
 // from the Toolkit this sweep runs (its `.toolkit` checkout) would change any of this repository's
-// Toolkit copies: the rendered ones (the sweep, its gate and the shard copies), the ones copied as they
-// are (the personal data guard and dependency auto-merge) or the vendored plain-text check, whether
-// missing, edited or older (toolkit-cloud-workflows-refresh.cjs pending, the same rows the refresh and
-// the session start read). A rendered copy's path holding someone else's file raises it too, since the
+// Toolkit copies: the rendered ones (the sweep and its gate), the ones copied as they are (the
+// personal data guard and dependency auto-merge), the vendored plain-text check, whether missing,
+// edited or older, or a retired copy still there (toolkit-cloud-workflows-refresh.cjs pending, the
+// same rows the refresh and the session start read). A rendered copy's path holding someone else's file raises it too, since the
 // refresh stops there. The sweep never changes workflows itself (its App holds no workflow permission);
 // a controller chat opens the refresh pull request (toolkit-cloud-workflows.cjs --refresh-pr). Local
 // reads only; any failure adds nothing, and the Toolkit's own repository is never checked.
