@@ -2659,12 +2659,40 @@ function graphRowCells(line) {
   return cells;
 }
 
-// `issues` maps an issue number to what GitHub shows for it (title, close time).
+// A task's DONE WHEN progress, `Progress: <ticked>/<all>`, counted on its page (rowTicks), or null
+// when the page has no DONE WHEN checkbox row. A task whose page this pass did not read keeps the
+// count the graph already shows (`shown`), so a single-issue pass leaves the other rows as they are.
+function progressText(issue, shown) {
+  if (typeof issue?.body !== 'string') return shown || null;
+  const { ticked, total } = childRows().rowTicks(issue.body).done_when;
+  return total ? `Progress: ${ticked}/${total}` : null;
+}
+
+// The Progress counts a parent page's graph shows, by issue, read back from its STATE block. A block
+// edited by hand (its hash no longer matches) gives none.
+function shownProgress(body) {
+  const shown = new Map();
+  const { block } = findStateBlock(String(body || ''));
+  if (!block || block.tampered) return shown;
+  for (const line of block.body.split('\n')) {
+    const issue = graphRowIssue(line);
+    const match = issue === null ? null : /^Progress: \d+\/\d+/.exec(graphRowCells(line)[3] || '');
+    if (match) shown.set(issue, match[0]);
+  }
+  return shown;
+}
+
+// `issues` maps an issue number to what GitHub shows for it (title, page text, close time). The
+// Waiting on cell starts with the task's DONE WHEN progress when its page has DONE WHEN rows.
 function renderParentBlockBody(parent, children, issues = new Map(), comments = new Map()) {
+  const shown = shownProgress(issues.get(parent.parent_issue)?.body);
   const rows = graphOrder(parent, children, issues).map(outcome => {
     const child = children.get(outcome.issue);
     const issue = issues.get(outcome.issue);
-    return `|${taskName(outcome, issue)}|#${outcome.issue}|${statusCell(outcome, child)}|${waitingCell(outcome, child)}|${lastUpdated(outcome, child, issue, comments.get(outcome.issue) || [])}|`;
+    const waiting = waitingCell(outcome, child);
+    const progress = progressText(issue, shown.get(outcome.issue));
+    const cell = !progress ? waiting : waiting === '-' ? progress : `${progress}, ${waiting}`;
+    return `|${taskName(outcome, issue)}|#${outcome.issue}|${statusCell(outcome, child)}|${cell}|${lastUpdated(outcome, child, issue, comments.get(outcome.issue) || [])}|`;
   });
   return [
     revisionLine(parent, children),
