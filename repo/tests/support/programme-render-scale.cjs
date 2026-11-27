@@ -2,9 +2,13 @@
 
 const { FakeGitHub } = require('../toolkit-programme-fake-github.cjs');
 
+const DONE_WHEN = `Goal.\n\n## DONE WHEN\n\n${Array.from({ length: 12 }, (_, i) => `- [${i < 11 ? 'x' : ' '}] Criterion ${i + 1}`).join('\n')}\n`;
+
 // Synthetic programme at the measured parent's scale. No owner text or private state is copied.
-// Eight active tasks, ten queued, forty completed and fourteen retired; four PRs per task.
-function renderScaleFixture(state, { count = 72, proseSize = 38100 } = {}) {
+// Eight active tasks, ten queued, forty completed and fourteen retired; four PRs per task. With
+// `doneWhen`, every page has twelve DONE WHEN rows, eleven ticked, so each graph row carries
+// `Progress: 11/12` (those pages hold hand-written text, which a pass lays out ten pages at a time).
+function renderScaleFixture(state, { count = 72, proseSize = 38100, doneWhen = false } = {}) {
   const repository = 'example.test/app';
   const github = new FakeGitHub({ repository, store: 'example.test/store' });
   const writer = { session: 'fixture-controller', prefix: 'TEST-' };
@@ -29,7 +33,8 @@ function renderScaleFixture(state, { count = 72, proseSize = 38100 } = {}) {
     const child = state.newChild({ repository, outcome });
     child.lifecycle = i < 8 ? 'ACTIVE' : i < 18 ? 'PLANNED' : i < 58 ? 'DONE' : 'RETIRED';
     const terminal = i >= 18;
-    const issue = github.addIssue(outcome.issue, { parent: 421, title: outcome.name, state: terminal ? 'closed' : 'open' });
+    const issue = github.addIssue(outcome.issue, { parent: 421, title: outcome.name, state: terminal ? 'closed' : 'open', ...(doneWhen ? { body: DONE_WHEN } : {}) });
+    if (doneWhen) child.private = { ...child.private, done_when: { ticked: 11, total: 12 } };
     if (terminal) {
       issue.state_reason = i < 58 ? 'completed' : 'not_planned';
       issue.closed_at = child.completed_at = '2026-11-01T00:00:00Z';

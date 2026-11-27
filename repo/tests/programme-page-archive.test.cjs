@@ -701,3 +701,23 @@ test('N1: compaction preserves an exact registered duplicate below the floor and
   assert.equal(f.posts().length, before + 1);
   assert.equal(f.edits().length, 0);
 });
+
+// DONE WHEN progress: an archived row keeps its count on a single-issue pass, which reads only its
+// own task's page, so the row still matches its archive comment and stays archived.
+for (const groups of [['COMPLETED', 'QUEUED'], ['RETIRED', 'QUEUED']]) {
+  test(`DONE WHEN progress: archived ${groups[0]} rows keep their count and stay archived on a single-issue pass`, () => {
+    const f = pageFixture(state, { count: 30, groups, width: 10 });
+    for (const issue of f.github.issues.values()) if (issue.number >= 100) issue.body = 'Goal.\n\n## DONE WHEN\n\n- [x] Row 1\n- [x] Row 2\n';
+    assert.deepEqual(f.make().run({ apply: true }).holds, []);
+    const rows = body => (state.findStateBlock(body).block?.body || '').split('\n').filter(line => /^\|[^|]*\|#\d+\|/.test(line));
+    const archived = f.parent().page_archive.filter(entry => entry.kind === 'graph' && entry.state === 'moved')
+      .flatMap(entry => f.github.comments.get(entry.comment_id).body.split('\n').filter(line => /^\|[^|]*\|#\d+\|/.test(line)));
+    assert.ok(archived.length >= 5 && archived.every(line => /\|Progress: 2\/2\|/.test(line)), `archived rows carry the count: ${archived[0]}`);
+    const before = rows(f.page());
+    const queued = f.parent().outcomes.find((outcome, i) => groups[i % groups.length] === 'QUEUED').issue;
+    const posts = f.posts().length, edits = f.edits().length;
+    assert.deepEqual(f.make().run({ apply: true, issue: queued }).holds, []);
+    assert.deepEqual(rows(f.page()), before, 'no archived row comes back onto the page');
+    assert.deepEqual([f.posts().length - posts, f.edits().length - edits], [0, 0], 'no archive comment is posted or edited');
+  });
+}

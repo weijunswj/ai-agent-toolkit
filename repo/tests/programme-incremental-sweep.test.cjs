@@ -18,18 +18,20 @@ const HOUR = 60 * 60 * 1000;
 const controller = { session: 'fixture-controller', prefix: 'TEST-' };
 
 // `count` tasks natively under #421, their pages drawn once by a full pass, `prs` merged PRs
-// linked from the tasks' timelines and a parent discussion of `discussion` comments.
-function fixture(t, { count = 6, prs = 0, discussion = 0, cached = true, closed = 0 } = {}) {
+// linked from the tasks' timelines and a parent discussion of `discussion` comments. `body` is every
+// task page's text; `named` gives each task a catalogue name, so its title needs no page read.
+function fixture(t, { count = 6, prs = 0, discussion = 0, cached = true, closed = 0, body = '', named = false } = {}) {
   const github = new FakeGitHub({ repository: 'example.test/app', store: 'example.test/store' });
   const binding = { schema: state.SCHEMA.binding, repository: github.repository, parent_issue: 421, record_prefix: 'TEST-', writer_prefix: 'TEST-',
     store: { kind: 'github', repository: github.storeRepository, branch: 'main', path: 'state/' }, required_checks: [] };
   github.addIssue(421, { body: '# Programme\n' });
-  const outcomes = Array.from({ length: count }, (_, i) => ({ issue: 500 + i, class: 'COMMITTED', parent: 421, order: i + 1 }));
-  for (const outcome of outcomes) github.addIssue(outcome.issue, { parent: 421 });
+  const name = (label, i) => (named ? { name: `${label} ${i}` } : {});
+  const outcomes = Array.from({ length: count }, (_, i) => ({ issue: 500 + i, ...name('Open task', i), class: 'COMMITTED', parent: 421, order: i + 1 }));
+  for (const outcome of outcomes) github.addIssue(outcome.issue, { parent: 421, body });
   // Closed tasks taken out from under the parent (GitHub caps a parent at 100 sub-issues).
   for (let i = 0; i < closed; i += 1) {
-    outcomes.push({ issue: 700 + i, class: 'COMPLETED', parent: 421, order: count + i + 1 });
-    github.addIssue(700 + i, { state: 'closed' });
+    outcomes.push({ issue: 700 + i, ...name('Done task', i), class: 'COMPLETED', parent: 421, order: count + i + 1 });
+    github.addIssue(700 + i, { state: 'closed', body });
   }
   for (let i = 0; i < prs; i += 1) {
     const task = outcomes[i % count].issue;
@@ -330,4 +332,23 @@ test('self-record: a queued sweep pass records the one open PR that claims an un
   const doc = f.store.read('child', 507).doc;
   assert.deepEqual([doc.pr.number, doc.pr.state, doc.candidate.branch, doc.candidate.head, doc.lifecycle], [3000, 'OPEN', 'feature-507', 'b'.repeat(40), 'ACTIVE']);
   assert.match(f.page(421), /\|#507\|NOW/);
+});
+
+test('DONE WHEN progress: warm sweeps keep every archived graph row\'s count and write no archive comment', t => {
+  // Finished tasks taken off the parent's list are read only on their rotation turn, so each row's
+  // count must come from state, not from the pages this pass happened to read.
+  const f = fixture(t, { count: 4, closed: 24, named: true, body: 'Goal.\n\n## DONE WHEN\n\n- [x] Row 1\n- [ ] Row 2\n' });
+  const archived = () => f.parent().page_archive.filter(entry => entry.kind === 'graph' && entry.comment_id)
+    .flatMap(entry => (f.github.comments.get(entry.comment_id)?.body || '').split('\n').filter(line => /^\|[^|]*\|#\d+\|/.test(line)));
+  assert.equal(f.run().code, 0);
+  const rows = archived();
+  assert.ok(rows.length >= 10, `finished rows are archived (${rows.length})`);
+  for (let pass = 0; pass < 4; pass += 1) {
+    const warm = f.run();
+    assert.equal(warm.code, 0, JSON.stringify(warm.report.holds));
+    const writes = warm.calls.filter(call => ['POST', 'PATCH'].includes(call.method) && /# Programme graph: /.test(String(call.body?.body || '')));
+    assert.deepEqual(writes.map(call => `${call.method} ${call.path}`), [], `pass ${pass + 1} writes no graph archive comment`);
+    assert.deepEqual(archived(), rows, `pass ${pass + 1} leaves the archived rows as they were`);
+  }
+  assert.ok(rows.every(line => /\|Progress: 1\/2\|/.test(line)), rows.find(line => !/\|Progress: 1\/2\|/.test(line)));
 });

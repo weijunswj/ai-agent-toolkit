@@ -1243,6 +1243,11 @@ test('DONE WHEN progress: 3 of 5 ticked reads Progress: 3/5, none ticked 0/5, no
   f.github.issues.get(4).body='Goal.\n\n## ROWS\n\n- [x] Polish row\n\n## DONE WHEN\n\n```\n- [x] Example only\n```\n\n## Notes\n\n- [ ] Not a criterion\n';
   f.run();
   assert.deepEqual([2,3,4].map(n=>waitingOf(f,n)),['Progress: 3/5','Progress: 0/5','-']);
+  // The count is kept in state, and only a well-formed one is accepted.
+  assert.deepEqual([2,3,4].map(n=>f.child(n).private.done_when),[{ticked:3,total:5},{ticked:0,total:5},undefined]);
+  for (const bad of [{ticked:6,total:5},{ticked:0,total:0},{ticked:1},{ticked:1,total:2,extra:1},{ticked:-1,total:2}]) {
+    assert.ok(state.validateChild({...f.child(2),private:{...f.child(2).private,done_when:bad}}).some(error=>error.startsWith('private.done_when')),JSON.stringify(bad));
+  }
   // Ticking a row shows on the next pass.
   f.github.issues.get(3).body=doneWhen(1,5); f.run();
   assert.equal(waitingOf(f,3),'Progress: 1/5');
