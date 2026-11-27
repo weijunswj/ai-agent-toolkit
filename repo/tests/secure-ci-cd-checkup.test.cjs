@@ -459,7 +459,10 @@ test('speed: recent runs are listed per workflow, so frequent scheduled runs nev
   assert.equal(calls.filter((call) => call.startsWith('run view')).length, 7, '5 sweep runs and 2 CI runs');
   assert.equal(checkup.recentRuns({ slug: 'acme/app', branch: 'main' }, 5, workflows, () => null), null, 'no listing read at all is "not checked", never "no runs"');
   const known = (args) => (args.includes('ci.yml') ? [] : null);
-  assert.deepEqual([...checkup.recentRuns({ slug: 'acme/app', branch: 'main' }, 5, workflows, known).times], [], 'a workflow GitHub does not know yet has no runs');
+  const partial = checkup.recentRuns({ slug: 'acme/app', branch: 'main' }, 5, workflows, known);
+  assert.deepEqual([...partial.times], [], 'a workflow GitHub does not know yet has no runs');
+  assert.deepEqual(partial.unread, ['.github/workflows/sweep.yml'], 'a listing that could not be read is named, never silent');
+  assert.deepEqual(stats.unread, []);
 });
 
 test('speed.shards-lopsided: legs of one matrix job far apart are a GAP; close legs and other systems are quiet', (t) => {
@@ -471,6 +474,63 @@ test('speed.shards-lopsided: legs of one matrix job far apart are a GAP; close l
   assert.deepEqual(lopsided([['CI / Tests (linux-1)', 400], ['CI / Tests (linux-2)', 300]]), [], 'under 1.5 times');
   assert.deepEqual(lopsided([['CI / Tests (linux-1)', 300], ['CI / Tests (linux-2)', 200]]), [], '1.5 times but under 2 minutes apart');
   assert.deepEqual(lopsided([['CI / Tests (ubuntu-latest)', 900], ['CI / Tests (windows-latest)', 300]]), [], 'legs for different systems are not shards of one split');
+});
+
+test('speed.shards-lopsided: only legs that differ in a split axis are compared, never runner images or versions', (t) => {
+  const job = (axes) => `name: CI
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+${axes}
+    steps:
+      - run: node --test
+`;
+  const lopsided = (axes, times) => {
+    const dir = fixture({ '.github/workflows/ci.yml': job(axes) });
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    return hits(checkup.checkup(dir, { github: false, jobTimes: new Map(times) }).items, 'speed.shards-lopsided').map((e) => e.message.split(' took')[0]);
+  };
+  assert.deepEqual(lopsided('        os: [macos-13, macos-14]', [['CI / Tests (macos-13)', 900], ['CI / Tests (macos-14)', 360]]), [], 'runner images');
+  assert.deepEqual(lopsided("        python-version: ['3.9', '3.12']", [['CI / Tests (3.9)', 900], ['CI / Tests (3.12)', 360]]), [], 'versions');
+  assert.deepEqual(lopsided('        group:\n          - a\n          - b', [['CI / Tests (a)', 900], ['CI / Tests (b)', 360]]), ['CI / Tests (a)'], 'a split key, whatever its values');
+  assert.deepEqual(lopsided('        index: [1, 2, 3]', [['CI / Tests (1)', 900], ['CI / Tests (2)', 360], ['CI / Tests (3)', 400]]), ['CI / Tests (1)'], 'whole-number legs');
+  const both = '        os: [macos-13, macos-14]\n        shard: [1, 2]';
+  assert.deepEqual(lopsided(both, [['CI / Tests (macos-13, 1)', 900], ['CI / Tests (macos-13, 2)', 360], ['CI / Tests (macos-14, 1)', 300], ['CI / Tests (macos-14, 2)', 300]]), ['CI / Tests (macos-13, 1)'], 'shards are compared within one image only');
+});
+
+test('speed.shards: a slow test job in a reusable workflow is flagged on its caller job', (t) => {
+  const dir = fixture({
+    '.github/workflows/ci.yml': `name: CI
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  tests:
+    uses: ./.github/workflows/reusable-tests.yml
+`,
+    '.github/workflows/reusable-tests.yml': `name: Reusable tests
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python -m unittest discover -s tests
+`,
+  });
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const found = hits(checkup.checkup(dir, { github: false, jobTimes: new Map([['CI / tests / run', 2880]]) }).items, 'speed.shards');
+  assert.deepEqual(found.map((e) => [e.level, e.path, e.message.split(';')[0]]), [['GAP', '.github/workflows/ci.yml', 'CI / tests / run took up to 48 min with no sharding']]);
 });
 
 // Fixes from the gate review: programs outside the repository, unknown required checks, started

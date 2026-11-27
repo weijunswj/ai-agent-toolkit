@@ -44,6 +44,8 @@ const DEFAULTS = Object.freeze({ job_seconds: null, unsharded_test_job_seconds: 
 const MAX_SHARDS = 8;
 const LOPSIDED_RATIO = 1.5;
 const LOPSIDED_SECONDS = 120;
+// A matrix key that names a split of one suite (legs are only compared across such a key).
+const SPLIT_KEY = /^(shards?|groups?|chunks?|parts?|index|indices|splits?|slices?|buckets?|partitions?|ci[-_]?node[-_]?index)$/i;
 const SHARD_PLAYBOOK = 'fast-tests-and-sharding playbook, section Arrange Shards In This Repository\'s CI';
 // Test file names counted for a shard finding (display only), by the common pattern each matches.
 const TEST_PATTERNS = Object.freeze([
@@ -337,6 +339,25 @@ function windowsRunner(lines, keys, end, indent) {
 
 // The top-level entries of a YAML flow value (`[a, b]` or `{a: x, b: {c: [d]}}`), each with its key
 // (or the bare item) and its own value text, cut at the matching bracket; a plain scalar is one entry.
+// The axes of a job's `strategy.matrix`: { key, values } with values a list of plain strings, or
+// null when they are not literal (an expression, a map or an include-only matrix).
+function matrixAxes(lines, keys, indent) {
+  const strategy = keys.find((entry) => entry.key === 'strategy');
+  if (!strategy) return [];
+  const strategyKeys = mapKeys(lines, strategy.line + 1, blockEnd(lines, strategy.line, indent), indent + 2);
+  const matrix = strategyKeys.find((entry) => entry.key === 'matrix');
+  if (!matrix || matrix.value.trim()) return [];
+  const end = blockEnd(lines, matrix.line, indent + 2);
+  const axisIndent = (lines.slice(matrix.line + 1, end).find((line) => line.trim() && !line.trimStart().startsWith('#')) || '').length - (lines.slice(matrix.line + 1, end).find((line) => line.trim() && !line.trimStart().startsWith('#')) || '').trimStart().length;
+  const plain = (value) => (/^[\w.+-]+$/.test(value) ? value : null);
+  return mapKeys(lines, matrix.line + 1, end, axisIndent).filter((axis) => !['include', 'exclude'].includes(axis.key)).map((axis) => {
+    const inline = axis.value.replace(/\s+#.*$/, '').trim();
+    let raw;
+    if (inline) raw = /^\[.*\]$/.test(inline) ? inline.slice(1, -1).split(',').map((value) => unquote(value.trim())).filter(Boolean) : null;
+    else raw = lines.slice(axis.line + 1, blockEnd(lines, axis.line, axisIndent)).filter((line) => line.trim() && !line.trimStart().startsWith('#')).map((line) => (/^\s*-\s+/.test(line) ? unquote(line.replace(/^\s*-\s+/, '').replace(/\s+#.*$/, '')) : null));
+    return { key: axis.key, values: raw && raw.length && raw.every((value) => value && plain(value)) ? raw : null };
+  });
+}
 function flowEntries(text) {
   const t = text.replace(/\s+#.*$/, '').trim();
   if (!/^[[{]/.test(t)) return t ? [{ key: unquote(t), value: '' }] : [];
@@ -449,6 +470,7 @@ function parseWorkflow(rel, text) {
       concurrency: concurrencyOf(keyText(lines, keys.find((entry) => entry.key === 'concurrency'), jobIndent + 2)),
       continueOnError: keys.some((entry) => entry.key === 'continue-on-error' && !/^false$/i.test(unquote(entry.value))),
       matrix: /\bmatrix:/.test(body),
+      axes: matrixAxes(lines, keys, jobIndent + 2),
       uses: (keys.find((entry) => entry.key === 'uses') || {}).value,
       dir: defaultsDir(lines, job.line + 1, end, jobIndent + 2) || workflow.dir,
       shell: defaultsShell(lines, job.line + 1, end, jobIndent + 2) || workflow.shell,
@@ -892,11 +914,13 @@ function githubRepo(root, tools) {
 // Recent green default-branch runs of each workflow file, read with `readGh` (gh arguments to
 // parsed JSON, or null): their job times (jobStats). Listed per workflow, so frequent scheduled
 // runs never crowd out the CI runs; a workflow GitHub does not know yet (a new file) has no runs.
-// Null when no listing could be read at all, so a gh failure says "not checked", never "no runs".
+// Null when no listing could be read at all, so a gh failure says "not checked", never "no runs";
+// `unread` names each workflow file whose listing could not be read, so its gap is never silent.
 function recentRuns(repo, runs, workflows, readGh) {
   const listed = workflows.map((workflow) => readGh(['run', 'list', '-R', repo.slug, '--workflow', path.posix.basename(workflow.rel), '--branch', repo.branch, '--status', 'success', '--limit', String(runs), '--json', 'databaseId,workflowName']));
   if (listed.length && listed.every((list) => !Array.isArray(list))) return null;
-  return jobStats(listed.flatMap((list) => list || []).map((entry) => ({ workflowName: entry.workflowName, jobs: (readGh(['run', 'view', String(entry.databaseId), '-R', repo.slug, '--json', 'jobs']) || {}).jobs })));
+  const stats = jobStats(listed.flatMap((list) => list || []).map((entry) => ({ workflowName: entry.workflowName, jobs: (readGh(['run', 'view', String(entry.databaseId), '-R', repo.slug, '--json', 'jobs']) || {}).jobs })));
+  return { ...stats, unread: workflows.filter((workflow, i) => !Array.isArray(listed[i])).map((workflow) => workflow.rel) };
 }
 
 // From runs of { workflowName, jobs }: each "workflow / job" key's longest time and median time,
@@ -1058,6 +1082,7 @@ function checkSpeed(root, fileList, workflows, analysis, settings, options) {
     items.push(item('CHECK', 'speed.jobs', '', 'job times not checked (no GitHub access)', 'run again with a working gh login to compare job times with budgets'));
     return items;
   }
+  if (measured.unread && measured.unread.length) items.push(item('CHECK', 'speed.jobs', '', `job times not read for ${measured.unread.join(', ')} (gh could not list their runs; a workflow GitHub does not know yet looks the same), so their speed rows are missing`, 'run again with a working gh login; a new workflow is measured once it has run on the default branch'));
   const times = measured.times;
   // A run that takes more than half the account's job slots makes the next pull request queue,
   // and queue time, not run time, is usually most of the wait.
@@ -1073,12 +1098,14 @@ function checkSpeed(root, fileList, workflows, analysis, settings, options) {
   // Long test jobs come from the measured times, whatever command they run; a job counts as a test
   // job when its name, a step name or a command says tests, a suite, a regression or a runner.
   const testJob = (job) => [job.id, job.name, ...job.steps.flatMap((s) => [s.name, s.run])].some((text) => text && (/\btests?\b|regression|suite|\bspec\b|unittest|run[-_]tests/i.test(text) || Object.values(RUNNERS).some((re) => re.test(text))));
+  // A measured key is "<workflow> / <job>", or "<workflow> / <caller job> / <called job>" for a job
+  // a reusable workflow runs; with no job of the full name, the caller job in this workflow answers.
   const jobOf = (name) => {
     const [workflowName, ...rest] = name.split(' / ');
-    const jobName = rest.join(' / ');
-    const plain = jobName.replace(/\s+\(.*\)$/, '');
+    const bare = (jobName) => jobName.replace(/\s+\(.*\)$/, '');
+    const find = (workflow, jobName) => workflow.jobs.find((j) => j.id === bare(jobName) || j.name === bare(jobName));
     return workflows.filter((w) => (w.name || path.posix.basename(w.rel)) === workflowName || w.rel === workflowName)
-      .map((workflow) => ({ workflow, job: workflow.jobs.find((j) => j.id === plain || j.name === plain) }))
+      .map((workflow) => ({ workflow, job: find(workflow, rest.join(' / ')) || (rest.length > 1 ? find(workflow, rest[0]) : undefined) }))
       .filter((hit) => hit.job);
   };
   // A long test job with no matrix: shards would pay. One shard per budget of time, at most
@@ -1094,22 +1121,27 @@ function checkSpeed(root, fileList, workflows, analysis, settings, options) {
       items.push(item('GAP', 'speed.shards', workflow.rel, `${name} took up to ${minutes(seconds)} with no sharding; about ${shards} shards would bring it near ${minutes(seconds / shards)} (${testCountText(tracked)})`, `arrange shards for this job in this repository's own CI (${SHARD_PLAYBOOK}), or record why not with an ignore entry and a reason`));
     }
   }
-  // Lopsided shards: legs of one matrix job whose names differ only in their numbers (shard
-  // indexes), compared by their median time, so legs for different systems are never compared.
+  // Lopsided shards: legs of one matrix job that differ only in a split axis (a key such as shard,
+  // group, chunk, part or index, or whole-number values), compared by their median time, so legs
+  // for different runner images, systems or versions are never compared.
   const groups = new Map();
   for (const [name, seconds] of measured.medians) {
-    if (!/\s\(.*\)$/.test(name)) continue;
-    const key = name.replace(/\d+/g, '#');
-    groups.set(key, [...(groups.get(key) || []), { name, seconds }]);
+    const suffix = name.match(/^(.*) \((.*)\)$/);
+    if (!suffix) continue;
+    for (const { workflow, job } of jobOf(name)) {
+      const split = job.axes.filter((axis) => SPLIT_KEY.test(axis.key) || (axis.values && axis.values.every((value) => /^\d+$/.test(value))));
+      if (!split.length) continue;
+      const isSplitValue = (value) => split.some((axis) => (axis.values ? axis.values.includes(value) : /\d/.test(value)));
+      const key = `${workflow.rel}\n${suffix[1]} (${suffix[2].split(', ').map((value) => (isSplitValue(value) ? '#' : value)).join(', ')})`;
+      groups.set(key, [...(groups.get(key) || []), { name, seconds, workflow }]);
+    }
   }
   for (const legs of groups.values()) {
     if (legs.length < 2) continue;
     const slow = legs.reduce((a, b) => (b.seconds > a.seconds ? b : a));
     const fast = legs.reduce((a, b) => (b.seconds < a.seconds ? b : a));
     if (slow.seconds < fast.seconds * LOPSIDED_RATIO || slow.seconds - fast.seconds < LOPSIDED_SECONDS) continue;
-    for (const { workflow } of jobOf(slow.name).filter((hit) => hit.job.matrix)) {
-      items.push(item('GAP', 'speed.shards-lopsided', workflow.rel, `${slow.name} took ${minutes(slow.seconds)} and ${fast.name} ${minutes(fast.seconds)} (median of recent green runs), so the shards are lopsided`, `rebalance the split from fresh per-file times (${SHARD_PLAYBOOK})`));
-    }
+    items.push(item('GAP', 'speed.shards-lopsided', slow.workflow.rel, `${slow.name} took ${minutes(slow.seconds)} and ${fast.name} ${minutes(fast.seconds)} (median of recent green runs), so the shards are lopsided`, `rebalance the split from fresh per-file times (${SHARD_PLAYBOOK})`));
   }
   return items;
 }
