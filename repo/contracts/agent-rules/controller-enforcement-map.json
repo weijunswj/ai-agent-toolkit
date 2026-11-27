@@ -977,7 +977,7 @@
     {
       "file": "repo/contracts/agent-rules/gate-rules.md",
       "rule": "G2 starts after the working result",
-      "rule_sha": "ab0d8dc053eb",
+      "rule_sha": "0a680285a88d",
       "instruction_only": {
         "basis": "judgement",
         "why": "Coverage, adversarial depth and rating findings are the reviewers' judgement; the train finder reads only each verdict's first line and route stamps."
