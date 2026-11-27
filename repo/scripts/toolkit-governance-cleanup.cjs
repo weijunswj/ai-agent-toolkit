@@ -9,7 +9,9 @@
 //     owner's is deleted;
 //   - a one-line CLAUDE.md, only when AGENTS.md has nothing of its own left; an older marked CLAUDE.md
 //     shim is replaced by the line `@AGENTS.md` while AGENTS.md has text of its own, else goes the same way;
-//   - docs/agent-playbooks/ files that are a copy Toolkit shipped, now or earlier.
+//   - docs/agent-playbooks/ files that are a copy Toolkit shipped, now or earlier;
+//   - retired workflow copies: a Toolkit test shards or Shard Timings workflow (Toolkit no longer sets up
+//     CI shards, and the rules refresh removes them too).
 // It also sets `min_toolkit` in the programme file, so a Toolkit copy too old to deliver the rules
 // says to update instead of running without them. The checks and workflow copies governance uses,
 // and anything not proven Toolkit's, stay. It never runs git: the changes go to the owner in one pull

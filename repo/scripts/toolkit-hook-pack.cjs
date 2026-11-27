@@ -157,7 +157,9 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'attention_net', 'desktop_sessions', 'gate_records', 'entrypoint', 'toolkit_helpers', 'governance_parts'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'attention_net', 'desktop_sessions', 'gate_records', 'entrypoint', 'toolkit_helpers', 'governance_parts', 'slow_ci', 'desktop_self'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  if (fixture.slow_ci !== undefined && !['shards', 'lopsided'].includes(fixture.slow_ci)) errors.push('fixture.slow_ci is shards or lopsided: a daily slow-CI result not shown yet');
+  if (fixture.desktop_self !== undefined && (!fixture.desktop_self || typeof fixture.desktop_self !== 'object' || Array.isArray(fixture.desktop_self))) errors.push('fixture.desktop_self must be an object of fields for this session\'s own desktop file');
   if (fixture.governance_parts !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !fixture.governance_parts || typeof fixture.governance_parts !== 'object' || Array.isArray(fixture.governance_parts)
     || Object.keys(fixture.governance_parts).some(key => !['app', 'store'].includes(key))
     || (fixture.governance_parts.app !== undefined && !['missing', 'found'].includes(fixture.governance_parts.app))
@@ -347,7 +349,11 @@ function combineDecisions(decisions) {
 
 // Read only the surface delivered as context by each host, never stderr diagnostics.
 function hookContext(host, event, result) {
-  if (result.status !== 0 || !['SessionStart', 'UserPromptSubmit', 'PostToolUse'].includes(event)) return '';
+  if (result.status !== 0 || !['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop'].includes(event)) return '';
+  // A turn end shows the owner its message directly; that is the text a Stop row checks.
+  if (event === 'Stop') {
+    try { const output = JSON.parse(result.stdout); return typeof output.systemMessage === 'string' ? output.systemMessage : ''; } catch { return ''; }
+  }
   // Codex takes a session start's plain stdout as context; both hosts send prompt and after-tool
   // context as JSON.
   if (host === 'codex' && event === 'SessionStart') return result.stdout;
@@ -484,15 +490,26 @@ class Fixture {
       }, { now: this.#now() });
       if (!saved) throw new Error('the fixture governance parts could not be saved');
     }
+    // A daily slow-CI result this computer has not shown yet (toolkit-slow-ci.cjs), checked just now,
+    // so no background check is due.
+    if (spec.slow_ci) {
+      const { SlowCiRecord } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-slow-ci.cjs'));
+      const finding = spec.slow_ci === 'shards'
+        ? { level: 'GAP', check: 'speed.shards', facts: { job: 'CI / Validate app', seconds: 2880, shards: 5, tests: 142 } }
+        : { level: 'GAP', check: 'speed.shards-lopsided', facts: { slow: 'CI / Tests (1)', slow_seconds: 900, fast: 'CI / Tests (2)', fast_seconds: 300 } };
+      const saved = new SlowCiRecord({ registryOptions: { userHome: this.home, testOnly: true }, now: () => this.#now() }).record(this.work, { items: [finding] });
+      if (!saved) throw new Error('the fixture slow-CI result could not be saved');
+    }
     // The Claude Code entry point the session runs in, as the host names it.
     if (spec.entrypoint) this.env.CLAUDE_CODE_ENTRYPOINT = spec.entrypoint;
     // The Claude desktop app's session files: this session's own, and each listed one it started
     // (spawnedFrom names this session unless the entry sets its own).
-    if (spec.desktop_sessions) {
+    if (spec.desktop_sessions || spec.desktop_self) {
       const folder = path.join(this.home, 'AppData', 'Local', 'Claude-Data', 'claude_fixture', 'claude-code-sessions', 'a', 'b');
       fs.mkdirSync(folder, { recursive: true });
-      fs.writeFileSync(path.join(folder, `${DESKTOP_SELF}.json`), JSON.stringify({ sessionId: DESKTOP_SELF, isArchived: false, createdAt: this.#now(86400000).getTime() }));
-      spec.desktop_sessions.forEach((entry, index) => {
+      // desktop_self adds fields to this session's own file, such as spawnedFrom for a side session.
+      fs.writeFileSync(path.join(folder, `${DESKTOP_SELF}.json`), JSON.stringify({ sessionId: DESKTOP_SELF, isArchived: false, createdAt: this.#now(86400000).getTime(), ...(spec.desktop_self || {}) }));
+      (spec.desktop_sessions || []).forEach((entry, index) => {
         const sessionId = `local_00000000-0000-4000-8000-${String(index + 2).padStart(12, '0')}`;
         fs.writeFileSync(path.join(folder, `${sessionId}.json`), JSON.stringify({ sessionId, spawnedFrom: { sessionId: DESKTOP_SELF, title: `Fixture side session ${index + 1}` }, ...entry }));
       });
