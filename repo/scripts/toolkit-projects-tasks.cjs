@@ -454,6 +454,11 @@ function validEntry(entry) {
   return Boolean(match) && (match.groups.reason === undefined || isReason(match.groups.reason));
 }
 
+// The BINDING line is read as printable ASCII only, by --check-memory and --rebind alike: a tab, a
+// no-break space or a zero-width space the format pattern would let through is named, never read past.
+const PRINTABLE = /^[\x20-\x7e]*$/;
+const NOT_PRINTABLE = 'has a character outside printable ASCII';
+
 // Only LF and CRLF end a line: a lone CR or a Unicode line break stays inside its line and fails it.
 const memoryLines = text => String(text).replace(/^\uFEFF/, '').split('\n').map(line => line.replace(/\r$/, ''));
 
@@ -463,6 +468,7 @@ function checkMemory(text) {
   const binding = lines.filter(line => /^[-*\s]*BINDING:/.test(line));
   if (!binding.length) faults.push('MEMORY FORMAT: BINDING missing');
   else if (binding.length > 1) faults.push('MEMORY FORMAT: BINDING more than one line');
+  else if (!PRINTABLE.test(binding[0])) faults.push(`MEMORY FORMAT: BINDING ${NOT_PRINTABLE}`);
   else if (!BINDING_LINE.test(binding[0])) faults.push('MEMORY FORMAT: BINDING old format');
   const tasks = lines.filter(line => /^[-*\s]*SCHEDULED TASKS:/.test(line));
   if (!tasks.length) faults.push('MEMORY FORMAT: SCHEDULED TASKS missing');
@@ -483,7 +489,6 @@ function checkMemory(text) {
 // copied into the new one, so it is read default-deny: one line, printable ASCII, the current format.
 const CONTROLLER_REL = 'repo/CONTROLLER.md';
 const BINDING_PARTS = /^([-* ]*)BINDING: (\S+) (\S+) commit ([0-9a-f]{40}) CONTROLLER\.md blob ([0-9a-f]{40}) toolkit (\S+) skill (\S+) bound (\S+) *$/;
-const PRINTABLE = /^[\x20-\x7e]*$/;
 const MAX_CHANGED_BY = 10;
 
 function defaultGit(cwd, args, input) {
@@ -495,7 +500,8 @@ function readBinding(text) {
   const found = memoryLines(text).filter(line => /^[-*\s]*BINDING:/.test(line));
   if (!found.length) return { reason: 'no BINDING line in memory' };
   if (found.length > 1) return { reason: 'more than one BINDING line in memory' };
-  const match = PRINTABLE.test(found[0]) && BINDING_LINE.test(found[0]) ? BINDING_PARTS.exec(found[0]) : null;
+  if (!PRINTABLE.test(found[0])) return { reason: `the BINDING line ${NOT_PRINTABLE} (a tab, a no-break or zero-width space, or similar): rewrite it` };
+  const match = BINDING_LINE.test(found[0]) ? BINDING_PARTS.exec(found[0]) : null;
   if (!match) return { reason: 'the BINDING line is not in the current format (no full commit and blob to compare)' };
   const [, prefix, repo, branch, commit, blob, , skill, bound] = match;
   return { binding: { prefix, repo, branch, commit, blob, skill, bound } };
@@ -536,8 +542,8 @@ class BindingCheck {
     if (!binding) return unknown(reason);
     // Few git runs: each costs a process start, slow on Windows.
     const git = (args, input) => this.#git(checkout, args, input);
-    const heads = git(['rev-parse', '--show-toplevel', 'HEAD^{commit}', `HEAD:${CONTROLLER_REL}`]);
-    const [top, commit, blob] = heads.ok ? heads.out.split('\n').map(part => part.trim()) : [];
+    const heads = git(['rev-parse', '--show-toplevel', '--is-shallow-repository', 'HEAD^{commit}', `HEAD:${CONTROLLER_REL}`]);
+    const [top, shallow, commit, blob] = heads.ok ? heads.out.split('\n').map(part => part.trim()) : [];
     let isTop = false;
     try { isTop = Boolean(top) && fs.realpathSync.native(top) === fs.realpathSync.native(checkout); } catch { isTop = false; }
     if (!isTop || !/^[0-9a-f]{40}$/.test(commit) || !/^[0-9a-f]{40}$/.test(blob)) return unknown(`cannot read ${CONTROLLER_REL} at HEAD of the Toolkit clone`);
@@ -557,7 +563,11 @@ class BindingCheck {
     const types = git(['cat-file', '--batch-check=%(objecttype)'], `${binding.blob}\n${binding.commit}\n`);
     const [blobType, commitType] = types.ok ? types.out.split('\n').map(part => part.trim()) : [];
     if (blobType !== 'blob') {
-      lines.push(`CHANGES UNREAD: the bound blob ${short(binding.blob)} is not in this clone: run git fetch --unshallow in it once, then --rebind again`);
+      // Unshallow helps only a shallow clone; a full clone without the blob never had it (hand-edited, or
+      // bound to another repository), so the step reads the file instead of fetching again.
+      lines.push(shallow === 'true'
+        ? `CHANGES UNREAD: the bound blob ${short(binding.blob)} is not in this shallow clone: run git fetch --unshallow in it once, then --rebind again`
+        : `CHANGES UNREAD: the bound blob ${short(binding.blob)} is not in Toolkit's history: read ${CONTROLLER_REL} in the clone in full`);
       return { lines, exitCode: 1 };
     }
     const diff = git(['diff', '--no-color', '--no-ext-diff', '-U0', binding.blob, main.blob]);
@@ -565,7 +575,7 @@ class BindingCheck {
     if (!diff.ok || !text.ok) lines.push(`CHANGES UNREAD: git could not compare the two CONTROLLER.md blobs: read ${CONTROLLER_REL} in the clone`);
     else lines.push(...changedSections(diff.out, text.out.replace(/\r\n/g, '\n')));
     if (commitType === 'commit') {
-      const log = git(['log', '--format=%H %s', `${binding.commit}..${main.commit}`, '--', CONTROLLER_REL]);
+      const log = git(['log', '--no-merges', '--format=%H %s', `${binding.commit}..${main.commit}`, '--', CONTROLLER_REL]);
       const commits = log.ok ? log.out.split('\n').filter(Boolean) : [];
       for (const entry of commits.slice(0, MAX_CHANGED_BY)) {
         const title = entry.slice(41).replace(/[^\x20-\x7e]/g, '?').slice(0, 120);
