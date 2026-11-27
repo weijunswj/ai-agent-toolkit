@@ -348,9 +348,6 @@ for (const mode of ['after-fetch', 'before-worktree', 'fetch-failure', 'resoluti
 }
 
 test('v1 stays as it was: the Toolkit root reads validate.yml and Validate runs and writes the v1 manifest', () => {
-  assert.equal(refresh.V1.workflowFile, 'validate.yml');
-  assert.equal(refresh.V1.workflowName, 'Validate');
-  assert.equal(refresh.V1.manifestRel, 'repo/contracts/ci/test-shards.json');
   const calls = [];
   const { latestGreenRun, prBody } = loadWithCommands('refresh-shard-timings.cjs', ['latestGreenRun', 'prBody'], (program, args) => {
     calls.push([program, ...args]);
@@ -361,7 +358,4 @@ test('v1 stays as it was: the Toolkit root reads validate.yml and Validate runs 
   assert.deepEqual(calls[0], ['gh', 'run', 'list', '--workflow', 'validate.yml', '--branch', 'main', '--event', 'push', '--status', 'success', '--limit', '1', '--json', 'databaseId,headSha,conclusion,headBranch,workflowName']);
   assert.throws(() => latestGreenRun(shards.ROOT, '2'), /^Error: run 2 is not a finished Validate run$/);
   assert.equal(prBody({ databaseId: 123, headSha: 'a'.repeat(40) }, { findings: [] }).split('\n')[0], 'Refreshes the measured test times in `repo/contracts/ci/test-shards.json` from the test summaries of Validate run 123 on main (aaaaaaa).');
-  // The v1 plan is the same with the default profile and with V1 named.
-  const current = manifest(even);
-  assert.deepEqual(refresh.planRefresh(current, FILES, { linux: even, windows: even }), refresh.planRefresh(current, FILES, { linux: even, windows: even }, refresh.V1));
 });

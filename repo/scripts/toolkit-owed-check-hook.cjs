@@ -452,13 +452,61 @@ function pruneStamps(folder, nowMs) {
   } catch { /* nothing to prune */ }
 }
 
-// The owed check, with the permissions line added to whatever it says.
+// ---- slow-CI line ---------------------------------------------------------------------------------
+
+// A session a Toolkit launcher started (a gate, a pinned helper or task profile): nobody reads it.
+function launched(env) {
+  const { LAUNCHER_MARKERS } = require('./toolkit-governed-repo.cjs');
+  return LAUNCHER_MARKERS.some(name => String(env[name] || '').trim());
+}
+
+// Whether the owner started this chat, so a line meant for them lands where they read it. Not when a
+// Toolkit launcher started it, nor when the Claude desktop app started it from another session
+// (start_session or a side chat: its own session file names spawnedFrom), whose turn ends and first
+// reply only the session that started it sees. A terminal or IDE chat (no desktop session id) is the
+// owner's. A desktop session whose own file cannot be found or read is unknown and counts as not the
+// owner's, so the line waits for a chat that is. It walks the desktop session folders, so callers ask
+// only when a line is waiting.
+function ownerStartedChat(env, deps = {}) {
+  if (launched(env)) return false;
+  const self = String(env.CLAUDE_CODE_HOST_SESSION_ID || '');
+  if (!CLAUDE_SESSION.test(self)) return true;
+  const own = sessionFiles(env, deps).find(file => path.basename(file) === `${self}.json`);
+  if (!own) return false;
+  try {
+    const doc = JSON.parse(fs.readFileSync(own, 'utf8'));
+    return doc?.sessionId === self && !doc.spawnedFrom;
+  } catch { return false; }
+}
+
+// The daily slow-CI line (toolkit-slow-ci.cjs) for the owner at turn end, in any local chat in a
+// repository with a github.com origin, governed or not: given once per new result, whichever comes
+// first, this or a session start; never a block. It reads this computer's record only and may start
+// the day's check in the background. Cloud sessions and sessions a launcher started read nothing; a
+// side session leaves a waiting line for a chat the owner started (ownerStartedChat). Any failure
+// drops the line.
+function slowCiNote(input, deps = {}) {
+  try {
+    const env = deps.env || process.env;
+    if (!input || typeof input !== 'object' || (input.hook_event_name !== undefined && input.hook_event_name !== 'Stop')) return null;
+    if (env.CLAUDE_CODE_REMOTE === 'true' || typeof input.cwd !== 'string' || !input.cwd || launched(env)) return null;
+    const slowCi = require('./toolkit-slow-ci.cjs');
+    const record = deps.slowCi || new slowCi.SlowCiRecord({ environment: env });
+    const pending = record.peek(input.cwd);
+    if (!pending) return null;
+    // A result with no finding is saved as shown with no line, in any chat.
+    if (!pending.note) { pending.markShown(); return null; }
+    return ownerStartedChat(env, deps) && pending.markShown() ? slowCi.turnEndLine(pending.note) : null;
+  } catch { return null; }
+}
+
+// The owed check, with the permissions and slow-CI lines added to whatever it says.
 function check(input, deps = {}) {
   const result = owedCheck(input, deps);
-  const line = permissionsNote(input, deps);
-  if (!line) return result;
+  const lines = [permissionsNote(input, deps), slowCiNote(input, deps)].filter(Boolean);
+  if (!lines.length) return result;
   const output = { ...(result.output || {}) };
-  output.systemMessage = [output.systemMessage, line].filter(Boolean).join('\n');
+  output.systemMessage = [output.systemMessage, ...lines].filter(Boolean).join('\n');
   return { ...result, output };
 }
 
@@ -539,4 +587,4 @@ function main(deps = {}) {
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ check, main, scanTranscript, finishedSideSessions, owedList, reasonText, STATE_SCHEMA });
+module.exports = Object.freeze({ check, main, ownerStartedChat, scanTranscript, finishedSideSessions, owedList, reasonText, STATE_SCHEMA });
