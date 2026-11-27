@@ -542,7 +542,7 @@ test('the rules say an eligible pull request lands with no card, with one notice
   const on = gate.split('\n').find(line => line.startsWith('- With On, the controller')) || '';
   assert.match(on, /G2 PASS \(or required delta G2, or scripted carry\) is recorded, every required check is green, no other merge is running, no FAIL, disputed verdict or overdue promise is open/);
   assert.match(on, /It runs `gh pr merge N --merge --match-head-commit <full SHA>` with no card or question at any tier outside a train \(the merge hold checks scope first\), then posts one short notice: what landed, its effect, how to undo it\./);
-  assert.match(gate, /Those wait for the owner's typed `merge N`; no label grants anything\./, 'what the check refuses still waits for the owner');
+  assert.match(gate, /Those wait for the owner's typed `merge N` \(a proved refresh lands by `--land-refresh`\); no label grants anything\./, 'what the check refuses still waits for the owner');
   assert.match(gate, /RISKY ones keep the card in a train, else follow Task auto-merge\./);
   assert.match(page('repo/docs/agent-playbooks/pr-review-and-ci.md'), /- \*\*Task auto-merge:\*\* with the switch On and an eligible pull request, the merge needs no approval, card or question; one short notice follows it \(gate rules, task auto-merge\)\. Run the check before telling the owner a card will open\./);
   assert.match(page('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /exit 0 merges with no card, the notice after; scope exit 1 asks by merge card/);

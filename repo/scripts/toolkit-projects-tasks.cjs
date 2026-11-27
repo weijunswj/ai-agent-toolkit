@@ -581,7 +581,7 @@ class BindingCheck {
         const title = entry.slice(41).replace(/[^\x20-\x7e]/g, '?').slice(0, 120);
         lines.push(`CHANGED BY: ${short(entry)} ${title}`);
       }
-      if (commits.length > MAX_CHANGED_BY) lines.push(`CHANGED BY: ${commits.length - MAX_CHANGED_BY} more (git log ${short(binding.commit)}..HEAD -- ${CONTROLLER_REL})`);
+      if (commits.length > MAX_CHANGED_BY) lines.push(`CHANGED BY: ${commits.length - MAX_CHANGED_BY} more (git log --no-merges ${short(binding.commit)}..HEAD -- ${CONTROLLER_REL})`);
     }
     return { lines, exitCode: 1 };
   }

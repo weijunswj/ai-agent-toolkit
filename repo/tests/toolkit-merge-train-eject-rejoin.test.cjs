@@ -16,8 +16,7 @@ test('an ejected member rejoins a later train only once its branch restores the 
   const one = f.branch('pr-1', { 'b.txt': 'b\n' });
   const two = f.branch('pr-2', { 'c.txt': 'c\n' });
   const { out } = built(f, [f.member(1, one), f.member(2, two)]);
-  f.git('switch', '--quiet', 'toolkit-train/one'); // eject runs in a checkout of the train
-  const ejected = train.run(['eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
+  const ejected = train.run(['eject', '--manifest', out, '--branch', 'toolkit-train/one', '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
   assert.match(f.git('log', '-1', '--format=%B', ejected.reverts[1].commit), new RegExp(`^Train-Eject-Head: ${two}$`, 'm'));
   f.git('switch', '--quiet', 'main');
   f.git('merge', '--quiet', '--no-ff', '--no-edit', 'toolkit-train/one');
@@ -60,8 +59,7 @@ test('after an eject train lands, other pull requests made from main board and v
   const one = f.branch('pr-1', { 'b.txt': 'b\n' });
   const two = f.branch('pr-2', { 'c.txt': 'c\n' });
   const { out } = built(f, [f.member(1, one), f.member(2, two)]);
-  f.git('switch', '--quiet', 'toolkit-train/one'); // eject runs in a checkout of the train
-  const ejected = train.run(['eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
+  const ejected = train.run(['eject', '--manifest', out, '--branch', 'toolkit-train/one', '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
   assert.match(f.git('log', '-1', '--format=%B', ejected.reverts[1].commit), /^Train-Eject-PR: #2$/m);
   f.git('switch', '--quiet', 'main');
   f.git('merge', '--quiet', '--no-ff', '--no-edit', 'toolkit-train/one');
@@ -94,8 +92,7 @@ test('land refuses while the ejected pull request points at any commit the train
   const two = f.git('rev-parse', 'HEAD');
   f.git('switch', '--quiet', 'main');
   const { out } = built(f, [f.member(1, one), f.member(2, two)]);
-  f.git('switch', '--quiet', 'toolkit-train/one'); // eject runs in a checkout of the train
-  const ejected = train.run(['eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
+  const ejected = train.run(['eject', '--manifest', out, '--branch', 'toolkit-train/one', '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
   const live = path.join(f.root, 'live.json');
   fs.writeFileSync(live, JSON.stringify({ 70: { state: 'OPEN', head: ejected.head, body: MEMBER_BODY }, 1: { state: 'OPEN', head: one, body: MEMBER_BODY }, 2: { state: 'OPEN', head: early, body: MEMBER_BODY } }));
   const refused = train.run(['land', '--manifest', out, '--pr', '70', '--head', ejected.head, '--main', 'main', '--live', live], f.repo, f.opts);

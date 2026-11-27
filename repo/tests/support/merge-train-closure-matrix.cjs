@@ -38,8 +38,8 @@ function landOnMain(f, ref, back) {
 const exists = (f, ref, file) => spawnSync('git', ['cat-file', '-e', `${ref}:${file}`], { cwd: f.repo }).status === 0;
 
 // Running train A (#1) on main, and train B stacked on it holding #2 = X (two commits, x1 then x2)
-// and #3 = Z. Returns the commits and B's manifest file; the checkout is switched to B (build leaves it
-// where it was), since eject and catchup run in a checkout of the train.
+// and #3 = Z. Returns the commits and B's manifest file; the checkout stays on main (eject and catchup
+// take the train's branch and work in a temporary worktree of their own).
 function stackedPair(f) {
   const a = f.branch('pr-1', { 'a1.txt': 'a1\n' });
   const x1 = commitOn(f, 'pr-2', f.main, { 'x1.txt': 'x1\n' });
@@ -50,25 +50,26 @@ function stackedPair(f) {
   const stacked = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, x2), f.member(3, z)] }, 'stacked-in.json'),
     '--branch', 'toolkit-train/two', '--main', 'main', '--onto', first.result.head, '--out', out], f.repo, f.opts);
   assert.deepEqual(stacked.boarded, [2, 3], JSON.stringify(stacked.ejected));
-  f.git('switch', '--quiet', 'toolkit-train/two');
   return { a, x1, x2, z, runningHead: first.result.head, out };
 }
 
 const run = (f, ...args) => train.run(args, f.repo, f.opts);
-const eject = (f, out, main) => run(f, 'eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', main);
-const catchup = (f, out) => run(f, 'catchup', '--manifest', out, '--main', 'main');
+const eject = (f, out, main, branch = 'toolkit-train/two') => run(f, 'eject', '--manifest', out, '--branch', branch, '--pr', '2', '--reason', 'failed review', '--main', main);
+const catchup = (f, out) => run(f, 'catchup', '--manifest', out, '--branch', 'toolkit-train/two', '--main', 'main');
 const verify = (f, out, head = 'toolkit-train/two') => run(f, 'verify', '--manifest', out, '--head', head, '--main', 'main');
 
-// A command that refuses must leave the train branch and its manifest exactly as they were.
+// A command that refuses must leave the train branch and its manifest exactly as they were, and the
+// caller's checkout (eject and catchup work in a temporary worktree of their own) on main, clean.
 function assertRefusedInPlace(f, result, out, before) {
   assert.equal(result.ok, false, JSON.stringify(result));
   assert.ok(result.problems.some(problem => UNEQUAL.test(problem)), result.problems.join('\n'));
-  assert.equal(f.git('rev-parse', 'HEAD'), before.head, 'the train head is unchanged');
+  assert.equal(f.git('rev-parse', before.branch), before.head, 'the train head is unchanged');
+  assert.equal(f.git('rev-parse', '--abbrev-ref', 'HEAD'), 'main', 'the checkout stays on its branch');
   assert.equal(f.git('status', '--porcelain'), '', 'the checkout is clean');
   assert.equal(fs.readFileSync(out, 'utf8'), before.manifest, 'the manifest is unchanged');
 }
 
-const snapshot = (f, out) => ({ head: f.git('rev-parse', 'HEAD'), manifest: fs.readFileSync(out, 'utf8') });
+const snapshot = (f, out, branch = 'toolkit-train/two') => ({ branch, head: f.git('rev-parse', branch), manifest: fs.readFileSync(out, 'utf8') });
 
 // Kind: S = stacked train (runs today), P = trains side by side (later). Expect: R = refused, OK = lands.
 const MATRIX = [
@@ -81,13 +82,14 @@ const MATRIX = [
     run(f) {
       const { x2, runningHead, out } = stackedPair(f);
       landOnMain(f, runningHead);
-      landOnMain(f, x2, 'toolkit-train/two');
+      landOnMain(f, x2);
       const caught = catchup(f, out);
       assert.equal(caught.ok, true);
       const before = snapshot(f, out);
       assertRefusedInPlace(f, eject(f, out, 'main'), out, before);
       // The same eject made without the self-check (as eject did before it, or by hand) fails verify,
       // so land refuses it too.
+      f.git('switch', '--quiet', 'toolkit-train/two');
       const board = f.git('log', '--first-parent', '--format=%H', '--grep', '^Merge train: board #2 ', 'main..HEAD');
       f.git('revert', '--no-edit', caught.bump);
       const bumpRevert = f.git('rev-parse', 'HEAD');
@@ -110,7 +112,7 @@ const MATRIX = [
       const { x2, runningHead, out } = stackedPair(f);
       assert.equal(eject(f, out, runningHead).ok, true);
       landOnMain(f, runningHead);
-      landOnMain(f, x2, 'toolkit-train/two');
+      landOnMain(f, x2);
       const before = snapshot(f, out);
       assertRefusedInPlace(f, catchup(f, out), out, before);
     },
@@ -122,7 +124,7 @@ const MATRIX = [
       assert.equal(eject(f, out, runningHead).ok, true);
       const moved = commitOn(f, 'pr-2-moved', x2, { 'x3.txt': 'x3\n' });
       landOnMain(f, runningHead);
-      landOnMain(f, moved, 'toolkit-train/two');
+      landOnMain(f, moved);
       const before = snapshot(f, out);
       assertRefusedInPlace(f, catchup(f, out), out, before);
     },
@@ -135,7 +137,7 @@ const MATRIX = [
       assert.equal(eject(f, out, runningHead).ok, true);
       const w = commitOn(f, 'pr-4', x1, { 'w.txt': 'w\n' });
       landOnMain(f, runningHead);
-      landOnMain(f, w, 'toolkit-train/two');
+      landOnMain(f, w);
       const before = snapshot(f, out);
       assertRefusedInPlace(f, catchup(f, out), out, before);
     },
@@ -146,7 +148,7 @@ const MATRIX = [
       const { x1, runningHead, out } = stackedPair(f);
       const w = commitOn(f, 'pr-4', x1, { 'w.txt': 'w\n' });
       landOnMain(f, runningHead);
-      landOnMain(f, w, 'toolkit-train/two');
+      landOnMain(f, w);
       assert.equal(catchup(f, out).ok, true);
       const before = snapshot(f, out);
       assertRefusedInPlace(f, eject(f, out, 'main'), out, before);
@@ -159,7 +161,7 @@ const MATRIX = [
       const { runningHead, out } = stackedPair(f);
       const twin = commitOn(f, 'pr-5', f.main, { 'x1.txt': 'x1\n' });
       landOnMain(f, runningHead);
-      landOnMain(f, twin, 'toolkit-train/two');
+      landOnMain(f, twin);
       assert.equal(catchup(f, out).ok, true);
       const before = snapshot(f, out);
       assertRefusedInPlace(f, eject(f, out, 'main'), out, before);
@@ -172,7 +174,7 @@ const MATRIX = [
       assert.equal(eject(f, out, runningHead).ok, true);
       const twin = commitOn(f, 'pr-5', f.main, { 'x1.txt': 'x1\n' });
       landOnMain(f, runningHead);
-      landOnMain(f, twin, 'toolkit-train/two');
+      landOnMain(f, twin);
       const caught = catchup(f, out);
       assert.equal(caught.ok, true, JSON.stringify(caught));
       const checked = verify(f, out);
@@ -193,9 +195,8 @@ const MATRIX = [
       const x2 = commitOn(f, 'pr-2', x1, { 'x2.txt': 'x2\n' });
       const w = commitOn(f, 'pr-4', x1, { 'w.txt': 'w\n' });
       const { out } = built(f, [f.member(2, x2), f.member(4, w)]);
-      f.git('switch', '--quiet', 'toolkit-train/one'); // eject and catchup run in a checkout of the train
-      const before = snapshot(f, out);
-      assertRefusedInPlace(f, run(f, 'eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main'), out, before);
+      const before = snapshot(f, out, 'toolkit-train/one');
+      assertRefusedInPlace(f, eject(f, out, 'main', 'toolkit-train/one'), out, before);
     },
   },
   { row: 14, kind: 'P, S', expect: 'R', sequence: 'main moved since the last bump, no catch-up', elsewhere: ['toolkit-merge-train.test.cjs', 'land checks live heads, main and RISKY owner OKs before it names the one merge'] },
@@ -206,7 +207,6 @@ const MATRIX = [
       const z = f.branch('pr-3', { 'z.txt': 'z\n' });
       landOnMain(f, landed);
       const { result, out } = built(f, [f.member(2, landed), f.member(3, z)]);
-      f.git('switch', '--quiet', 'toolkit-train/one'); // eject and catchup run in a checkout of the train
       assert.deepEqual(result.boarded, [3]);
       assert.equal(result.ejected[0].reason, 'already on the train base');
       const checked = verify(f, out, result.head);
@@ -239,8 +239,7 @@ const MATRIX = [
       const x2 = commitOn(f, 'pr-2', x1, { 'x2.txt': 'x2\n' });
       const z = f.branch('pr-3', { 'z.txt': 'z\n' });
       const { out } = built(f, [f.member(2, x2), f.member(3, z)]);
-      f.git('switch', '--quiet', 'toolkit-train/one'); // eject and catchup run in a checkout of the train
-      const ejected = run(f, 'eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main');
+      const ejected = eject(f, out, 'main', 'toolkit-train/one');
       assert.equal(ejected.ok, true, JSON.stringify(ejected));
       const live = path.join(f.root, 'live.json');
       fs.writeFileSync(live, JSON.stringify({ 9: { state: 'OPEN', head: ejected.head, body: MEMBER_BODY }, 2: { state: 'CLOSED', head: x2, body: MEMBER_BODY }, 3: { state: 'OPEN', head: z, body: MEMBER_BODY } }));
@@ -262,7 +261,7 @@ const MATRIX = [
     run(f) {
       const { runningHead, out } = stackedPair(f);
       landOnMain(f, runningHead);
-      landOnMain(f, f.branch('pr-6', { 'q.txt': 'q\n' }), 'toolkit-train/two');
+      landOnMain(f, f.branch('pr-6', { 'q.txt': 'q\n' }));
       const ejected = eject(f, out, 'main');
       assert.equal(ejected.ok, true, JSON.stringify(ejected));
       assert.equal(catchup(f, out).ok, true);

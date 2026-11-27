@@ -83,7 +83,7 @@ test('build stacks onto the manifest onto at the head find saw, prints the base 
   assert.equal(stacked.bump, null, 'a stacked train takes no bump');
   assert.deepEqual(stacked.steps, [
     "open this train's pull request against train #50's branch, not main: gh pr create --head toolkit-train/two --base toolkit-train/one (with the body from body)",
-    `once train #50 lands: gh pr edit toolkit-train/two --base main, then node repo/scripts/toolkit-merge-train.cjs catchup --manifest ${out} in a clean checkout of toolkit-train/two`,
+    `once train #50 lands: gh pr edit toolkit-train/two --base main, then node repo/scripts/toolkit-merge-train.cjs catchup --manifest ${out} --branch toolkit-train/two`,
   ]);
   const boarded = JSON.parse(fs.readFileSync(out, 'utf8'));
   assert.deepEqual([boarded.stacked, boarded.onto], [true, onto]);
@@ -102,10 +102,9 @@ test('build stacks onto the manifest onto at the head find saw, prints the base 
   f.git('commit', '--quiet', '-m', 'main moves past the landed train');
   // A stacked train left open after the train under it landed is not a train that landed: the
   // refusal names catchup, or find would write the same onto again.
-  assert.throws(() => train.run(['build', '--manifest', manifest, '--branch', 'toolkit-train/x', '--main', 'main'], f.repo, f.opts), /train #50 at [0-9a-f]{12} does not contain main: if it landed, run find again; if it is still open \(stacked on a train that landed\), catch it up first \(catchup in a clean checkout of toolkit-train\/one\), then run find again$/);
+  assert.throws(() => train.run(['build', '--manifest', manifest, '--branch', 'toolkit-train/x', '--main', 'main'], f.repo, f.opts), /train #50 at [0-9a-f]{12} does not contain main: if it landed, run find again; if it is still open \(stacked on a train that landed\), catch it up first \(catchup --branch toolkit-train\/one\), then run find again$/);
 
-  f.git('switch', '--quiet', 'toolkit-train/two');
-  const caught = train.catchup(f.repo, boarded, { main: 'main', out });
+  const caught = train.catchup(f.repo, boarded, { main: 'main', out, branch: 'toolkit-train/two' });
   assert.equal(caught.ok, true, JSON.stringify(caught));
   const after = JSON.parse(fs.readFileSync(out, 'utf8'));
   assert.deepEqual([after.stacked, after.onto], [undefined, undefined], 'catchup drops stacked and onto, so a rebuild starts from main');
