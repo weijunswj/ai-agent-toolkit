@@ -1159,8 +1159,8 @@
     {
       "file": "repo/contracts/agent-rules/gate-rules.md",
       "rule": "That check exits 1 for bindings and their schemas/readers",
-      "rule_sha": "b10a3ddee099",
-      "covers": "The auto-merge eligibility check exits 1 for every listed path family and for a major bump, so those wait for the owner's typed merge; the merge hold lifts only CI workflow copies a refresh's copy proof shows are Toolkit main's own render, so an unproved refresh still waits.",
+      "rule_sha": "1424f0197052",
+      "covers": "The auto-merge eligibility check exits 1 for every listed path family and for a major bump, so those wait for the owner's merge OK (the merge card, or a typed merge where there is none); the merge hold lifts only CI workflow copies a refresh's copy proof shows are Toolkit main's own render, so an unproved refresh still waits.",
       "enforced_by": [
         {
           "kind": "script",
