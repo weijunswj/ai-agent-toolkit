@@ -1,5 +1,45 @@
 # Toolkit Changelog
 
+## 3.204.0 (guided governance setup)
+
+### Added
+
+- `toolkit governance` in a repository that is not governed asks three short questions in one message, each part explained first and the questions last in the global question shape: turn governance on (yes, later or no), the evidence store (this repository's own private store, another private repository, or no store) and task auto-merge with merge train (yes or no). Answer in your own words or with the letters, such as `1A 2A 3A`.
+- Where governance is on, `toolkit governance` shows one summary: the steps still left with their commands in PowerShell blocks (Toolkit permissions first, counting your own lines without listing them, then the Governance App), then one table of every part with its state and what it does. Changes are said in words: turn off governance, task auto-merge on or off, or change store.
+- A tap on a question card the app chose to show counts as your reply to Toolkit's governance questions, the same way a typed reply does.
+- After your answer the agent carries the setup through in the same turn: it waits for the setup pull request's checks, merges it only through your approval on the merge card, runs the post-merge finish and shows the summary.
+
+### Changed
+
+- Toolkit no longer forces a question card or a background wait for the governance questions: how they show (text, a card or the end-of-turn box) is the app's choice. Toolkit's merge card is unchanged.
+- The setup pull request writes `min_toolkit` with this Toolkit's version (which turns on the setup hold) and, when you answer yes to task auto-merge, merge trains on with it.
+- The old governance question bank (its table of codes such as `1.2=B` and the `explain` command) is retired.
+
+## 3.203.0 (the parallel CI shards offer retires)
+
+### Added
+
+- The CI check-up flags when shards would pay: `speed.shards` is a GAP for a test job with no matrix that took 10 minutes or more on recent green runs, with a suggested shard count (one per 10 minutes, at most 8) and the repository's tracked test files. `speed.shards-lopsided` is a GAP for legs of one matrix split (they differ only in a split axis such as `shard` or `index`, never in runner images or versions) whose median times are at least 1.5 times and 2 minutes apart.
+- The controller check raises both as ATTENTION on its `ci` row, with the next action: the repository's controller arranges or rebalances the shards in the repository's own CI.
+- The fast-tests-and-sharding playbook has a new section, Arrange Shards In This Repository's CI, for any stack: decide, measure per-file times, split tracked files, copy the job into a matrix with the same setup, prove every file ran once, swap the required check, then remove the serial step.
+
+### Changed
+
+- The CI check-up's unsharded test job limit (`budgets.unsharded_test_job_seconds`) defaults to 600 seconds instead of 300, and the old judgement row for a long test job with no matrix is replaced by `speed.shards`.
+- The CI check-up reads job times from the newest green runs of each workflow (`--runs`, default 5, per workflow), so frequent scheduled runs no longer crowd the CI runs out of the sample; a workflow whose runs could not be listed is named in one CHECK line. A check-up with GitHub access takes longer in a repository with many workflows.
+- The test files counted beside a shard finding are tracked files only (`git ls-files`), so untracked and ignored folders such as `.claude/` or `.tmp/` never count; outside a git checkout the count says it was not counted.
+- A rules refresh pull request removes the test shards and Shard Timings copies (found by their Toolkit marker) and the shard list an older Toolkit left in a repository, each with one line saying why. The governance check names each one as a retired Toolkit file, so the session start asks for that refresh. A removal never passes the copy proof, so that pull request waits for the owner's merge.
+- The binding key `ci_shards` is retired: it is still read, so a binding an older Toolkit wrote stays valid, and every binding writer (a switch pull request, the instruction copies cleanup) deletes its line in the file's own layout.
+- The session start removes the shard offer's memory of closed shard pull requests (`ci-shards-closed.v1.json`) from Toolkit's user-state folder.
+- The leftover file scan lists a retired test shards or Shard Timings copy wherever it is, governance on included.
+- Toolkit's own shards, its shard manifest and its own Shard Timings workflow are unchanged.
+
+### Removed
+
+- The governance question bank no longer has a Parallel CI shards row or a `shards=` override. A reply that still says `shards=` gets one line, "Toolkit no longer sets up CI shards; the CI check-up flags when they would pay", and nothing is written.
+- Toolkit no longer writes a shard list (`.github/toolkit-test-shards.json`) or copies the test shards workflow and Shard Timings into other repositories, and no turn-on or binding pull request records `ci_shards`.
+- The governed shard runner is gone: `run-tests.cjs --repo-root` is a usage error, `refresh-shard-timings.cjs` takes no `--branch` and refreshes only Toolkit's own shard manifest, and `repo/scripts/governed-test-shards.cjs`, `repo/scripts/toolkit-ci-shards-offer.cjs` and `repo/contracts/ci/governed-test-shards.yml` are removed.
+
 ## 3.202.0
 
 ### Changed

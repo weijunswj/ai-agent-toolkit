@@ -310,18 +310,18 @@ test('real runner handles large GitHub responses, projects the PR list and reads
   assert.ok(!calls.some(call => call.args.join(' ').includes('recursive=')));
 });
 
-test('first yes opens the governance bank, a hand-built yes is refused, and the bank publishes one complete marked adoption', async t => {
+test('first yes opens the guided setup, a hand-built yes is refused, and the setup publishes one complete marked adoption', async t => {
   const f = fixture(t), github = fakeGitHub(f);
   const options = { registryOptions: f.registryOptions, environment: {}, proposalTransport: github.transport };
   gate.startSession({ cwd: f.cwd, session_id: 'owner', source: 'startup' }, options);
   const hold = new gate.PromptHold(options);
   assert.equal(hold.decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'Do this work' }).action, 'pass');
-  // The owner's "yes" reaches the agent with a reply ticket; it records nothing and opens the bank.
+  // The owner's "yes" reaches the agent with a reply ticket; it records nothing and opens the guided setup.
   const reply = hold.decide({ cwd: f.cwd, sessionId: 'owner', prompt: 'yes' });
   assert.equal(reply.action, 'pass');
   const answer = hold.answerTicket((/ ANSWER ([0-9a-f]{32})\n/.exec(reply.context) || [])[1], 'yes');
   assert.equal(answer.ok, true, answer.text);
-  assert.match(answer.text, /question bank/);
+  assert.match(answer.text, /guided setup/);
   assert.match(answer.text, /toolkit-governance\.cjs" setup/);
   assert.match(answer.text, /Build nothing by hand/);
   assert.doesNotMatch(answer.text, /repository-agent-rules|publish --run|governance discover/);
@@ -340,7 +340,7 @@ test('first yes opens the governance bank, a hand-built yes is refused, and the 
   const stale = f.owner.request(f.cwd, 'yes', run);
   const binding = prepareAdoption(f, { full: false, rules: true });
   assert.equal(await cli.main(['publish', '--run', stale.run]), 2);
-  assert.match(stderr.join(''), /published only from the governance question bank/);
+  assert.match(stderr.join(''), /published only from the guided governance setup/);
   assert.equal(github.read().calls.filter(call => call.input).length, 0, 'a hand-built yes causes no GitHub writes');
   // A working tree prepared with the programme file and the instruction copies older turn-ons wrote:
   // the bank adds the plain-text check and carries the binding and CI files only. The installed
@@ -363,23 +363,23 @@ test('first yes opens the governance bank, a hand-built yes is refused, and the 
   assert.equal(published.files['.github/plain-text.json'], `${JSON.stringify(installer.STARTING_CONFIG, null, 2)}\n`);
   assert.equal(published.files['.github/workflows/plain-text.yml'], fs.readFileSync(path.join(__dirname, '..', '..', 'skills', 'secure-ci-cd', 'templates', 'github-actions', 'plain-text.yml'), 'utf8').replace(/\r\n/g, '\n'));
   for (const name of [...REQUIRED_FILES.filter(entry => entry !== governance.BINDING_FILE), '.github/plain-text-baseline.json', '.github/dependabot.yml']) assert.equal(fs.existsSync(path.join(f.cwd, name)), false, `not in the checkout: ${name}`);
-  // The bank writes both switches off with the turn-on, as it showed them, and requires the plain-text
-  // check its own workflow adds next to the check the prepared binding names.
-  assert.deepEqual(JSON.parse(published.files[governance.BINDING_FILE]), { ...binding, required_checks: ['plain-text', 'validate'], task_prs: { auto_merge: 'off', merge_train: 'off' } });
+  // All recommended writes task auto-merge with merge train on with the turn-on, and requires the
+  // plain-text check its own workflow adds next to the check the prepared binding names.
+  assert.deepEqual(JSON.parse(published.files[governance.BINDING_FILE]), { ...binding, required_checks: ['plain-text', 'validate'], task_prs: { auto_merge: 'after-gates', merge_train: 'on' } });
   // The fixed summary: what merging does, what the pull request holds and what finishes after the merge,
   // then one closing line after the owner's commands.
   const said = stdout.join('');
   assert.match(said, /prepared the governance turn-on pull request: https:\/\/github\.com\/example-owner\/example-repo\/pull\/1\./);
   assert.match(said, /It holds: \.github\/toolkit-programme\.json, .*\.github\/workflows\/plain-text\.yml/);
   assert.doesNotMatch(said, /It holds: .*(AGENTS|CLAUDE)\.md/, 'no instruction copies');
-  assert.match(said, /the next session here finishes on its own: default-branch protection/);
+  assert.match(said, /After the merge, Toolkit finishes the setup on its own: default-branch protection/);
   assert.doesNotMatch(said, /no required checks yet/, 'a binding with required checks has no protection wait line');
   assert.match(said, /^Nothing was written to your checkout, so after the merge the next session here can bring your local default branch up to date on its own\.$/m);
   assert.doesNotMatch(said, /before pulling|untracked files/, 'no pull step for the owner');
-  assert.match(said, /Run the command above, then merge https:\/\/github\.com\/example-owner\/example-repo\/pull\/1\. Nothing else is needed from you\.\n*$/);
+  assert.match(said, /Next: once its checks pass, approve merging https:\/\/github\.com\/example-owner\/example-repo\/pull\/1 when Toolkit asks\. Toolkit then finishes the setup and gives you two commands to run\.\n*$/);
   assert.match(said, /already holds these answers/, 'the same answers again leave the open pull request as it is');
-  // The bank's App row recommends Set up, so the owner gets the App setup command instead of the by-hand steps.
-  assert.match(stdout.join(''), /^node "[^"]+toolkit-governance-app-setup\.cjs" --repo \S+\/\S+ --store \S+$/m);
+  // The owner's App and permissions commands come in the summary after the merge, never here.
+  assert.doesNotMatch(stdout.join(''), /toolkit-governance-app-setup\.cjs/);
   assert.doesNotMatch(stdout.join(''), /github\.com\/settings\/apps\/new\?/);
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).state, 'UNDECIDED');
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).programme_records_bind, false);
@@ -404,28 +404,28 @@ test('a re-run with new answers while the turn-on pull request is open updates t
   prepareAdoption(f);
   require('node:child_process').execFileSync('git', ['init', '--quiet', f.cwd], { stdio: 'ignore', windowsHide: true });
   const stdout = [], answers = [];
-  // The first answer's render carries shard files; the later answers no longer make them.
-  const SHARDS = '.github/workflows/toolkit-test-shards.yml', LIST = '.github/toolkit-test-shards.json';
+  // The first answer's render carries a workflow copy (an older Toolkit's test shards copy); the later
+  // answers no longer make it.
+  const SHARDS = '.github/workflows/toolkit-test-shards.yml';
   let rendered = { [SHARDS]: `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED test-shards toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)}\nname: shards\n` };
-  fs.writeFileSync(path.join(f.cwd, LIST), '{"shards":[]}\n');
   const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
   const cli = new ToolkitGovernanceCli({ cwd: f.cwd, registryOptions: f.registryOptions, proposalTransport: github.transport, cloudWorkflows: () => ({ files: rendered, warning: null }),
     stdout: { write: text => stdout.push(text) }, stderr: { write: text => stdout.push(text) },
     discoveryGh: () => ({ ok: false, reason: 'offline' }), interactive: true, environment: {}, ask: async () => answers.shift() ?? '',
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
     permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }) });
-  answers.push('all recommended');
+  // The prepared programme file names the store, so the questions are governance (1) and task auto-merge (2).
+  answers.push('1A 2B');
   assert.equal(await cli.main(['setup']), 0, stdout.join(''));
   assert.equal(JSON.parse(github.read().files[governance.BINDING_FILE]).task_prs.auto_merge, 'off');
-  assert.ok(github.read().files[SHARDS] && github.read().files[LIST], 'the first answer carries the shard files');
+  assert.ok(github.read().files[SHARDS], 'the first answer carries the workflow copy');
   rendered = {};
-  fs.rmSync(path.join(f.cwd, LIST));
   // A workflow someone else pushed to the turn-on branch is not Toolkit's copy, so it stays.
   const MINE = '.github/workflows/mine.yml';
   // GitHub also shows the earlier head for one read after the branch moves; the read-back waits for it.
   fs.writeFileSync(path.join(f.root, 'github.json'), JSON.stringify({ ...github.read(), lag: 1, files: { ...github.read().files, [MINE]: 'name: mine\n' } }));
-  // Any answer to this bank turns governance on; this one also sets task auto-merge on.
-  answers.push('1.1=B');
+  // This answer also sets task auto-merge on.
+  answers.push('1A 2A');
   assert.equal(await cli.main(['setup']), 0, stdout.join(''));
   const published = github.read();
   assert.equal(published.calls.filter(call => call.args[1].endsWith('/pulls') && call.input).length, 1, 'still one pull request');
@@ -433,15 +433,14 @@ test('a re-run with new answers while the turn-on pull request is open updates t
   assert.equal(JSON.parse(published.files[governance.BINDING_FILE]).task_prs.auto_merge, 'after-gates', 'the open pull request carries the new answer');
   assert.match(published.pr.body, /<!-- toolkit-governance-decision -->/);
   // Files the new answers no longer make leave the pull request, and its description says so.
-  assert.equal(published.files[SHARDS], undefined, 'the shard workflow left the pull request');
-  assert.equal(published.files[LIST], undefined, 'the shard list left the pull request');
+  assert.equal(published.files[SHARDS], undefined, 'the workflow copy left the pull request');
   assert.match(published.pr.body, /No longer in this pull request[^]*toolkit-test-shards\.yml/);
   assert.equal(published.files[MINE], 'name: mine\n', 'a workflow without the Toolkit marker is left on the branch');
   assert.doesNotMatch(published.pr.body, /mine\.yml/);
   assert.match(stdout.join(''), /updated the open governance turn-on pull request with these answers: https:\/\/github\.com\/example-owner\/example-repo\/pull\/1\./);
   // A branch that also holds a file Toolkit did not put there is not ours to change.
   fs.writeFileSync(path.join(f.root, 'github.json'), JSON.stringify({ ...published, foreign: 'product.txt' }));
-  answers.push('1.1=A');
+  answers.push('all recommended');
   assert.equal(await cli.main(['setup']), 2);
   assert.equal(github.read().commits, 2, 'nothing was pushed to a changed branch');
 });
@@ -782,7 +781,7 @@ test('an off pull request may remove the marked cloud sweep copies, and nothing 
     if (endpoint.includes('/contents/.github/toolkit-programme.json')) return json({ type: 'file', sha: 'c'.repeat(40), encoding: 'base64', size: Buffer.byteLength(text), content: Buffer.from(text).toString('base64') });
     if (endpoint.includes('/pulls/1/files')) return json(files);
     if (endpoint.includes(`/contents/.github/workflows?ref=${'9'.repeat(40)}`)) return json(Object.keys(atBase).map(name => ({ type: 'file', name: name.split('/').pop() })));
-    for (const name of [sweep, gate, shards, other, ...require('./support/default-cloud-workflows.cjs').SHARDS.map(row => row.file)]) if (endpoint.includes(`/contents/${name}?ref=${'9'.repeat(40)}`)) {
+    for (const name of [sweep, gate, shards, other, '.github/workflows/toolkit-shard-timings.yml']) if (endpoint.includes(`/contents/${name}?ref=${'9'.repeat(40)}`)) {
       if (atBase[name] === undefined) throw Object.assign(Error('missing'), { code: 'PROPOSAL_NOT_FOUND' });
       return json({ type: 'file', encoding: 'base64', content: Buffer.from(atBase[name]).toString('base64') });
     }
@@ -844,7 +843,7 @@ test('recovering an interrupted off branch needs every listed removal done, and 
   assert.equal(extra.writes, 0);
 });
 
-test('a disabled repository turned on through the bank: the bank shown before the answer names the post-merge settings, and a binding with no required checks gives the owner no required_checks edit or migrate step', async t => {
+test('a disabled repository turned back on: the turn-on names the post-merge settings before the owner approves the merge, and a binding with no required checks gives the owner no required_checks edit or migrate step', async t => {
   const f = fixture(t);
   recordMerged(f.cwd, { registryPath: f.registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: 'example-owner/example-repo', governance: 'disabled' }) });
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).state, 'DISABLED');
@@ -852,7 +851,7 @@ test('a disabled repository turned on through the bank: the bank shown before th
   fs.writeFileSync(path.join(f.cwd, governance.BINDING_FILE), JSON.stringify({ ...binding, required_checks: [] }));
   const github = fakeGitHub(f);
   const finishing = require('../scripts/toolkit-governance-finish.cjs');
-  const stdout = [], shown = [], answers = ['1.1=B'];
+  const stdout = [], shown = [], answers = ['1B'];
   const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
   const cli = new ToolkitGovernanceCli({ cwd: f.cwd, registryOptions: f.registryOptions, proposalTransport: github.transport, cloudWorkflows: () => ({ files: {}, warning: null }),
     stdout: { write: text => stdout.push(text) }, stderr: { write: text => stdout.push(text) },
@@ -861,8 +860,9 @@ test('a disabled repository turned on through the bank: the bank shown before th
     refresh: () => ({ refreshed: true }), hookReader: () => null, queueReader: () => null,
     permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0 }) });
   assert.equal(await cli.main(['setup']), 0, stdout.join(''));
-  assert.match(shown[0], /\| 1\.1 \| GitHub governance \| Off \| A\. Keep current \| B\. Turn on \|/);
-  assert.ok(shown[0].includes(finishing.WHAT), 'Turn on is not recommended here, yet the shown bank names what it also turns on');
+  assert.match(shown[0], /^\*\*1\. Question: Turn GitHub governance back on for example-owner\/example-repo\?\*\*$/m);
+  assert.match(shown[0], /^   - \*\*A\. Keep it off \(my pick\):\*\* /m);
+  assert.ok(stdout.join('').slice(shown[0].length).includes(finishing.WHAT), 'the turn-on names what the finish also turns on, before the owner approves the merge');
   const id = governance.readIdentity(f.cwd).repository_id;
   assert.equal(finishing.entryFor(f.registryOptions, id)?.status, 'pending', 'the turn-on is marked for the post-merge finish');
   const after = stdout.join('').slice(shown[0].length);

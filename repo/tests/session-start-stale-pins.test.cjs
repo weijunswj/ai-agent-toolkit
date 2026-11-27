@@ -142,7 +142,7 @@ test('the session line names every copied file and the vendored plain-text check
   assert.ok(text.includes(`⚠️ Stale Toolkit copies: a refresh would change ${files[0]} (edited by hand), ${files[1]} (missing), ${files[2]} (missing), ${files[3]} (missing), ${files[4]} (older copy), ${files[5]} (older copy). ${WITHOUT_ASKING} \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${repo.repo} --refresh-pr\` from it; it opens or updates one pull request, which the controller lands once green where task auto-merge is on (\`--land-refresh\` says when), else the owner merges it.`), text);
   // The same files the refresh itself would change, and no others.
   const refresh = require('../scripts/toolkit-cloud-workflows-refresh.cjs');
-  assert.deepEqual(refresh.pending({ target: repo.repo, root: toolkit.root, commit: toolkit.B, ciShards: null }).rows.map(row => row.file), files);
+  assert.deepEqual(refresh.pending({ target: repo.repo, root: toolkit.root, commit: toolkit.B }).rows.map(row => row.file), files);
   // Someone else's file in a copied workflow's place is left out of the refresh, so it is not named.
   fs.writeFileSync(at('.github/workflows/dependency-auto-merge.yml'), 'name: ours\non: push\n');
   assert.doesNotMatch(line(), /dependency-auto-merge\.yml/);

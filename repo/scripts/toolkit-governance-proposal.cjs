@@ -18,8 +18,6 @@ const PROMPT_INTERVAL_MS = 60000;
 const SHA = /^[a-f0-9]{40}$/;
 const EPOCH = /^[a-f0-9]{32}$/;
 function fail(code) { throw Object.assign(new Error(code), { code }); }
-// The branch a parallel CI shards answer is prepared on (publishCiShards).
-const SHARDS_BRANCH = /^toolkit\/(?:switches-[a-z0-9-]+-)?ci-shards-(?:yes|never)-/;
 const cloudFiles = () => require('./toolkit-cloud-workflows.cjs').DEFAULT_FILES;
 // The Dependabot settings the turn-on adds where missing (toolkit-governance-adopt.cjs).
 const securityFiles = () => require('./toolkit-governance-security.cjs').DEPENDABOT_NAMES;
@@ -27,7 +25,7 @@ const ownerFiles = () => require('./toolkit-governance-owner-files.cjs');
 const READBACK_TRIES = 4, READBACK_WAIT_MS = 500;
 function key(value) { return crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 32); }
 // A yes is published only by the governance question bank, whose script makes every piece itself.
-const BANK_ONLY = 'A yes is published only from the governance question bank, which makes the store, parent issue, programme file and CI checks itself.';
+const BANK_ONLY = 'A yes is published only from the guided governance setup, which makes the store, parent issue, programme file and CI checks itself.';
 // The files every turn-on pull request carries: the programme file and the plain-text check. A yes
 // missing any of them is refused. The installed Toolkit delivers the governed rules and playbooks,
 // so no instruction file is required or added.
@@ -44,14 +42,10 @@ function missingFiles(files) { return REQUIRED_FILES.filter(name => typeof files
 // workflow left out because a file Toolkit did not write is in its place, or because this repository
 // lacks what it needs, and `added` the workflows this repository did not have.
 const CLOUD_FIX = 'run node repo/scripts/toolkit-cloud-workflows.cjs --repo <this repository> from a Toolkit checkout on main, commit the copies to the governance pull request, then run the governance check (toolkit-governance.cjs check) in this repository';
-// `ciShards` is the proposed binding's ci_shards answer, so the shard copies follow the pull request's
-// own answer rather than this computer's last read of the merged binding. `root` and `commit` (the
-// Toolkit checkout and the commit to pin) are only for tests.
+// `root` and `commit` (the Toolkit checkout and the commit to pin) are only for tests.
 // `source` is the Toolkit git checkout to render from (by default this copy, or the managed checkout
 // from a plugin copy).
-// `overlay` is the folder the turn-on rendered its own files into, outside the checkout (a first shard
-// list among them).
-function cloudWorkflowFiles(cwd, { root = null, commit = null, ciShards = null, source: chosen = undefined, overlay = null } = {}) {
+function cloudWorkflowFiles(cwd, { root = null, commit = null, source: chosen = undefined } = {}) {
   // From a plugin copy the copies come from the managed checkout, rendered by that checkout's own
   // installer, so the render logic always matches the commit the copies are pinned to. Its rows are read
   // with this copy's own helpers, since that checkout may be another Toolkit version.
@@ -60,7 +54,7 @@ function cloudWorkflowFiles(cwd, { root = null, commit = null, ciShards = null, 
   const workflows = own.installerAt(source);
   if (workflows.isToolkitCheckout(cwd)) return { files: {}, warning: null };
   try {
-    const result = workflows.plan({ repo: cwd, ciShards, ...(root ? { root } : {}), ...(commit ? { commit } : {}), ...(overlay ? { overlay } : {}) });
+    const result = workflows.plan({ repo: cwd, ...(root ? { root } : {}), ...(commit ? { commit } : {}) });
     const missing = new Set(result.rows.filter(row => row.state === 'missing' && !row.held).map(row => row.file));
     return {
       files: Object.fromEntries(own.writableRows(result.rows).map(row => [row.file, row.expected])), warning: null,
@@ -82,12 +76,12 @@ function bindingV2(binding) {
 }
 
 // The turn-on file set: the programme file, the CI files (each read from `rendered`, the folder outside
-// the checkout the bank rendered the missing plain-text check, Dependabot settings and shard list into,
-// else from the checkout, which already has it) and the cloud workflows. Instruction files, product
-// files and backups never join it. A link or folder in a cloud workflow's place is never read: the plan
-// already leaves that workflow out and names it, so it does not stop the turn-on.
+// the checkout the bank rendered the missing plain-text check and Dependabot settings into, else from
+// the checkout, which already has it) and the cloud workflows. Instruction files, product files and
+// backups never join it. A link or folder in a cloud workflow's place is never read: the plan already
+// leaves that workflow out and names it, so it does not stop the turn-on.
 function adoptionFiles(cwd, text, cloud = { files: {} }, rendered = null) {
-  const names = [...PLAIN_TEXT_FILES, '.github/plain-text-baseline.json', ...cloudFiles(), require('./governed-test-shards.cjs').MANIFEST_REL, ...securityFiles()];
+  const names = [...PLAIN_TEXT_FILES, '.github/plain-text-baseline.json', ...cloudFiles(), ...securityFiles()];
   const files = { [cache.BINDING_PATH]: text };
   for (const name of names) {
     const base = rendered && fs.existsSync(path.join(rendered, name)) ? rendered : cwd;
@@ -202,7 +196,7 @@ class GovernanceProposals {
     const run = sessionId && EPOCH.test(epoch) ? key(`${sessionId}:${epoch}`) : null;
     const request = value.requests.find(item => item.run === run && ['yes', 'no'].includes(item.answer) && this.#now() - new Date(item.at) >= 0 && this.#now() - new Date(item.at) <= cache.FRESH_MS);
     if (!request) return null;
-    return { kind: 'preparing', ...request, text: `Toolkit: the owner's ${request.answer} is pending for this run. ${request.answer === 'yes' ? `${BANK_ONLY} Show the owner the bank again with node "${path.join(__dirname, 'toolkit-governance.cjs')}" setup and build nothing by hand.` : `Prepare and publish one governance decision pull request with node "${path.join(__dirname, 'toolkit-governance.cjs')}" publish --run ${request.run}. Then show its external effects and ask the owner to merge it now.`} Governance stays as merged on the default branch.` };
+    return { kind: 'preparing', ...request, text: `Toolkit: the owner's ${request.answer} is pending for this run. ${request.answer === 'yes' ? `${BANK_ONLY} Show the owner the setup questions again with node "${path.join(__dirname, 'toolkit-governance.cjs')}" setup and build nothing by hand.` : `Prepare and publish one governance decision pull request with node "${path.join(__dirname, 'toolkit-governance.cjs')}" publish --run ${request.run}. Then show its external effects and ask the owner to merge it now.`} Governance stays as merged on the default branch.` };
   }
   // A failed query is unknown, never "there are no proposals". Closed unmerged PRs end requests.
   // One PR-state read per minute across chats. Claim before I/O, so even a killed hook is throttled.
@@ -297,7 +291,7 @@ class GovernanceProposals {
     // The bank's own answer also refreshes an open turn-on pull request; any other caller reuses the
     // open one as it is.
     const refresh = Boolean(yes && matches[0] && bank && this.#transport.update);
-    const cloud = yes && (!matches[0] || refresh) ? this.#cloudWorkflows(cwd, { ciShards: prepared.binding.ci_shards?.answer || null, ...(rendered ? { overlay: rendered } : {}) }) : { files: {}, warning: null };
+    const cloud = yes && (!matches[0] || refresh) ? this.#cloudWorkflows(cwd) : { files: {}, warning: null };
     const files = matches[0] && !refresh ? null : yes ? adoptionFiles(cwd, prepared.text, cloud, rendered) : { [cache.BINDING_PATH]: prepared.text };
     // A bank turn-on requires the checks its own workflows add, next to any the default branch already
     // requires, so default-branch protection has them from the merge on.
@@ -387,8 +381,8 @@ class GitHubProposalTransport {
     catch (error) { if (error.code === 'PROPOSAL_NOT_FOUND') return null; throw error; }
   }
   // The Toolkit's cloud workflow copies on the default branch at `ref`: each workflow file that starts
-  // with the rendered-copy marker of a copy that may sit at its path (the sweep, its gate, Shard Timings,
-  // and the test shards copy at whatever name its shard list chose).
+  // with the rendered-copy marker of a copy that may sit at its path (the sweep, its gate, and the
+  // retired Shard Timings and test shards copies, the latter at whatever name its shard list chose).
   #cloudCopies(repository, ref) {
     const workflows = require('./toolkit-cloud-workflows.cjs');
     const listing = this.#optional(`repos/${repository}/contents/.github/workflows?ref=${ref}`);
@@ -473,26 +467,6 @@ class GitHubProposalTransport {
     }
     return { repository, number: pr.number, head: pr.head.sha, url: pr.html_url, answer: binding.governance === 'disabled' ? 'no' : 'yes', state: pr.state };
   }
-  // The open pull requests that hold a parallel CI shards answer: this repository's own
-  // toolkit/...ci-shards-yes|never-... branches (publishCiShards), newest first.
-  openCiShards(repository) {
-    this.#auth();
-    const prs = this.#api(`repos/${repository}/pulls?state=open&per_page=100`, undefined, null, 'map({number, url: .html_url, ref: .head.ref, repo: .head.repo.full_name})');
-    if (!Array.isArray(prs) || prs.length === 100) fail('PROPOSAL_LIST_INCOMPLETE');
-    return prs.filter(pr => String(pr.repo).toLowerCase() === repository.toLowerCase() && SHARDS_BRANCH.test(String(pr.ref)))
-      .map(pr => ({ number: pr.number, url: pr.url }));
-  }
-  // The newest shard split this repository's owner closed without merging: a closed, unmerged
-  // toolkit/...ci-shards-yes-... pull request of its own (publishCiShards), or null. Reads the 100 most
-  // recently updated closed pull requests; an older close is not asked about.
-  closedCiShards(repository) {
-    this.#auth();
-    const prs = this.#api(`repos/${repository}/pulls?state=closed&sort=updated&direction=desc&per_page=100`, undefined, null, 'map({number, url: .html_url, ref: .head.ref, repo: .head.repo.full_name, merged: (.merged_at != null)})');
-    if (!Array.isArray(prs)) fail('PROPOSAL_LIST_INCOMPLETE');
-    const split = prs.filter(pr => pr.merged === false && Number.isInteger(pr.number) && String(pr.repo).toLowerCase() === repository.toLowerCase()
-      && SHARDS_BRANCH.test(String(pr.ref)) && /ci-shards-yes-/.test(String(pr.ref))).sort((a, b) => b.number - a.number)[0];
-    return split ? { number: split.number, url: split.url } : null;
-  }
   list(repository) {
     const prs = this.#api(`repos/${repository}/pulls?state=open&per_page=100`, undefined, null, `map({number, marked: ((.body // "") | contains("${MARKER}"))})`);
     if (!Array.isArray(prs) || prs.length === 100) fail('PROPOSAL_LIST_INCOMPLETE');
@@ -524,47 +498,6 @@ class GitHubProposalTransport {
     const meaning = Object.entries(changes).map(([name, value]) => SWITCH_MEANING[name]?.[value]).filter(Boolean).join('\n\n');
     const retired = retiredDropped(mergedText, text);
     const pr = this.#api(`repos/${repository}/pulls`, { title: `Set ${words} for this repository`, head, base: branch, body: `This changes only ${changed} in \`${cache.BINDING_PATH}\`${retired ? `, and deletes ${retired}` : ''}. These are this repository's own switches, read the same way by every app and the Projects controller.\n\n${meaning}\n\nIt applies only after the owner merges it. After the merge, \`refresh governance\` reads it back on each computer.\n\n${require('./toolkit-governance-state.cjs').taskSwitchVersionLine()}` });
-    return { number: pr.number, url: pr.html_url, head: result.commit.sha };
-  }
-  // The owner's sharded CI answer: one pull request that changes only ci_shards in the binding, from the
-  // exact merged text, and for yes adds a first shard list (`list`) when the default branch has none.
-  // Switch `changes` from the same answer ({ auto_merge, merge_train }) join it, so the two never conflict.
-  publishCiShards(repository, mergedText, text, answer, list = null, changes = {}) {
-    this.#auth();
-    const repo = this.#api(`repos/${repository}`), branch = repo.default_branch;
-    if (!cache.parseSymref(`ref: refs/heads/${branch}\tHEAD`)) fail('PROPOSAL_BASE_INVALID');
-    const base = this.#api(`repos/${repository}/git/ref/heads/${branch}`);
-    if (!SHA.test(base.object?.sha)) fail('PROPOSAL_BASE_INVALID');
-    const current = this.#api(`repos/${repository}/contents/${cache.BINDING_PATH}?ref=${base.object.sha}`);
-    if (current.type !== 'file' || current.encoding !== 'base64' || typeof current.content !== 'string') fail('PROPOSAL_BINDING_INVALID');
-    if (Buffer.from(current.content, 'base64').toString('utf8').replace(/\r\n/g, '\n') !== String(mergedText).replace(/\r\n/g, '\n')) fail('SWITCH_BASE_CHANGED');
-    const LIST = '.github/toolkit-test-shards.json';
-    const addList = typeof list === 'string' && !this.#optional(`repos/${repository}/contents/${LIST}?ref=${base.object.sha}`);
-    const words = switchWords(changes);
-    const head = `toolkit/${words ? `switches-${words.replace(/[^a-z0-9]+/g, '-')}-` : ''}ci-shards-${answer}-${key(text + (addList ? list : '') + base.object.sha)}`;
-    const owner = repository.split('/')[0];
-    const open = this.#api(`repos/${repository}/pulls?state=open&head=${encodeURIComponent(`${owner}:${head}`)}`);
-    if (Array.isArray(open) && open[0]?.number) return { number: open[0].number, url: open[0].html_url, head: open[0].head?.sha || null };
-    // Another shards answer still open is the one to merge or close, never a second beside it.
-    const waiting = this.openCiShards(repository);
-    if (waiting.length) throw Object.assign(new Error('SHARDS_PR_OPEN'), { code: 'SHARDS_PR_OPEN', url: waiting[0].url });
-    if (this.#optional(`repos/${repository}/git/ref/heads/${head}`)) fail('SWITCH_BRANCH_EXISTS');
-    this.#api(`repos/${repository}/git/refs`, { ref: `refs/heads/${head}`, sha: base.object.sha });
-    const title = words ? `Set ${words} and parallel CI shards ${answer === 'yes' ? 'yes' : 'never ask'} for this repository`
-      : answer === 'yes' ? 'Split this repository\'s tests into parallel CI shards' : 'Stop offering parallel CI shards for this repository';
-    let result = this.#api(`repos/${repository}/contents/${cache.BINDING_PATH}`, { message: title, content: Buffer.from(text).toString('base64'), branch: head, sha: current.sha }, 'PUT');
-    if (!SHA.test(result.commit?.sha || '')) fail('PROPOSAL_COMMIT_INVALID');
-    if (addList) {
-      result = this.#api(`repos/${repository}/contents/${LIST}`, { message: 'Add a first test shard list', content: Buffer.from(list).toString('base64'), branch: head }, 'PUT');
-      if (!SHA.test(result.commit?.sha || '')) fail('PROPOSAL_COMMIT_INVALID');
-    }
-    const what = answer === 'yes'
-      ? `Yes: the next rules refresh copies the Toolkit test shards workflow (its gate job, \`Toolkit test shards\`, checks every test file ran once on each system) and Shard Timings, while \`${LIST}\` is a usable shard list.${addList ? ` This pull request adds a first \`${LIST}\`: Node tests run with node --test, split across Linux shards; Shard Timings rebalances them from measured times.` : ''}`
-      : 'Never: Toolkit does not offer parallel CI shards here again. Nothing is copied.';
-    const switched = words ? ` It also sets ${Object.keys(changes).map(name => `\`task_prs.${name}\``).join(' and ')}.` : '';
-    const meaning = Object.entries(changes).map(([name, value]) => SWITCH_MEANING[name]?.[value]).filter(Boolean).map(line => `\n\n${line}`).join('');
-    const retired = retiredDropped(mergedText, text);
-    const pr = this.#api(`repos/${repository}/pulls`, { title, head, base: branch, body: `This sets \`ci_shards\` in \`${cache.BINDING_PATH}\` to \`${answer}\`, this repository's parallel CI shards answer.${switched}${addList ? ` It also adds \`${LIST}\`.` : ''}${retired ? ` It also deletes ${retired}.` : ''} Nothing else changes.\n\n${what}${meaning}\n\nIt applies only after the owner merges it.\n\n${require('./toolkit-governance-state.cjs').taskSwitchVersionLine()}` });
     return { number: pr.number, url: pr.html_url, head: result.commit.sha };
   }
   publish(repository, binding, wanted = { [cache.BINDING_PATH]: `${JSON.stringify(binding, null, 2)}\n` }) {
@@ -633,14 +566,12 @@ class GitHubProposalTransport {
     const own = new Set(diff.files.filter(file => ['added', 'renamed', 'copied'].includes(file.status)).map(file => file.filename));
     const { files, ...judged } = new (ownerFiles().OwnerFiles)(wanted, { held: name => this.#held(repository, name, read.head), onBase: name => !own.has(name) }).judge();
     const changed = Object.entries(files).filter(([name, content]) => this.#held(repository, name, read.head) !== content);
-    // A file an earlier answer added that the new answers no longer make (shard workflows and the
-    // shard list after shards go from yes to not now) leaves the pull request: one it added is
-    // deleted, and one it changed goes back to the default branch's copy. Only the shard list and a
-    // workflow carrying the Toolkit's rendered-copy marker on the branch are Toolkit's to drop; a
-    // workflow someone else pushed there stays as it is.
+    // A file an earlier answer added that the new answers no longer make (a workflow copy this run
+    // leaves out) leaves the pull request: one it added is deleted, and one it changed goes back to the
+    // default branch's copy. Only a workflow carrying the Toolkit's rendered-copy marker on the branch
+    // is Toolkit's to drop; a workflow someone else pushed there stays as it is.
     const workflows = require('./toolkit-cloud-workflows.cjs');
     const ours = name => {
-      if (name === require('./governed-test-shards.cjs').MANIFEST_REL) return true;
       const file = this.#optional(`repos/${repository}/contents/${name}?ref=${read.head}`);
       return Boolean(file && file.type === 'file' && file.encoding === 'base64' && typeof file.content === 'string' && workflows.copyIdAt(name, Buffer.from(file.content, 'base64').toString('utf8')));
     };
@@ -663,10 +594,10 @@ class GitHubProposalTransport {
   }
 }
 
-// Files a turn-on branch may hold beyond the current set: an earlier answer may have added shard
-// workflows or a shard list that the new answer no longer renders, and a default cloud workflow's own
-// files stay when this run could not make the copies.
-const TURN_ON_NAMES = [name => /^\.github\/workflows\/[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$/.test(name), name => name === require('./governed-test-shards.cjs').MANIFEST_REL, name => cloudFiles().includes(name)];
+// Files a turn-on branch may hold beyond the current set: an earlier answer may have added a workflow
+// copy that the new answer no longer renders, and a default cloud workflow's own files stay when this
+// run could not make the copies.
+const TURN_ON_NAMES = [name => /^\.github\/workflows\/[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml$/.test(name), name => cloudFiles().includes(name)];
 
 function proposalBody(binding, files, removals, dropped = [], notes = []) {
   return `${MARKER}\n\nThe programme file on the default branch decides governance on every computer. This proposal sets it to ${binding.governance === 'disabled' ? 'disabled' : 'enabled, with its CI checks; the installed Toolkit gives sessions the governed rules'}. Global coding rules still apply. It does not change credentials or deployment.${switchNote(binding)}\n\nPrepared files:\n${Object.keys(files).map(name => `- ${name}`).join('\n')}\n\n${removals.length ? `Removed files (the Toolkit's cloud workflow copies):\n${removals.map(name => `- ${name}`).join('\n')}\n\n` : ''}${dropped.length ? `No longer in this pull request (the latest answers do not make them):\n${dropped.map(name => `- ${name}`).join('\n')}\n\n` : ''}${notes.length ? `Already on GitHub:\n${notes.map(note => `- ${note}`).join('\n')}\n\n` : ''}Please merge this decision now after checking its effects and required checks. Owner merge permission is still required.`;

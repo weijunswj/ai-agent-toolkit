@@ -17,7 +17,7 @@ const workflows = require('../scripts/toolkit-cloud-workflows.cjs');
 const security = require('../scripts/toolkit-governance-security.cjs');
 const guard = require('../../skills/secure-ci-cd/scripts/install-personal-data-guard.cjs');
 const plainText = require('../../skills/secure-ci-cd/scripts/install-plain-text-check.cjs');
-const { COPIED_FILES, SHARDS, SWEEPS } = require('./support/default-cloud-workflows.cjs');
+const { COPIED_FILES, SWEEPS } = require('./support/default-cloud-workflows.cjs');
 const { recordAbsent } = require('./toolkit-governed-fixture-support.cjs');
 const COMMIT = workflows.toolkitHead(ROOT);
 const SLUG = 'example-owner/example-repo';
@@ -26,7 +26,7 @@ const CONFIG = '.github/personal-data-guard.json', SCRIPT = '.github/scripts/per
 const CHECK = '.github/workflows/personal-data-guard.yml', SWEEP = '.github/workflows/personal-data-sweep.yml';
 const GUARD = [CHECK, SWEEP, SCRIPT, CONFIG];
 const PLAIN = { settings: '.github/plain-text.json', baseline: '.github/plain-text-baseline.json', script: '.github/scripts/plain-text-check.cjs', workflow: '.github/workflows/plain-text.yml' };
-const LIST = '.github/toolkit-test-shards.json', BINDING = '.github/toolkit-programme.json';
+const BINDING = '.github/toolkit-programme.json';
 const RENDERED = SWEEPS.map(row => row.file);
 const binding = { schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'enabled', parents: [{ issue: 1, record_prefix: 'INT-FX-' }], store: { kind: 'github', repository: 'example-owner/evidence', branch: 'main', path: 'state/' }, required_checks: ['validate'] };
 
@@ -53,7 +53,7 @@ function wantedFiles(t) {
   cached ||= {
     [BINDING]: `${JSON.stringify(binding, null, 2)}\n`,
     [PLAIN.settings]: '{"rules":"new"}\n', [PLAIN.baseline]: '{"allowed":[]}\n', [PLAIN.script]: plainText.vendoredText(), [PLAIN.workflow]: 'name: plain text\n',
-    '.github/dependabot.yml': 'version: 2\n', [LIST]: '{"shards":[]}\n',
+    '.github/dependabot.yml': 'version: 2\n',
     ...proposal.cloudWorkflowFiles(checkout(t), { root: ROOT, commit: COMMIT }).files,
   };
   return { ...cached };
@@ -187,10 +187,9 @@ test('rendered copies: someone else\'s file on GitHub is kept and no rendered co
     both(wanted, { [file]: older[file]() }, ({ route, result, tree }) => { assert.equal(tree[file], wanted[file], route); assert.deepEqual(result.notes, [], route); });
     both(wanted, { [file]: `${wanted[file]}# a hand edit\n` }, ({ route, result, tree }) => { assert.equal(tree[file], wanted[file], route); assert.match(result.notes[0], /edited by hand and is brought back/, route); });
   }
-  assert.equal(SHARDS.length, 2, 'the shard copies are rendered copies too');
 });
 
-test('the plain-text check, the Dependabot settings and the shard list on the default branch are the owner\'s', t => {
+test('the plain-text check and the Dependabot settings on the default branch are the owner\'s', t => {
   const wanted = wantedFiles(t);
   const rows = [
     [{ [PLAIN.settings]: '{"rules":"ours"}\n' }, [PLAIN.settings, PLAIN.baseline], [keptNote(PLAIN.settings)]],
@@ -199,7 +198,6 @@ test('the plain-text check, the Dependabot settings and the shard list on the de
     [{ [PLAIN.script]: '// our own check\n' }, Object.values(PLAIN), [`${PLAIN.script} is not a Toolkit copy, so it is left as it is and the plain-text check is not added around it; move it aside in a pull request first.`]],
     [{ '.github/dependabot.yml': 'version: 2 # ours\n' }, ['.github/dependabot.yml'], [keptNote('.github/dependabot.yml')]],
     [{ '.github/dependabot.yaml': 'version: 2 # ours\n' }, ['.github/dependabot.yml'], [keptNote('.github/dependabot.yaml')]],
-    [{ [LIST]: '{"shards":["ours"]}\n' }, [LIST], [keptNote(LIST)]],
     [{ [PLAIN.settings]: [] }, [PLAIN.settings, PLAIN.baseline], [keptNote(PLAIN.settings)]],
   ];
   for (const [base, left, notes] of rows) {
@@ -215,10 +213,10 @@ test('the plain-text check, the Dependabot settings and the shard list on the de
 
 test('answering again rewrites what its own pull request added, except guard settings and files Toolkit did not write', t => {
   const wanted = wantedFiles(t);
-  const branch = { ...wanted, [BINDING]: wanted[BINDING].replace('validate', 'other'), [PLAIN.settings]: '{"rules":"an earlier answer"}\n', [LIST]: '{"shards":["an earlier answer"]}\n', '.github/dependabot.yml': 'version: 2 # an earlier answer\n', [CONFIG]: 'the owner\'s own\n', [AUTO]: 'name: pushed by the owner\n' };
+  const branch = { ...wanted, [BINDING]: wanted[BINDING].replace('validate', 'other'), [PLAIN.settings]: '{"rules":"an earlier answer"}\n', '.github/dependabot.yml': 'version: 2 # an earlier answer\n', [CONFIG]: 'the owner\'s own\n', [AUTO]: 'name: pushed by the owner\n' };
   const github = fakeGitHub({ base: {}, branch });
   const result = github.transport.update(SLUG, 1, binding, wanted);
-  assert.deepEqual(Object.keys(github.world.tree).sort(), [BINDING, PLAIN.settings, LIST, '.github/dependabot.yml'].sort());
+  assert.deepEqual(Object.keys(github.world.tree).sort(), [BINDING, PLAIN.settings, '.github/dependabot.yml'].sort());
   assert.deepEqual(result.left.sort(), [CONFIG, AUTO].sort());
   assert.deepEqual(result.onBase, [], 'the default branch holds none of it');
 });
@@ -230,7 +228,7 @@ test('GitHub is read before anything is written, and a file that cannot be read 
   const firstWrite = github.world.order.findIndex(line => line.startsWith('write '));
   const lastRead = github.world.order.map(line => line.includes('/contents/')).lastIndexOf(true);
   assert.ok(lastRead < firstWrite, 'every file is read first');
-  for (const file of [...COPIED_FILES, ...RENDERED, ...Object.values(PLAIN), LIST, '.github/dependabot.yml', '.github/dependabot.yaml']) assert.ok(github.world.reads.includes(file), `${file} is read`);
+  for (const file of [...COPIED_FILES, ...RENDERED, ...Object.values(PLAIN), '.github/dependabot.yml', '.github/dependabot.yaml']) assert.ok(github.world.reads.includes(file), `${file} is read`);
   const writes = [];
   const broken = new proposal.GitHubProposalTransport({ run(args, input) {
     if (args[0] === 'auth') return '';

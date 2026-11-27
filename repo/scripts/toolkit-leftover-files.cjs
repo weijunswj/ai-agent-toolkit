@@ -12,7 +12,7 @@
 //     line endings aside.
 // A repository whose governance is on gets its governed rules and playbooks from the installed
 // Toolkit, so only those instruction copies (and the retired n8n adapter and shim blocks) are listed there; its checks and workflow copies are in
-// use and shown as kept. The repository's programme file is its on/off decision, so it is always kept.
+// use and shown as kept, except the retired test shards and Shard Timings copies, which are listed everywhere. The repository's programme file is its on/off decision, so it is always kept.
 // A one-line CLAUDE.md is listed only when AGENTS.md has nothing of its own left without the listed
 // blocks; otherwise it loads the repository's own rules and is kept. An older marked shim in CLAUDE.md
 // (CLAUDE.SHIM) that loads the repository's own AGENTS.md is listed to be replaced by that one line.
@@ -250,10 +250,10 @@ class LeftoverScan {
     }
   }
 
-  // A Toolkit workflow copy (the sweep, its gate, the test shards workflow or Shard Timings) whose first
-  // line is the Toolkit's marker for a copy that may sit at that path; the test shards copy is found at
-  // whatever name its shard list chose. A workflow without the marker may be the owner's, so it is not
-  // listed.
+  // A Toolkit workflow copy (the sweep, its gate, or the retired test shards workflow or Shard Timings)
+  // whose first line is the Toolkit's marker for a copy that may sit at that path; the test shards copy
+  // is found at whatever name its shard list chose. A workflow without the marker may be the owner's, so
+  // it is not listed. A retired copy is in use nowhere, so it is listed where governance is on too.
   #workflows(root, result) {
     // Each candidate is read through readInside, which refuses links at every level, so a linked
     // folder only lists names that are then skipped.
@@ -268,7 +268,8 @@ class LeftoverScan {
       const text = unix(read.text), marker = cloud.MARKER.exec(text);
       const id = cloud.copyIdAt(file, text);
       if (!id) continue;
-      if (result.governed) { result.kept.push({ file, reason: IN_USE }); continue; }
+      const retired = cloud.RETIRED_COPIES.some(row => row.id === id);
+      if (result.governed && !retired) { result.kept.push({ file, reason: IN_USE }); continue; }
       result.files.push({ file, kind: 'workflow', ...(id.startsWith('programme-sweep') ? {} : { copy: id }), proof: 'Toolkit marker', edited: cloud.bodyHash(text.slice(marker[0].length + 1)) !== marker[3] });
     }
   }
@@ -289,7 +290,7 @@ function describeFile(item) {
   if (item.kind === 'shim-block') return `- ${item.file}: an older marked form of Toolkit's one-line shim (block ${item.block})${item.edited ? ', edited by hand since' : ''}. It loads your AGENTS.md, so replace the block with the line \`${SHIM_LINE}\` rather than removing it. The rest of the file is yours.`;
   if (item.kind === 'block') return `- ${item.file}: Toolkit block ${item.block} inside the file${item.edited ? ', edited by hand since' : ''}. The rest of the file is yours.`;
   if (item.kind === 'check') return `- ${item.file}: a Toolkit check copy. It keeps working without governance; removing it is your choice, together with its workflow and settings.`;
-  if (item.kind === 'workflow' && item.copy) return `- ${item.file}: a Toolkit ${item.copy === 'test-shards' ? 'test shards workflow' : 'Shard Timings'} copy${item.edited ? ', edited by hand since' : ''}. Governance is off, so nothing refreshes it any more and removing it is suggested.`;
+  if (item.kind === 'workflow' && item.copy) return `- ${item.file}: a Toolkit ${item.copy === 'test-shards' ? 'test shards workflow' : 'Shard Timings'} copy${item.edited ? ', edited by hand since' : ''}. Toolkit no longer sets up CI shards, so removing it is suggested; where governance is on, the rules refresh pull request removes it.`;
   if (item.kind === 'workflow') return `- ${item.file}: a Toolkit cloud sweep copy${item.edited ? ', edited by hand since' : ''}. With governance off it writes nothing, but its runs still start on GitHub, so removing it is suggested.`;
   return `- ${item.file}: ${item.proof}.`;
 }

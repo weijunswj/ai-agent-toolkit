@@ -5,8 +5,7 @@
 // line for the agent to pass on, so the owner hears about it without asking.
 //
 // - Governance App: missing (GitHub lists neither its variable nor its secret) or partly set up. The
-//   governance jobs on GitHub (the cloud Programme Sweep and the Shard Timings pull request) do
-//   nothing without it.
+//   governance jobs on GitHub (such as the cloud Programme Sweep) do nothing without it.
 // - Evidence store: the store the merged programme file names cannot be found, is not private, or
 //   cannot be written with this computer's GitHub sign-in. Programme state lives there, so every
 //   programme write refuses until it is usable; the line says so.
@@ -180,15 +179,16 @@ function savedStore(registryOptions, repositoryId, store) {
   } catch { return null; }
 }
 
-// The last saved App and store results for the readiness check (toolkit-governance-ready.cjs), each
-// kept only in its known shape: { app, store, checked_at }, or null when none is saved. Local read only.
+// The last saved App, store and settings results for the readiness check (toolkit-governance-ready.cjs)
+// and the governance summary, each kept only in its known shape: { app, store, settings, checked_at },
+// or null when none is saved. Local read only.
 function saved(registryOptions, repositoryId) {
   try {
     if (typeof repositoryId !== 'string' || !repositoryId) return null;
     const repositories = read(registryOptions).repositories;
     const entry = Object.hasOwn(repositories, repositoryId) ? repositories[repositoryId] : null;
     if (!entry || typeof entry !== 'object') return null;
-    return { app: cleanApp(entry.app), store: cleanStore(entry.store?.repository, entry.store), checked_at: typeof entry.checked_at === 'string' ? entry.checked_at : null };
+    return { app: cleanApp(entry.app), store: cleanStore(entry.store?.repository, entry.store), settings: cleanSettings(entry.settings), checked_at: typeof entry.checked_at === 'string' ? entry.checked_at : null };
   } catch { return null; }
 }
 
@@ -209,9 +209,9 @@ function sessionLines(state, registryOptions = {}, deps = {}) {
     const app = entry && cleanApp(entry.app);
     const slug = state.repository || 'this repository';
     if (app && !unknown(app) && app.variable === 'missing' && app.secret === 'missing') {
-      partLine(`Toolkit governance: the Governance App is not set up on ${slug} (GitHub lists neither its variable nor its secret), so the governance jobs on GitHub (the cloud sweep and the shard refresh) do nothing; everything else, this computer's own refresh included, still works. In your first reply, tell the user once, in one line, that saying \`refresh governance\` gives the one line that sets it up; nothing waits on it.`);
+      partLine(`Toolkit governance: the Governance App is not set up on ${slug} (GitHub lists neither its variable nor its secret), so the governance jobs on GitHub (such as the cloud sweep) do nothing; everything else, this computer's own refresh included, still works. In your first reply, tell the user once, in one line, that saying \`refresh governance\` gives the one line that sets it up; nothing waits on it.`);
     } else if (app && !unknown(app) && (app.variable === 'missing' || app.secret === 'missing')) {
-      partLine(`Toolkit governance: the Governance App is only partly set up on ${slug} (variable ${app.variable}, secret ${app.secret}), so the governance jobs on GitHub (the cloud sweep and the shard refresh) do nothing. In your first reply, tell the user once, in one line, that saying \`refresh governance\` shows how to finish it; nothing waits on it.`);
+      partLine(`Toolkit governance: the Governance App is only partly set up on ${slug} (variable ${app.variable}, secret ${app.secret}), so the governance jobs on GitHub (such as the cloud sweep) do nothing. In your first reply, tell the user once, in one line, that saying \`refresh governance\` shows how to finish it; nothing waits on it.`);
     }
     const kept = entry && entry.store && entry.store.repository === store ? entry.store : null;
     const why = STORE_WHY[kept?.state];

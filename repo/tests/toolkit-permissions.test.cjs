@@ -331,7 +331,7 @@ test('Codex gets no allow rule for a command that needs an exact form or an ask 
   assert.match(spaced.blocks[0].text, /match = \[\["node","C:\/Users\/A Dev\/tk\//);
 });
 
-test('the governance question bank is two exact lines: showing it, and sending the reply with its ticket', t => {
+test('the governance setup is two exact lines: showing it, and sending the reply with its ticket', t => {
   const deps = { ...computer(t, { platform: 'win32', managed: 'C:\\tk' }), fs: { ...governedFs(), existsSync: () => true }, run: fakeGit() };
   const { blocks, table } = new permissions.PermissionBlocks(deps).build({ scope: 'computer' });
   const bank = 'node "C:/tk/repo/scripts/toolkit-governance.cjs"';
@@ -340,8 +340,8 @@ test('the governance question bank is two exact lines: showing it, and sending t
     for (const command of [`${bank} refresh`, `${bank} setup --json`, `${bank} status`, `${bank} enable`, `${bank} disable`, `${bank} migrate --root C:/repo`, `${bank} publish --run ${'a'.repeat(32)}`, `${bank} finish`,
       'node "C:/elsewhere/repo/scripts/toolkit-governance.cjs" setup', `${bank}`]) assert.equal(verdict(blocks, tool, command), 'prompt', `${tool}: ${command}`);
   }
-  assert.match(permissions.ROWS.find(row => row.id === 'governance-bank').guard, /live one-use bank ticket/);
-  assert.ok(table.some(row => /Governance question bank/.test(row.name)));
+  assert.match(permissions.ROWS.find(row => row.id === 'governance-bank').guard, /live one-use reply ticket/);
+  assert.ok(table.some(row => /Governance setup/.test(row.name)));
   // Codex would allow any flag after `setup`, so it gets a prompt rule there and no allow rule.
   const codex = new permissions.PermissionBlocks(deps).build({ host: 'codex', scope: 'computer' });
   assert.ok(!/toolkit-governance\.cjs","setup"\],\n {4}decision = "allow"/.test(codex.blocks[0].text));
