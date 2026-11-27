@@ -2392,26 +2392,29 @@ function runSessionStartHook(cwd, home, syncSource = 'codex-plugin') {
 
 const DISABLED_LINE = 'Toolkit local bridge: auto-sync disabled; run node repo/scripts/toolkit-local-bridge.cjs --audit for status.\n';
 
-// What the retired controller handoff snapshot left on a computer: its after-tool hook's session files
-// and lock, the store command's run record and per-computer folder records (all in Toolkit's user-state
-// folder), and the empty `~/.toolkit-handoff-off` a scheduled task's first step made.
-function plantRetiredHandoffState(home) {
+// What retired Toolkit features left on a computer. The controller handoff snapshot: its after-tool
+// hook's session files and lock, the store command's run record and per-computer folder records (all in
+// Toolkit's user-state folder), and the empty `~/.toolkit-handoff-off` a scheduled task's first step
+// made. The parallel CI shards offer: its memory of shard pull requests the owner closed.
+function plantRetiredUserState(home) {
   const state = path.join(home, '.ai-agent-toolkit', 'user-state');
   writeJson(path.join(state, 'handoff-sessions', '0123456789abcdef.json'), { started_at: 1, checked_at: 2, rows: [] });
   writeJson(path.join(state, 'handoff-folders', 'record.json'), { files: [] });
   writeJson(path.join(state, 'handoff-refresh.json'), { store: path.join(home, 'store'), repo_root: path.join(home, 'repo'), repository: 'acme/app' });
   writeFile(path.join(state, 'handoff-refresh.lock'), '2026-11-21T18:07:00.000Z\n');
   writeFile(path.join(home, '.toolkit-handoff-off'), '');
+  writeJson(path.join(state, 'ci-shards-closed.v1.json'), { schema: 'toolkit.ci-shards-closed.v1', answers: [] });
   // Neighbours the clean-up never touches.
   writeJson(path.join(state, 'keep.json'), { kept: true });
+  writeJson(path.join(state, 'ci-shards-closed.v1.json.notes'), { kept: true });
   writeJson(path.join(state, 'handoff-sessions-notes', 'mine.json'), { kept: true });
   writeFile(path.join(home, '.toolkit-handoff-off-notes'), '');
   return state;
 }
 
-const RETIRED_HANDOFF_NAMES = ['handoff-sessions', 'handoff-folders', 'handoff-refresh.json', 'handoff-refresh.lock'];
+const RETIRED_STATE_NAMES = ['handoff-sessions', 'handoff-folders', 'handoff-refresh.json', 'handoff-refresh.lock', 'ci-shards-closed.v1.json'];
 
-test('a session start removes what the retired handoff snapshot left, and nothing else', async (t) => {
+test('a session start removes what retired features left (the handoff snapshot, the shard offer), and nothing else', async (t) => {
   const cases = {
     'Claude Code installed copy': (home, cwd) => runSessionStartHook(cwd, home, 'claude-plugin'),
     'Codex plugin': (home, cwd) => runSessionStartHook(cwd, home, 'codex-plugin'),
@@ -2425,12 +2428,13 @@ test('a session start removes what the retired handoff snapshot left, and nothin
       const home = tmpRoot();
       const cwd = tmpRoot();
       t.after(() => { fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(cwd, { recursive: true, force: true }); });
-      const state = plantRetiredHandoffState(home);
+      const state = plantRetiredUserState(home);
       const result = start(home, cwd);
       assert.equal(result.status, 0, result.stderr);
-      for (const retired of RETIRED_HANDOFF_NAMES) assert.equal(fs.existsSync(path.join(state, retired)), false, `${retired} is removed`);
+      for (const retired of RETIRED_STATE_NAMES) assert.equal(fs.existsSync(path.join(state, retired)), false, `${retired} is removed`);
       assert.equal(fs.existsSync(path.join(home, '.toolkit-handoff-off')), false, 'the empty scheduled-session marker is removed');
       assert.deepEqual(readJson(path.join(state, 'keep.json')), { kept: true });
+      assert.deepEqual(readJson(path.join(state, 'ci-shards-closed.v1.json.notes')), { kept: true });
       assert.deepEqual(readJson(path.join(state, 'handoff-sessions-notes', 'mine.json')), { kept: true });
       assert.equal(fs.existsSync(path.join(home, '.toolkit-handoff-off-notes')), true);
       assert.doesNotMatch(`${result.stdout}${result.stderr}`, /handoff/i, 'the clean-up prints nothing');

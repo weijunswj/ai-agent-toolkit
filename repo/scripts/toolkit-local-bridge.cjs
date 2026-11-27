@@ -3507,18 +3507,20 @@ function persistActiveWrite({
   }
 }
 
-// The one-time clean-up of what the retired controller handoff snapshot left on a computer, run at
-// every session start (both apps, any copy, a cloud session too): its after-tool hook's session files
-// (handoff-sessions/) and refresh lock, and its store command's run record and per-computer memory
-// folder records (handoff-folders/), all in Toolkit's user-state folder, and the empty
-// `~/.toolkit-handoff-off` a scheduled task's first step made in the home folder. Each is removed only
+// The one-time clean-up of what retired Toolkit features left on a computer, run at every session
+// start (both apps, any copy, a cloud session too). The controller handoff snapshot: its after-tool
+// hook's session files (handoff-sessions/) and refresh lock, and its store command's run record and
+// per-computer memory folder records (handoff-folders/), all in Toolkit's user-state folder, and the
+// empty `~/.toolkit-handoff-off` a scheduled task's first step made in the home folder. The parallel
+// CI shards offer: its memory of shard pull requests the owner closed (ci-shards-closed.v1.json, in
+// the user-state folder). Each is removed only
 // when it is that exact name directly in that folder and the kind the feature wrote (a folder or a
 // file, never a link); the home file only when it is empty. Anything else is left alone. Advisory: an
 // error leaves that entry for the next session start and prints nothing.
-// Remove this clean-up once every supported install has refreshed past the release that retired the
-// snapshot (at the controller's call, no earlier than the release after next).
-const RETIRED_HANDOFF_STATE = Object.freeze([['handoff-sessions', 'folder'], ['handoff-folders', 'folder'], ['handoff-refresh.json', 'file'], ['handoff-refresh.lock', 'file']]);
-class RetiredHandoffState {
+// Remove each entry once every supported install has refreshed past the release that retired its
+// feature (at the controller's call, no earlier than the release after next).
+const RETIRED_USER_STATE = Object.freeze([['handoff-sessions', 'folder'], ['handoff-folders', 'folder'], ['handoff-refresh.json', 'file'], ['handoff-refresh.lock', 'file'], ['ci-shards-closed.v1.json', 'file']]);
+class RetiredUserState {
   #stateDirectory; #home;
   constructor({ stateDirectory, home }) { this.#stateDirectory = stateDirectory; this.#home = home; }
 
@@ -3526,12 +3528,12 @@ class RetiredHandoffState {
   // session start never fails on it.
   static atSessionStart() {
     let state;
-    try { state = new RetiredHandoffState({ stateDirectory: require('./toolkit-user-state.cjs').userStateDirectory(), home: os.homedir() }); } catch { return; }
+    try { state = new RetiredUserState({ stateDirectory: require('./toolkit-user-state.cjs').userStateDirectory(), home: os.homedir() }); } catch { return; }
     state.remove();
   }
 
   remove() {
-    for (const [name, kind] of RETIRED_HANDOFF_STATE) this.#removeIf(path.join(this.#stateDirectory, name), kind);
+    for (const [name, kind] of RETIRED_USER_STATE) this.#removeIf(path.join(this.#stateDirectory, name), kind);
     this.#removeIf(path.join(this.#home, '.toolkit-handoff-off'), 'empty file');
   }
 
@@ -3701,7 +3703,7 @@ class LocalBridgeRun {
     const args = this.#args = parseArgs(this.#argv);
     const isolated = this.#isolatedProjectCommand(args);
     if (isolated) return isolated;
-    if (args.hook) RetiredHandoffState.atSessionStart();
+    if (args.hook) RetiredUserState.atSessionStart();
     if (this.#uninstalledClaudeCopy(args)) return { status: 0, audit: null };
     assertReconciliationCommandArgs(args);
     const hubPath = this.#hubPath = assertSafeWritePath(args.hub || defaultHubPath(), 'hub path');

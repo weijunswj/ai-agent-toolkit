@@ -107,6 +107,7 @@ test('toolkit governance shows the summary where governance is on, and keeps the
     assert.match(row(result.out, 'Task auto-merge with merge train'), /^\| Task auto-merge with merge train \| Off \|/);
     assert.match(row(result.out, 'Toolkit permissions (Claude Code, this computer)'), /\| Waiting: 6 to add \|/);
     assert.match(row(result.out, 'Toolkit instruction copies'), /\| 1 file left; say clean up copies \|/);
+    assert.doesNotMatch(result.out, /shard/i, 'no parallel CI shards row');
     assert.ok(result.out.includes('\n```powershell\nnode fixture-apply.cjs --apply\n```\n'), 'the owner\'s permissions command, in a PowerShell block');
     assert.doesNotMatch(result.out, /Bank reference|1\.1=|could not note this/);
   }

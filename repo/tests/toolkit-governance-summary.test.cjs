@@ -99,7 +99,6 @@ test('a governed repository shows its steps left, Toolkit permissions first with
     '| Security settings | Not checked here yet | Flags and updates vulnerable dependencies |',
     '| Cloud workflows | Not read | Keep records in step from GitHub, with no computer on |',
     '| Guards | Not read | Check every pull request and push |',
-    '| Parallel CI shards | Not applicable | Split long test runs across runners |',
     '| Toolkit permissions (Claude Code, this computer) | Waiting: 2 to add, 1 old to update | Agents run Toolkit\'s own commands without asking each time |',
     '| Governance App | Waiting: not set up | Lets the cloud workflows act on GitHub |',
     '| Toolkit instruction copies | 1 file left; say clean up copies | Old Toolkit instruction copies an earlier setup left |',
@@ -126,7 +125,7 @@ test('with every part in place the summary says on and ready, with no command an
 });
 
 // The toolkit-uat-v4 values of 27 Nov: private on GitHub Free, the finish wrote what GitHub offers there,
-// the guards and cloud workflows merged, shards not applicable.
+// the guards and cloud workflows merged.
 test('the summary after a GitHub Free finish says what is on and what GitHub Free does not offer', () => {
   const files = new Set(['.github/workflows/toolkit-programme-sweep.yml', '.github/workflows/toolkit-programme-sweep-gate.yml',
     require(path.join(scripts, 'toolkit-cloud-workflows-copied.cjs')).SWEEP_WORKFLOW, require(path.join(scripts, 'toolkit-governance-security.cjs')).WORKFLOW_REL,
@@ -135,7 +134,7 @@ test('the summary after a GitHub Free finish says what is on and what GitHub Fre
     repository: 'example-owner/toolkit-uat-v4', defaultBranch: 'main', store: { repository: 'example-owner/TRANSPORT-toolkit-uat-v4', state: 'usable' }, parents: [1],
     task: { auto_merge: 'after-gates', merge_train: 'on' }, requiredChecks: ['plain-text', 'personal-data'],
     finish: { on: ['the free dependency and security settings'], unavailable: ['the no-force-push ruleset', 'default-branch protection'], held: [] }, drift: null,
-    files, shards: 'Not applicable', permissions: { checked: true, app: 'Claude Code', missing: 0, stale: 0 }, app: { variable: 'found', secret: 'found' }, appCommand: 'x', copies: null, stale: null,
+    files, permissions: { checked: true, app: 'Claude Code', missing: 0, stale: 0 }, app: { variable: 'found', secret: 'found' }, appCommand: 'x', copies: null, stale: null,
   };
   const text = summary.renderSummary(facts);
   assert.equal(text.split('\n')[0], '**Governance: on and ready.**');
@@ -149,7 +148,6 @@ test('the summary after a GitHub Free finish says what is on and what GitHub Fre
     '| Security settings | On: the free dependency and security settings | Flags and updates vulnerable dependencies |',
     '| Cloud workflows | On: programme sweep, sweep gate, personal data sweep and dependency auto-merge | Keep records in step from GitHub, with no computer on |',
     '| Guards | On: plain-text check and personal data guard | Check every pull request and push |',
-    '| Parallel CI shards | Not applicable | Split long test runs across runners |',
     '| Toolkit permissions (Claude Code, this computer) | Up to date | Agents run Toolkit\'s own commands without asking each time |',
     '| Governance App | Set up | Lets the cloud workflows act on GitHub |',
   ]);

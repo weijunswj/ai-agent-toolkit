@@ -16,24 +16,19 @@ const ROOT = process.env.A2A_SOURCE_ROOT || path.resolve(__dirname, '../..');
 const workflows = require(path.join(ROOT, 'repo/scripts/toolkit-cloud-workflows.cjs'));
 const conformance = require(path.join(ROOT, 'repo/scripts/toolkit-governance-conformance.cjs'));
 const proposal = require(path.join(ROOT, 'repo/scripts/toolkit-governance-proposal.cjs'));
-const governed = require(path.join(ROOT, 'repo/scripts/governed-test-shards.cjs'));
 const guard = require(path.join(ROOT, 'skills/secure-ci-cd/scripts/personal-data-guard.cjs'));
 const COMMIT = workflows.toolkitHead(ROOT);
 
 const CHECK = '.github/workflows/personal-data-guard.yml', SWEEP = '.github/workflows/personal-data-sweep.yml', SCRIPT = '.github/scripts/personal-data-guard.cjs', CONFIG = '.github/personal-data-guard.json';
 const GUARD_FILES = [CHECK, SWEEP, SCRIPT, CONFIG];
 const AUTO_MERGE = '.github/workflows/dependency-auto-merge.yml';
-// Every file a governed repository with a usable shard list carries, spelt out so the list in the code
-// cannot drop one unnoticed.
+// Every file a governed repository carries, spelt out so the list in the code cannot drop one unnoticed.
 const EXPECTED = {
   'programme-sweep': ['.github/workflows/toolkit-programme-sweep.yml'],
   'programme-sweep-gate': ['.github/workflows/toolkit-programme-sweep-gate.yml'],
   'personal-data-guard': GUARD_FILES,
   'dependency-auto-merge': [AUTO_MERGE],
-  'test-shards': ['.github/workflows/toolkit-test-shards.yml'],
-  'shard-timings': ['.github/workflows/toolkit-shard-timings.yml'],
 };
-const SHARD_LIST = { schema: governed.MANIFEST_SCHEMA, systems: { linux: { command: ['node', '--test', '{files}'], discover: 'tests/*.test.js', shards: [{ id: 'linux-1', files: ['tests/a.test.js'] }, { id: 'linux-2', rest: true }] } } };
 
 function git(cwd, args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.invalid' } });
@@ -48,25 +43,19 @@ function put(dir, file, text) {
 
 const read = (dir, file) => fs.readFileSync(path.join(dir, ...file.split('/')), 'utf8');
 
-// A repository with a usable shard list. `installed` writes every default workflow, as a merged turn-on
-// pull request leaves them.
-function repository(t, { installed = false, shards = true } = {}) {
+// A repository. `installed` writes every default workflow, as a merged turn-on pull request leaves them.
+function repository(t, { installed = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'default-cloud-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   git(dir, ['init', '--quiet', '-b', 'main']);
-  if (shards) {
-    put(dir, governed.MANIFEST_REL, JSON.stringify(SHARD_LIST));
-    for (const name of ['a', 'b']) put(dir, `tests/${name}.test.js`, '');
-  }
   if (installed) for (const [file, text] of Object.entries(turnOn(dir).files)) put(dir, file, text);
   return dir;
 }
 
 // What a turn-on pull request from this Toolkit commit carries here.
-const turnOn = (dir, ciShards = 'yes') => proposal.cloudWorkflowFiles(dir, { root: ROOT, commit: COMMIT, ciShards });
-const plan = dir => workflows.plan({ repo: dir, root: ROOT, commit: COMMIT, ciShards: 'yes' });
-const YES = () => ({ ci_shards: { answer: 'yes' }, required_checks: ['Toolkit test shards'] });
-const findings = dir => conformance.cloudWorkflowFindings(fetchedState(dir), ROOT, { cloudWorkflowsCommit: COMMIT, mergedBinding: YES });
+const turnOn = dir => proposal.cloudWorkflowFiles(dir, { root: ROOT, commit: COMMIT });
+const plan = dir => workflows.plan({ repo: dir, root: ROOT, commit: COMMIT });
+const findings = dir => conformance.cloudWorkflowFindings(fetchedState(dir), ROOT, { cloudWorkflowsCommit: COMMIT });
 const drift = dir => findings(dir).filter(entry => entry.severity === 'drift').map(entry => entry.message);
 
 test('the one list names every Toolkit cloud workflow, and turn-on, check and refresh read only it', t => {
@@ -77,7 +66,7 @@ test('the one list names every Toolkit cloud workflow, and turn-on, check and re
   assert.deepEqual(Object.keys(turnOn(dir).files).sort(), Object.values(EXPECTED).flat().sort());
   assert.deepEqual([...new Set(plan(dir).rows.map(row => row.id))], Object.keys(EXPECTED));
   // A cloud workflow added to the Toolkit later joins the list, unless it only serves the Toolkit itself.
-  const listed = workflows.DEFAULT_CLOUD_WORKFLOWS.map(row => path.basename(row.file)), toolkitOnly = ['toolkit-rebump.yml'];
+  const listed = workflows.DEFAULT_CLOUD_WORKFLOWS.map(row => path.basename(row.file)), toolkitOnly = ['toolkit-rebump.yml', 'toolkit-shard-timings.yml'];
   for (const name of fs.readdirSync(path.join(ROOT, '.github/workflows')).filter(file => file.startsWith('toolkit-') && !toolkitOnly.includes(file))) assert.ok(listed.includes(name), `${name} is not a default cloud workflow`);
 });
 
@@ -102,9 +91,9 @@ test('a governed repository missing any one default workflow file is told about 
 // Red on the parent: the turn-on carried the guard only where its files already existed, and its settings
 // needed an owner's choice about commit author addresses.
 test('a turn-on in a repository with no guard files carries its workflow, script and settings, and no hooks', t => {
-  const dir = repository(t, { shards: false });
+  const dir = repository(t);
   const before = fs.readdirSync(path.join(dir, '.git', 'hooks')).sort();
-  const carried = turnOn(dir, null);
+  const carried = turnOn(dir);
   assert.equal(carried.warning, null);
   assert.deepEqual(carried.notes, []);
   assert.deepEqual(carried.added, ['programme-sweep', 'programme-sweep-gate', 'personal-data-guard', 'dependency-auto-merge']);
@@ -122,12 +111,12 @@ test('a turn-on in a repository with no guard files carries its workflow, script
 });
 
 test('the guard a turn-on carries passes on its own pull request, on a Dependabot sign-off and on a person\'s own commit identity', t => {
-  const dir = repository(t, { shards: false });
+  const dir = repository(t);
   put(dir, 'README.md', 'App\n');
   git(dir, ['add', '-A']);
   git(dir, ['commit', '--quiet', '-m', 'Start']);
   const base = git(dir, ['rev-parse', 'HEAD']);
-  for (const [file, text] of Object.entries(turnOn(dir, null).files)) put(dir, file, text);
+  for (const [file, text] of Object.entries(turnOn(dir).files)) put(dir, file, text);
   git(dir, ['add', '-A']);
   git(dir, ['commit', '--quiet', '-m', 'Prepare repository governance and checks']);
   const person = ['jane.tan', 'mailbox.sg'].join('@');
@@ -261,7 +250,7 @@ test('a link in a default workflow\'s place is never written through', t => {
   assert.deepEqual(turnOn(dir).notes.length, 1);
 });
 
-test('owner choices: governance off reports no missing workflow and its pull request leaves the guard alone; shards on never are left out, not drift', t => {
+test('owner choices: governance off reports no missing workflow and its pull request leaves the guard alone', t => {
   const dir = repository(t, { installed: true });
   // The pull request that turns governance off removes only marked cloud copies, so neither copied
   // workflow is one of them.
@@ -271,10 +260,33 @@ test('owner choices: governance off reports no missing workflow and its pull req
   }
   const off = { state: 'DISABLED', root: dir };
   assert.deepEqual(conformance.cloudSweepReachFindings(off, { mergedBinding: () => null }), []);
-  const bare = repository(t);
-  const never = conformance.cloudWorkflowFindings(fetchedState(bare), ROOT, { cloudWorkflowsCommit: COMMIT, mergedBinding: () => ({ ci_shards: { answer: 'never' } }) });
-  assert.deepEqual(never.filter(entry => /shard/i.test(entry.message)), []);
-  assert.ok(never.some(entry => entry.message.startsWith(CHECK)));
+});
+
+// The parallel CI shards offer is retired (INT-TK421-1391). A copy an older Toolkit made (the test
+// shards workflow at the name its list chose, Shard Timings at its fixed path) and its shard list are
+// named for the refresh pull request to remove: info with a refresh row, never drift, and a turn-on
+// never carries them. A workflow without the marker, a marker at a path that copy never had, and a
+// list with another schema are someone else's and are never named.
+const RETIRED_MARK = id => `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ${id} toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)} layout=1\nname: ${id}\n`;
+test('retired shard copies and the shard list are named for the refresh to remove, and only Toolkit\'s own', t => {
+  const dir = repository(t, { installed: true });
+  put(dir, '.github/workflows/our-shards.yml', RETIRED_MARK('test-shards'));
+  put(dir, '.github/workflows/toolkit-shard-timings.yml', RETIRED_MARK('shard-timings'));
+  put(dir, '.github/toolkit-test-shards.json', `${JSON.stringify({ schema: 'toolkit-test-shards/v2', systems: {} })}\n`);
+  put(dir, '.github/workflows/timings-elsewhere.yml', RETIRED_MARK('shard-timings'));
+  put(dir, '.github/workflows/mine.yml', 'name: shards of my own\n');
+  const retired = ['.github/toolkit-test-shards.json', '.github/workflows/our-shards.yml', '.github/workflows/toolkit-shard-timings.yml'];
+  assert.deepEqual(plan(dir).retired.map(row => row.file).sort(), retired);
+  assert.ok(plan(dir).retired.every(row => /Toolkit no longer sets up CI shards/.test(row.why)));
+  const found = findings(dir);
+  assert.deepEqual(found.filter(entry => entry.severity === 'drift'), [], 'never drift');
+  const named = found.filter(entry => entry.id === 'CLOUD_WORKFLOW_RETIRED');
+  assert.deepEqual(named.map(entry => entry.file).sort(), retired);
+  assert.ok(named.every(entry => entry.severity === 'info' && entry.state === 'retired' && entry.refreshable === true && /--refresh-pr` opens the pull request that removes it/.test(entry.message)));
+  assert.deepEqual(Object.keys(turnOn(dir).files).filter(file => /shard/.test(file)), [], 'a turn-on carries none of them');
+  // Another schema is not the retired list.
+  put(dir, '.github/toolkit-test-shards.json', '{"schema":"my-own/v1"}\n');
+  assert.deepEqual(plan(dir).retired.map(row => row.file).sort(), retired.slice(1));
 });
 
 test('unreadable: a Toolkit checkout that cannot give the copies carries none, says why, and claims nothing added', t => {
@@ -287,6 +299,6 @@ test('unreadable: a Toolkit checkout that cannot give the copies carries none, s
   assert.deepEqual(carried.files, {});
   assert.equal(carried.added, undefined);
   assert.match(carried.warning, /the cloud workflow copies were not refreshed in this pull request \(.* is missing at Toolkit commit /);
-  const found = conformance.cloudWorkflowFindings(fetchedState(dir), empty, { toolkitRoot: empty, cloudWorkflowsCommit: git(empty, ['rev-parse', 'HEAD']), mergedBinding: YES });
+  const found = conformance.cloudWorkflowFindings(fetchedState(dir), empty, { toolkitRoot: empty, cloudWorkflowsCommit: git(empty, ['rev-parse', 'HEAD']) });
   assert.deepEqual(found.map(entry => `${entry.id}:${entry.severity}`), ['CLOUD_WORKFLOWS_UNCHECKED:info']);
 });

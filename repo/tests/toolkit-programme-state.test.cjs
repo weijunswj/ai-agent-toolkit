@@ -73,10 +73,15 @@ test('the JSON schemas and the runtime validator agree on valid and invalid docu
     assert.equal(validateBinding({ ...binding, parent_lifecycle }), false);
     assert.throws(() => state.validateBinding({ ...binding, parent_lifecycle }), /invalid/);
   }
-  // ci_shards (the sharded CI offer's answer) is read and accepted, never acted on, in this release.
+  // ci_shards (the retired parallel CI shards offer's answer) is still read and accepted, so a binding
+  // an older Toolkit wrote stays valid, but it is retired: every binding writer leaves it out.
+  assert.ok(state.RETIRED_BINDING_KEYS.includes('ci_shards'));
   for (const ci_shards of [{ answer: 'yes' }, { answer: 'not-now', offered_at: '2026-11-14T18:00:00Z' }, { answer: 'never' }]) {
     assert.equal(validateBinding({ ...binding, ci_shards }), true, JSON.stringify(ci_shards));
     assert.deepEqual(state.validateBinding({ ...binding, ci_shards }).ci_shards, ci_shards);
+    assert.deepEqual(state.withoutRetiredKeys({ ...binding, ci_shards }), binding, `${JSON.stringify(ci_shards)}: a writer drops it`);
+    const text = `${JSON.stringify({ ...binding, ci_shards }, null, 2)}\n`;
+    assert.equal(state.withoutRetiredKeysText(text), `${JSON.stringify(binding, null, 2)}\n`, 'in the file\'s own layout, only its lines go');
   }
   for (const ci_shards of [{}, { answer: 'maybe' }, { answer: 'yes', shards: 4 }, { answer: 'yes', offered_at: 'yesterday' }, 'yes']) {
     assert.equal(validateBinding({ ...binding, ci_shards }), false, JSON.stringify(ci_shards));
