@@ -44,8 +44,9 @@
 // runs again), or, when it is closed, start the next train stacked behind it (`onto`, as build reads
 // it). With no open train while main's checks run, even one ready pull request starts a train on main.
 // With no open train and main's checks done, fewer than two ready write nothing: merge the one alone.
-// `--next-train` starts the next train behind the last one instead of joining it: `join` names it for
-// a pull request that conflicted with that train, which is dropped at once and starts the next train.
+// `--next-train` starts the next train behind the last one instead of joining it, for ready pull
+// requests a full train has no room for. A joiner dropped for conflicting with a train boards no train
+// until that train has landed and its conflict is resolved on top of main and reviewed (join says so).
 //
 // --live reads every GitHub fact from a JSON file instead of `gh api` (REST):
 //   { "default_branch": "main",

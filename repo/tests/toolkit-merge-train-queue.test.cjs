@@ -4,12 +4,14 @@
 // required checks running after a merge, or an open train), a pull request that becomes ready never
 // waits alone: it joins the last train in the queue while that train takes joiners (behind another
 // train, or at the front while main's checks run), else it starts the next train behind it; a joiner
-// that conflicts is dropped at once and starts the next train; the front train lands only once main's
+// that conflicts is dropped and boards the next train only after that train lands and its builder's
+// resolution on top of main passes a delta review (INT-TK421-1388); the front train lands only once main's
 // checks are done. Red on the parent: find stacked every ready pull request into a new train, there
 // was no join, land never looked at main's checks, and build left the caller's checkout on the train.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const train = require('../scripts/toolkit-merge-train.cjs');
 const { fixture, built } = require('./support/merge-train-fixture.cjs');
@@ -90,7 +92,7 @@ test('find: a ready pull request joins the last train while it takes joiners, el
   const train2 = { pr: 51, branch: 'toolkit-train/two', base: 'toolkit-train/one', head: one, members: [[1, one]] };
   const behind = find(f, facts(f, { ready: [[2, two]], trains: [train1, train2], main: green }));
   assert.equal(behind.manifest.join.pr, 51);
-  // --next-train starts the next train instead (a joiner that conflicted with the last one).
+  // --next-train starts the next train instead (ready pull requests a full train has no room for).
   const forced = find(f, facts(f, { ready: [[2, two]], trains: [train1], main: running }), ['--next-train']);
   assert.equal(forced.manifest.onto.pr, 50);
   assert.equal(forced.manifest.join, undefined);
@@ -109,7 +111,10 @@ test('join adds a ready pull request to an open train without rewriting it, re-b
   assert.equal(joined.ok, true, JSON.stringify(joined));
   assert.deepEqual(joined.joined, [2]);
   assert.deepEqual(joined.dropped.map(entry => [entry.pr, entry.reason]), [[3, 'conflicts with the train']]);
-  assert.match(joined.next.join('\n'), /#3 conflicts with train toolkit-train\/one: it starts the next train behind it at once \(node repo\/scripts\/toolkit-merge-train\.cjs find --pr 3 --next-train\)/);
+  assert.ok(joined.next.includes("#3 conflicts with train toolkit-train/one, so it is dropped and boards no train for now: once this train lands, its builder merges main into #3's branch and resolves the conflict there, a delta review checks the resolution at the new head, then it boards the next train (node repo/scripts/toolkit-merge-train.cjs find --pr 3)"), joined.next.join('\n'));
+  assert.doesNotMatch(joined.next.join('\n'), /--next-train|at once/, 'G2 round 1 M1: no step that cannot succeed');
+  // The train body tells the same path for the dropped joiner.
+  assert.match(train.body(train.checkManifest(JSON.parse(fs.readFileSync(first.out, 'utf8')))), /\| #3 \| `[0-9a-f]{40}` \| conflicts with the train \| once this train lands, its builder merges main into #3's branch and resolves the conflict there/);
   // Forward only: the old head is inside the new one, so the push needs no force.
   assert.equal(f.git('merge-base', '--is-ancestor', start, 'toolkit-train/one') === '', true);
   assert.equal(f.git('rev-parse', 'toolkit-train/one'), joined.head);
@@ -136,6 +141,40 @@ test('join adds a ready pull request to an open train without rewriting it, re-b
   // A branch here that moved since find read it is refused.
   const stale = f.manifestFile({ join: { pr: 50, branch: 'toolkit-train/one', head: start }, members: [f.member(4, f.branch('pr-4', { 'd.txt': 'd\n' }))] }, 'stale.json');
   assert.throws(() => train.run(['join', '--manifest', first.out, '--add', stale, '--main', 'main'], f.repo, f.opts), /toolkit-train\/one here is at [0-9a-f]{12}, not the head find saw/);
+});
+
+// G2 round 1 M1, with the owner's answer (INT-TK421-1388): the printed path for a dropped joiner, followed
+// on a fixture, ends with it boarded on the next train.
+test('a joiner dropped for conflicting follows its printed steps: the train lands, its builder resolves on main, a delta review passes, it boards the next train', t => {
+  const f = fixture(t);
+  const one = f.branch('pr-1', { 'b.txt': 'b\n' });
+  const clash = f.branch('pr-3', { 'b.txt': 'other\n' });
+  const first = built(f, [f.member(1, one)]);
+  const add = f.manifestFile({ join: { pr: 50, branch: 'toolkit-train/one', head: first.result.head }, members: [f.member(3, clash)] }, 'add.json');
+  const dropped = train.run(['join', '--manifest', first.out, '--add', add, '--main', 'main'], f.repo, f.opts);
+  assert.equal(dropped.ok, false);
+  assert.match(dropped.next[0], /^#3 conflicts with train toolkit-train\/one, so it is dropped and boards no train for now: once this train lands, /);
+  // Step 1: the train lands.
+  f.git('merge', '--quiet', '--no-ff', '-m', 'land train #50', 'toolkit-train/one');
+  // Step 2: its builder merges main into #3's branch and resolves the conflict there.
+  f.git('switch', '--quiet', 'pr-3');
+  assert.notEqual(spawnSync('git', ['merge', '--no-edit', 'main'], { cwd: f.repo, encoding: 'utf8' }).status, 0, 'the conflict is real');
+  f.write('b.txt', 'b\nother\n');
+  f.git('add', 'b.txt');
+  f.git('commit', '--quiet', '--no-edit');
+  const resolved = f.git('rev-parse', 'HEAD');
+  f.git('switch', '--quiet', 'main');
+  // Step 3: a delta review passes the resolution (its PASS names the new head); main's checks run after
+  // the landing, so find starts the next train with it.
+  const found = find(f, facts(f, { ready: [[3, resolved]], main: running }), ['--pr', '3']);
+  assert.equal(found.result.written, true, JSON.stringify(found.result));
+  assert.deepEqual(found.manifest.members.map(member => [member.pr, member.head]), [[3, resolved]]);
+  // Step 4: it boards the next train and that train verifies.
+  const out = path.join(f.root, 'next.json');
+  const next = train.run(['build', '--manifest', found.out, '--branch', 'toolkit-train/two', '--main', 'main', '--live', f.noTrains, '--out', out], f.repo, f.opts);
+  assert.deepEqual([next.ok, next.boarded, next.ejected], [true, [3], []], JSON.stringify(next));
+  assert.equal(train.run(['verify', '--manifest', out, '--head', next.head, '--main', 'main'], f.repo, f.opts).ok, true);
+  assert.equal(f.git('show', `${next.head}:b.txt`), 'b\nother');
 });
 
 test('land waits while main\'s required checks run: the train still takes joiners, then lands', t => {

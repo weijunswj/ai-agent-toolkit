@@ -1,6 +1,6 @@
 ### Added
 
-- Merge trains form a queue: while main's required checks run after a merge, or a train is open, a pull request that becomes ready joins the last open train (`toolkit-merge-train.cjs join`, which reverts the train's bump, merges the joiner and bumps once again without rewriting the branch), or starts the next train behind it once that train has closed. A joiner that conflicts is dropped at once and starts the next train (`find --next-train`). `land` waits while main's required checks run.
+- Merge trains form a queue: while main's required checks run after a merge, or a train is open, a pull request that becomes ready joins the last open train (`toolkit-merge-train.cjs join`, which reverts the train's bump, merges the joiner and bumps once again without rewriting the branch), or starts the next train behind it once that train has closed. A joiner that conflicts is dropped; once the train lands, its builder resolves the conflict on top of main, a delta review checks it, and it boards the next train. `land` waits while main's required checks run.
 - The programme sweep raises `TRAIN_BOARD_DUE` for a ready pull request no train holds while a landing is in flight, and `BOT_PR_OPEN` for a bot's pull request on the first sweep that sees it; both are called out at the controller's next turn end, not after four hours.
 
 ### Changed

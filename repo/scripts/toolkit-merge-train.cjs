@@ -56,8 +56,10 @@
 // train's head it reverts the train's bump (when it ends in one), merges each joiner at its reviewed
 // head, then bumps once at the level of every member, and moves the branch there (forward only, so the
 // push needs no force). The bump revert is recorded under "rebumps", which verify accepts. A joiner that
-// does not merge cleanly is dropped at once and starts the next train behind this one (find --pr <n>
-// --next-train); when none joins, the train is left as it was. It refuses a train that does not verify,
+// does not merge cleanly is dropped and boards no train for now: every later train carries this one's
+// content, so once this train lands its builder merges main into the joiner's branch and resolves the
+// conflict there, a delta review checks the resolution at the new head, and then it boards the next
+// train (CONFLICT_PATH); when none joins, the train is left as it was. It refuses a train that does not verify,
 // a branch checked out in any worktree, a branch here that is not at the head find saw, and a result
 // that would not equal a fresh build of every member on main.
 // eject takes a boarded member off a train that is already pushed, without rewriting its history,
@@ -538,13 +540,13 @@ function join(cwd, manifest, options) {
       const merged = git(tree, ['-c', 'rerere.enabled=false', 'merge', '--no-ff', '--no-edit', '-m', memberMessage(member), member.head], { allowFail: true });
       if (merged.status !== 0) {
         git(tree, ['merge', '--abort'], { allowFail: true });
-        dropped.push({ ...member, reason: 'conflicts with the train' });
+        dropped.push({ ...member, reason: JOIN_CONFLICT });
         continue;
       }
       joined.push(member);
     }
-    const nextFor = entries => entries.map(entry => (entry.reason === 'conflicts with the train'
-      ? `#${entry.pr} conflicts with train ${branch}: it starts the next train behind it at once (node repo/scripts/toolkit-merge-train.cjs find --pr ${entry.pr} --next-train)`
+    const nextFor = entries => entries.map(entry => (entry.reason === JOIN_CONFLICT
+      ? `#${entry.pr} conflicts with train ${branch}, so it is dropped and boards no train for now: ${CONFLICT_PATH(entry.pr)}`
       : `#${entry.pr}: ${entry.reason}`));
     if (!joined.length) return { ok: false, branch, head: start, main, joined: [], dropped: dropped.map(({ pr, head, reason }) => ({ pr, head, reason })), problems: ['no pull request joined, so the train is left as it was'], next: nextFor(dropped) };
     const members = [...manifest.members, ...joined];
@@ -884,9 +886,15 @@ function memberOverlap(cwd, members, main) {
 }
 
 // What the merging agent does about each ejected member: it never just drops off the train.
+// What a joiner join dropped for conflicting with a train does next (the owner's rule): no train at
+// once, since every later train carries that train's content.
+const JOIN_CONFLICT = 'conflicts with the train';
+const CONFLICT_PATH = pr => `once this train lands, its builder merges main into #${pr}'s branch and resolves the conflict there, a delta review checks the resolution at the new head, then it boards the next train (node repo/scripts/toolkit-merge-train.cjs find --pr ${pr})`;
+
 function ejectedNext(ejected = []) {
   return ejected.map(row => `#${row.pr}: ${row.reason === 'already on the train base' ? 'already landed; record it and drop it from the queue'
-    : 'land it on its own, or rejoin the next train once its review passes the head it boards at'} (${row.reason})`);
+    : row.reason === JOIN_CONFLICT ? CONFLICT_PATH(row.pr)
+      : 'land it on its own, or rejoin the next train once its review passes the head it boards at'} (${row.reason})`);
 }
 
 // The manifest's ejected rows as plain table cells (a pull request number, a full SHA, a fixed reason).
