@@ -1,6 +1,7 @@
 'use strict';
 
-// Open pull requests no task in progress owns: PR_UNOWNED (open 24 hours or more) and PR_RED_UNOWNED
+// Open pull requests no task in progress owns: PR_UNOWNED (open 24 hours or more), BOT_PR_OPEN (a
+// bot's, on the first sweep that sees it; the owner's decision of 26 November 2026) and PR_RED_UNOWNED
 // (red at its head, whatever its age), the sweep's reads and holds, and the owner `attention` shows.
 // Each test names the rows of the closure matrix it covers (M1 to M28): pull request x checks x age x
 // task link x acknowledgement. Every row runs through a real refresh pass on the in-memory GitHub.
@@ -21,6 +22,8 @@ const iso = ms => new Date(ms).toISOString();
 const sha = character => character.repeat(40);
 const controller = { session: 'controller-1', prefix: 'INT-TK421-' };
 const SHARD_BOT = 'example-governance[bot]';
+// A person's pull request: the 24-hour rule applies to it.
+const PERSON = 'example-builder';
 const temps = [];
 const tmp = () => { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'open-prs-')); temps.push(dir); return dir; };
 test.after(() => { for (const dir of temps) fs.rmSync(dir, { recursive: true, force: true }); });
@@ -77,7 +80,7 @@ function fixture(tasks = []) {
   fx.entry = (code, number, kind = undefined) => (fx.parent().attention || []).find(entry => entry.code === code && entry.issue === number && entry.kind === kind && ['new', 'acknowledged'].includes(entry.state));
   fx.ack = (id, hours = 24) => fx.ctrl(['ack', '--finding', id, '--next', 'land it on the next train', '--due', iso(fx.now + hours * HOUR)]);
   // The open findings of the two codes, as `<code> <number>`, with a store or acknowledged mark.
-  fx.flagged = () => (fx.parent().attention || []).filter(entry => ['PR_UNOWNED', 'PR_RED_UNOWNED'].includes(entry.code) && ['new', 'acknowledged'].includes(entry.state))
+  fx.flagged = () => (fx.parent().attention || []).filter(entry => ['PR_UNOWNED', 'PR_RED_UNOWNED', 'BOT_PR_OPEN'].includes(entry.code) && ['new', 'acknowledged'].includes(entry.state))
     .map(entry => `${entry.code} ${entry.kind === 'store' ? 'store ' : ''}${entry.issue}${entry.state === 'acknowledged' ? ' acknowledged' : ''}`).sort();
   fx.row = (number, where = 'repo') => (fx.run(['attention']).result.open_prs || []).find(row => row.where === where && row.number === number) || {};
   return fx;
@@ -86,22 +89,24 @@ const active = (pr = null) => doc => Object.assign(doc, { lifecycle: 'ACTIVE', n
 
 // T1 to T9 are red on the base: bots are left out of every pull request finding there, neither code
 // exists, and attention lists no pull requests.
-test('T1 M2: a shard refresh and a source-watch notice nobody owns are findings once open 24 hours', () => {
+test('T1 M2: a shard refresh and a source-watch notice nobody owns are findings on the first sweep that sees them', () => {
   const fx = fixture([{ issue: 500 }]);
-  fx.pr(1471, { hours: 25, author: SHARD_BOT, branch: 'toolkit/shard-timings-20261123', title: 'Refresh the test shards' });
+  fx.pr(1471, { hours: 1, author: SHARD_BOT, branch: 'toolkit/shard-timings-20261123', title: 'Refresh the test shards' });
   fx.pr(1261, { hours: 5 * 24, author: 'app/github-actions', branch: 'source-watch/notice', title: 'Upstream updates', checks: [] });
   fx.pass();
-  assert.deepEqual(fx.flagged(), ['PR_UNOWNED 1261', 'PR_UNOWNED 1471']);
+  assert.deepEqual(fx.flagged(), ['BOT_PR_OPEN 1261', 'BOT_PR_OPEN 1471']);
   const row = fx.row(1471);
-  assert.deepEqual([row.owner, row.code, row.next], ['none', 'PR_UNOWNED', `flagged ${fx.entry('PR_UNOWNED', 1471).id}`]);
+  assert.deepEqual([row.owner, row.code, row.next], ['none', 'BOT_PR_OPEN', `flagged ${fx.entry('BOT_PR_OPEN', 1471).id}`]);
+  // Called out to the controller at once, not after the net's four hours.
+  assert.ok(state.netCallout(fx.parent().attention, START).entries.some(entry => entry.code === 'BOT_PR_OPEN' && entry.ref === 'PR #1471'));
   assert.deepEqual(state.validateParent(fx.parent()), [], 'the stored findings are valid');
-  assert.ok(state.NET_CODES.has('PR_UNOWNED') && state.NET_CODES.has('PR_RED_UNOWNED'), 'both are stale-work net findings');
+  assert.ok(['PR_UNOWNED', 'PR_RED_UNOWNED', 'BOT_PR_OPEN'].every(code => state.NET_CODES.has(code)), 'all are stale-work net findings');
   for (const code of ['PR_WITHOUT_TASK', 'PR_UNTRACKED']) assert.equal((fx.parent().attention || []).some(entry => entry.code === code), false, `${code} still leaves these bots out`);
 });
 
 test('T2 M1: under 24 hours nothing is raised, at 24 hours it is, and an unread open time counts as old', () => {
   const fx = fixture([{ issue: 500 }]);
-  fx.pr(1471, { hours: 24 - 1 / 60, author: SHARD_BOT, branch: 'toolkit/shard-timings-20261123' });
+  fx.pr(1471, { hours: 24 - 1 / 60, author: PERSON, branch: 'toolkit/500-slice' });
   fx.pass();
   assert.deepEqual(fx.flagged(), []);
   assert.deepEqual([fx.row(1471).owner, fx.row(1471).next], ['none', `flagged after ${iso(START + HOUR / 60)}`]);
@@ -117,7 +122,7 @@ test('T2 M1: under 24 hours nothing is raised, at 24 hours it is, and an unread 
 
 test('T3 M3 M4: an acknowledgement owns it for at most 24 hours, then it is new and called out at once; it is never disposed', () => {
   const fx = fixture([{ issue: 500 }]);
-  fx.pr(1261, { hours: 30, author: 'github-actions[bot]' });
+  fx.pr(1261, { hours: 30, author: PERSON });
   fx.pass();
   assert.deepEqual(fx.flagged(), ['PR_UNOWNED 1261']);
   const { id } = fx.entry('PR_UNOWNED', 1261);
@@ -147,7 +152,7 @@ test('T3 M3 M4: an acknowledgement owns it for at most 24 hours, then it is new 
 test('T4 M5 M6 M7 M8: red is raised on the first pass, one finding per pull request, and each head is its own', () => {
   const fx = fixture([{ issue: 500 }]);
   fx.pr(1443, { hours: 1 / 6, checks: RED, author: SHARD_BOT, branch: 'toolkit/shard-timings-20261122' });
-  fx.pr(1261, { hours: 26, author: 'app/github-actions', head: sha('b') });
+  fx.pr(1261, { hours: 26, author: PERSON, head: sha('b') });
   fx.pass();
   assert.deepEqual(fx.flagged(), ['PR_RED_UNOWNED 1443', 'PR_UNOWNED 1261'], 'M5: ten minutes old and red');
   // M6: acknowledged while green, then red at the same head.
@@ -163,7 +168,7 @@ test('T4 M5 M6 M7 M8: red is raised on the first pass, one finding per pull requ
   for (const number of [1443, 1261]) fx.github.prs.get(number).contexts = [...RED, run('validate', 'SUCCESS', 30), run('gate', 'SUCCESS', 30)];
   fx.now = START + 2 * HOUR;
   fx.pass();
-  assert.deepEqual(fx.flagged(), ['PR_UNOWNED 1261']);
+  assert.deepEqual(fx.flagged(), ['BOT_PR_OPEN 1443', 'PR_UNOWNED 1261'], 'green again, a bot pull request is named as one');
   assert.equal(fx.entry('PR_UNOWNED', 1261).state, 'new');
   // M8: red again, acknowledged, then a new red head.
   fx.github.prs.get(1443).contexts = RED;

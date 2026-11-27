@@ -160,7 +160,8 @@ test('find leaves out pull requests an open train holds, stacks the rest onto it
   assert.deepEqual(manifest.onto, { pr: 50, branch: 'toolkit/train-50', head: sha(50) });
   assert.deepEqual(result.onto, manifest.onto);
   assert.equal(manifest.members.length, 6);
-  assert.deepEqual(result.next, [`stack #3, #4, #5, #6, #7, #8 onto train #50 (toolkit/train-50 at ${sha(50).slice(0, 12)}): fetch it, then build takes onto from this manifest`, 'board the next train with #9']);
+  // Main's checks are done (none listed), so train #50 is closed to joiners: the next train starts behind it.
+  assert.deepEqual(result.next, ['train #50 closed to joiners (main\'s required checks are done) and lands next: this starts the next train behind it', `stack #3, #4, #5, #6, #7, #8 onto train #50 (toolkit/train-50 at ${sha(50).slice(0, 12)}): fetch it, then build takes onto from this manifest`, 'board the next train with #9']);
   assert.equal(train.checkManifest(manifest).onto.pr, 50, 'build accepts it');
 
   // One ready pull request with an open train stacks too: one bump and one owner ask, not two.
@@ -174,17 +175,18 @@ test('find leaves out pull requests an open train holds, stacks the rest onto it
   live = facts(f, [ready(4), ready(5, { checks: [] })]);
   const lone = path.join(f.root, 'lone.json');
   ({ result } = find(f, live, lone));
-  assert.deepEqual([result.written, result.ready, result.next], [false, ['#4'], ['merge #4 alone: one ready pull request makes no train']]);
+  assert.deepEqual([result.written, result.ready, result.next], [false, ['#4'], ['merge #4 alone: one ready pull request makes no train while nothing is landing']]);
   assert.equal(fs.existsSync(lone), false);
   assert.equal(result.onto, undefined);
 });
 
 test('find stacks onto the end of a train chain, and onto the newest when two chains are open', t => {
   const f = fixture(t);
-  // #51 is stacked on #50 (its pull request targets #50's branch), so new members stack onto #51.
+  // #51 is stacked on #50 (its pull request targets #50's branch): it waits behind #50, so it is the
+  // last train in the queue and new members join it.
   let live = facts(f, [ready(3), ready(4)], { pulls: [openTrain(50, 'toolkit/train-50', 'main', 1), openTrain(51, 'toolkit/train-51', 'toolkit/train-50', 2)] });
   let { result, out } = find(f, live);
-  assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')).onto, { pr: 51, branch: 'toolkit/train-51', head: sha(51) });
+  assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')).join, { pr: 51, branch: 'toolkit/train-51', head: sha(51) });
   assert.equal(result.next.length, 1, result.next.join('\n'));
   // Two trains built on main side by side: stack onto the newest and name the other.
   live = facts(f, [ready(3), ready(4)], { pulls: [openTrain(50, 'toolkit/train-50', 'main', 1), openTrain(52, 'toolkit/train-52', 'main', 2)] });

@@ -1948,6 +1948,106 @@
       "status": "pass"
     },
     {
+      "id": "GOV.owed-check-train-board-due-blocks-at-once",
+      "source": "owner decision INT-TK421-1381 and G2 round 1 of the train queue (M2): a pull request ready to board while a landing is in flight stops the controller's turn at once, not after four hours",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "state",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "TRAIN_BOARD_DUE",
+            "state": "new",
+            "age_hours": 0,
+            "issue": 1547
+          }
+        ]
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.owed-check-bot-pr-blocks-at-once",
+      "source": "owner decision INT-TK421-1380 and G2 round 1 of the train queue (M2): a bot's pull request stops the controller's turn on the first sweep that sees it, not after 24 hours",
+      "hosts": [
+        "claude"
+      ],
+      "event": "Stop",
+      "payload": {
+        "stop_hook_active": false
+      },
+      "kind": "state",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "owed"
+        },
+        "transcript": [
+          {
+            "type": "assistant",
+            "timestamp": "{now}",
+            "message": {
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "tool_use",
+                  "id": "toolu_owed_1",
+                  "name": "Bash",
+                  "input": {
+                    "command": "node programme.cjs ack --finding abcdefabcdef --next \"x\" --session fixture --controller"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "attention_net": [
+          {
+            "code": "BOT_PR_OPEN",
+            "state": "new",
+            "age_hours": 0,
+            "issue": 1550
+          }
+        ]
+      },
+      "expect": {
+        "decision": "deny",
+        "reason": "toolkit-owed-check-hook"
+      },
+      "status": "pass"
+    },
+    {
       "id": "GOV.owed-check-desktop-top-level-blocks",
       "source": "the turn-end owed check in a top-level desktop chat of the controller: the host-session variable and CLAUDE_CODE_CHILD_SESSION do not decide whether the turn is stopped",
       "hosts": [

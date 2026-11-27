@@ -17,6 +17,7 @@ test('eject takes a boarded member off a bumped train with reverts on top, re-bu
   const three = f.branch('pr-3', { 'd.txt': 'd\n' });
   const { result, out } = built(f, [f.member(1, one), f.member(2, two, { bump: 'minor' }), f.member(3, three)]);
   assert.equal(f.git('show', `${result.head}:VERSION`), '1.1.0');
+  f.git('switch', '--quiet', 'toolkit-train/one'); // eject runs in a checkout of the train
   const cli = f.cli('eject', '--manifest', out, '--pr', '2', '--reason', 'failed its review after boarding', '--main', 'main');
   assert.equal(cli.status, 0, cli.stdout + cli.stderr);
   const ejected = JSON.parse(cli.stdout);
@@ -52,6 +53,7 @@ test('verify accepts only the recorded reverts, each identical to Git\'s own rev
   const two = f.branch('pr-2', { 'c.txt': 'c\n' });
   const { out } = built(f, [f.member(1, one), f.member(2, two)]);
   const before = JSON.parse(fs.readFileSync(out, 'utf8'));
+  f.git('switch', '--quiet', 'toolkit-train/one'); // eject runs in a checkout of the train
   const result = train.run(['eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
   assert.equal(result.ok, true, JSON.stringify(result));
   const record = JSON.parse(fs.readFileSync(out, 'utf8'));
@@ -99,6 +101,7 @@ test('eject refuses a member a later member builds on and leaves the train as it
   f.git('switch', '--quiet', 'main');
   const { result, out } = built(f, [f.member(1, one), f.member(2, two)]);
   const before = fs.readFileSync(out, 'utf8');
+  f.git('switch', '--quiet', 'toolkit-train/one'); // eject runs in a checkout of the train
   const refused = train.run(['eject', '--manifest', out, '--pr', '1', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
   assert.equal(refused.ok, false);
   assert.match(refused.problems[0], /^#2 is built on #1: a later member builds on it, so eject that member first$/);
@@ -115,6 +118,7 @@ test('a stacked train ejects with one revert, and land waits until the ejected p
   const first = built(f, [f.member(1, one)]);
   const out = path.join(f.root, 'stacked.json');
   const stacked = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, two), f.member(3, three)] }, 'stacked-in.json'), '--branch', 'toolkit-train/two', '--main', 'main', '--onto', first.result.head, '--out', out], f.repo, f.opts);
+  f.git('switch', '--quiet', 'toolkit-train/two'); // eject runs in a checkout of the train
   const result = train.run(['eject', '--manifest', out, '--pr', '3', '--reason', 'failed review', '--main', first.result.head], f.repo, f.opts);
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.reverts.length, 1, 'no bump to replace on a stacked train');
@@ -122,6 +126,7 @@ test('a stacked train ejects with one revert, and land waits until the ejected p
   assert.ok(stacked.head);
 
   const solo = built(f, [f.member(1, one), f.member(2, two)]);
+  f.git('switch', '--quiet', 'toolkit-train/one'); // eject runs in a checkout of the train
   const ejected = train.run(['eject', '--manifest', solo.out, '--pr', '2', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
   const live = path.join(f.root, 'live.json');
   const facts = { 60: { state: 'OPEN', head: ejected.head, body: MEMBER_BODY }, 1: { state: 'OPEN', head: one, body: MEMBER_BODY }, 2: { state: 'OPEN', head: two, body: MEMBER_BODY } };
@@ -160,6 +165,7 @@ test('eject refuses a member that a later member is built on even when they touc
   f.git('switch', '--quiet', 'main');
   const three = f.branch('pr-3', { 'd.txt': 'd\n' });
   const { result, out } = built(f, [f.member(1, one), f.member(2, two), f.member(3, three)]);
+  f.git('switch', '--quiet', 'toolkit-train/one'); // eject runs in a checkout of the train
   const refused = train.run(['eject', '--manifest', out, '--pr', '1', '--reason', 'failed review', '--main', 'main'], f.repo, f.opts);
   assert.equal(refused.ok, false);
   assert.match(refused.problems[0], /^#2 is built on #1: a later member builds on it, so eject that member first$/);

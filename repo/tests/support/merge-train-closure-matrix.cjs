@@ -38,7 +38,8 @@ function landOnMain(f, ref, back) {
 const exists = (f, ref, file) => spawnSync('git', ['cat-file', '-e', `${ref}:${file}`], { cwd: f.repo }).status === 0;
 
 // Running train A (#1) on main, and train B stacked on it holding #2 = X (two commits, x1 then x2)
-// and #3 = Z. Returns the commits and B's manifest file; the checkout is left on B.
+// and #3 = Z. Returns the commits and B's manifest file; the checkout is switched to B (build leaves it
+// where it was), since eject and catchup run in a checkout of the train.
 function stackedPair(f) {
   const a = f.branch('pr-1', { 'a1.txt': 'a1\n' });
   const x1 = commitOn(f, 'pr-2', f.main, { 'x1.txt': 'x1\n' });
@@ -49,6 +50,7 @@ function stackedPair(f) {
   const stacked = train.run(['build', '--manifest', f.manifestFile({ members: [f.member(2, x2), f.member(3, z)] }, 'stacked-in.json'),
     '--branch', 'toolkit-train/two', '--main', 'main', '--onto', first.result.head, '--out', out], f.repo, f.opts);
   assert.deepEqual(stacked.boarded, [2, 3], JSON.stringify(stacked.ejected));
+  f.git('switch', '--quiet', 'toolkit-train/two');
   return { a, x1, x2, z, runningHead: first.result.head, out };
 }
 
@@ -191,6 +193,7 @@ const MATRIX = [
       const x2 = commitOn(f, 'pr-2', x1, { 'x2.txt': 'x2\n' });
       const w = commitOn(f, 'pr-4', x1, { 'w.txt': 'w\n' });
       const { out } = built(f, [f.member(2, x2), f.member(4, w)]);
+      f.git('switch', '--quiet', 'toolkit-train/one'); // eject and catchup run in a checkout of the train
       const before = snapshot(f, out);
       assertRefusedInPlace(f, run(f, 'eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main'), out, before);
     },
@@ -203,6 +206,7 @@ const MATRIX = [
       const z = f.branch('pr-3', { 'z.txt': 'z\n' });
       landOnMain(f, landed);
       const { result, out } = built(f, [f.member(2, landed), f.member(3, z)]);
+      f.git('switch', '--quiet', 'toolkit-train/one'); // eject and catchup run in a checkout of the train
       assert.deepEqual(result.boarded, [3]);
       assert.equal(result.ejected[0].reason, 'already on the train base');
       const checked = verify(f, out, result.head);
@@ -235,6 +239,7 @@ const MATRIX = [
       const x2 = commitOn(f, 'pr-2', x1, { 'x2.txt': 'x2\n' });
       const z = f.branch('pr-3', { 'z.txt': 'z\n' });
       const { out } = built(f, [f.member(2, x2), f.member(3, z)]);
+      f.git('switch', '--quiet', 'toolkit-train/one'); // eject and catchup run in a checkout of the train
       const ejected = run(f, 'eject', '--manifest', out, '--pr', '2', '--reason', 'failed review', '--main', 'main');
       assert.equal(ejected.ok, true, JSON.stringify(ejected));
       const live = path.join(f.root, 'live.json');

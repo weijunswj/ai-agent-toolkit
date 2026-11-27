@@ -928,7 +928,7 @@ test('attention lists every open pull request with its owner, next step and fail
   fx.github.storePulls.push({ number: 12, title: 'Store clean-up', draft: false, created_at: before(26) });
   fx.run(['refresh']);
   const entry = (code, issue, kind) => fx.parentDoc().attention.find(item => item.code === code && item.issue === issue && item.kind === kind);
-  const ids = { aged: entry('PR_UNOWNED', 901)?.id, red: entry('PR_RED_UNOWNED', 902)?.id, store: entry('PR_UNOWNED', 12, 'store')?.id };
+  const ids = { aged: entry('BOT_PR_OPEN', 901)?.id, red: entry('PR_RED_UNOWNED', 902)?.id, store: entry('PR_UNOWNED', 12, 'store')?.id };
   const at = fx.github.calls.length;
   const text = fx.run(['attention'], {}, { json: false }).result;
   const block = text.slice(text.indexOf('Open PRs')).split('\n');
@@ -942,13 +942,14 @@ test('attention lists every open pull request with its owner, next step and fail
   assert.match(text, new RegExp(`^- ${ids.store} new PR_UNOWNED store PR 12: Controller: today, land`, 'm'));
   assert.match(text, new RegExp(`^- ${ids.red} new PR_RED_UNOWNED PR #902 at bbbbbbb: Controller: read the failing job`, 'm'));
   const reads = fx.github.calls.slice(at);
-  assert.deepEqual([reads.filter(call => /\/pulls\?state=open/.test(call.path)).length, reads.filter(call => /p90\d: pullRequest/.test(call.body?.query || '')).length], [2, 1], 'two lists and one check batch');
+  const boarding = call => (call.body?.query || '').includes('comments(last:20)');
+  assert.deepEqual([reads.filter(call => /\/pulls\?state=open/.test(call.path)).length, reads.filter(call => /p90\d: pullRequest/.test(call.body?.query || '') && !boarding(call)).length, reads.filter(boarding).length], [2, 1, 1], 'two lists, one check batch and one boarding read');
   // The owner of an acknowledged one is the controller, until its due time.
   const acked = fx.ctrl(['ack', '--finding', ids.red, '--next', 'gate failed on a full disk; rerun every job']);
   assert.equal(acked.error, null);
   const json = fx.run(['attention']).result;
   assert.deepEqual(json.open_prs.map(row => [row.where, row.number, row.owner, row.code, row.red, row.failing]), [['repo', 903, 'none', null, false, []],
-    ['repo', 902, 'controller', 'PR_RED_UNOWNED', true, ['gate', 'validate']], ['repo', 901, 'none', 'PR_UNOWNED', false, []],
+    ['repo', 902, 'controller', 'PR_RED_UNOWNED', true, ['gate', 'validate']], ['repo', 901, 'none', 'BOT_PR_OPEN', false, []],
     ['repo', 900, '#423', null, false, []], ['store', 12, 'none', 'PR_UNOWNED', false, []]]);
   assert.match(fx.run(['attention'], {}, { json: false }).result, new RegExp(`^- PR #902 "Refresh the shards", open 2 h, owner controller until ${acked.result.due}, next: gate failed on a full disk; rerun every job, failing: gate, validate$`, 'm'));
   // Each read failing on its own.
