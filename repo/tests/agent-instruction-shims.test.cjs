@@ -260,11 +260,12 @@ function shippedInstructionFiles() {
   return files;
 }
 
-test("action-blocking questions use the harness's native question method, with bold text only as the fallback", () => {
+// Chat replies once folded a question's choices inline while Projects posts nested them, and Toolkit
+// text told agents to open question cards the harness then dropped or cut short. The global rules now
+// carry the one question shape, and how a question shows (card, end-of-turn box, text) is the harness's.
+test('the global rules carry the one question shape, and no shipped instruction steers a question card', () => {
   const communication = readText(globalPath).split('## Communication\n\n')[1];
-  // The fallback once read as a trailing clause ("where none works, one fully bold sentence"), and a
-  // smaller model whose native question tool failed asked in plain text; it is now its own imperative.
-  assert.match(communication, /^Ask each action-blocking question \(choose, approve, confirm, give a path, continue\) with the harness's native question method[^\n]*\. Failing that, ask in one fully bold sentence\./);
+  assert.ok(communication.startsWith('Questions go last in the reply. Each is a numbered, fully bold question; its choices are lettered (A., B.) and nested under it, best first, each with a short plain reason; the recommended one is marked (my pick). A blank line between questions.'), communication.slice(0, 300));
   // The root-cause principle once read "make it in the shared source that copies, prompts and later runs
   // inherit", which parses two ways beside "upstream" meaning third-party code.
   assert.match(readText(globalPath), /make it at the shared source every copy, prompt and later run inherits;/);
@@ -273,11 +274,11 @@ test("action-blocking questions use the harness's native question method, with b
   const found = [];
   for (const rel of files) {
     readText(rel).split('\n').forEach((line, index) => {
-      const boldDefault = /question.*\bbold|\bbold.*question/i.test(line) && !line.includes('native question method');
-      if (boldDefault || /question UI/i.test(line)) found.push(`${rel}:${index + 1}`);
+      // Lines that only describe a card (where an owner's answer is kept, the merge card) are not steering.
+      if (/native question method|question UI|cards? first|card last|(?:open|use|show) (?:a|the) (?:question|decision) card|as a (?:question|decision) card|by card\b/i.test(line)) found.push(`${rel}:${index + 1}`);
     });
   }
-  assert.deepEqual(found, [], 'question wording names the native question method, never a host UI or bold by default');
+  assert.deepEqual(found, [], 'no shipped instruction tells the agent to use a question card or a native question method');
 });
 
 // A merge guard is an optional hook: a harness can skip it or let a merge through when it fails, and a
@@ -307,7 +308,7 @@ test('a merge guard stands in for the merge ask only where it is known to run', 
 // user saw the same question twice.
 test('the session reset question is asked once', () => {
   const skill = readText('skills/repository-agent-rules/SKILL.md');
-  assert.match(skill, /Ask its last line with the harness's native question method \(continue here best-effort, or start a new session\) and leave that line out of the message; where none works, keep it/);
+  assert.match(skill, /Keep the reset message bolded exactly as shown, except its last line: ask that once, as the reply's question in the global rules' question shape \(continue here best-effort, or start a new session\)\./);
 });
 
 test('no standing approval covers a Windows task command on any approval surface', () => {

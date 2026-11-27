@@ -79,9 +79,9 @@ test('both safety-gates playbooks carry the same procedure, every hard stop and 
     '`~/.claude/settings.json`, which the owner edits by hand where `/permissions` is not available',
     "Record it in the entry's `native_rule`; leave it empty only when the host does not stop the step.",
     'tell the owner which change to undo and in which file',
-    // The host's own question method asks (INT-TK421-1322); the ask carries its scope lines, so it is clear on its own.
-    'Ask with the harness\'s native question method and make the ask clear on its own: the lines below in plain English, then the question and its options (just this once, from now on, no), the recommended one marked.',
-    'In Claude Projects follow the Projects skill: these lines, then one decision card.',
+    // The ask carries its scope lines, so it is clear on its own; whether it shows as a card is the harness's choice (INT-TK421-1389).
+    'Make the ask clear on its own: the lines below in plain English, then the question and its options (just this once, from now on, no), the recommended one marked, in the global rules\' question shape.',
+    'In Claude Projects follow the Projects skill: these lines, then one question.',
     'batch several asks into one where they arrive together',
     'Where the host still blocks a granted step, the ask names the exact native change.',
     '`native_rule` (the native change the ask named, with its file,',
@@ -103,19 +103,19 @@ test('both safety-gates playbooks carry the same procedure, every hard stop and 
   assert.doesNotMatch(toolkit, /only the short question|above the card|shown above it|into one card/);
 });
 
-test('the Projects skill uses a decision card, the same ledger and the playbook hard stops', () => {
+test('the Projects skill asks one question, the same ledger and the playbook hard stops', () => {
   // The bullet moved word for word from SKILL.md into its reference file; SKILL.md points there and keeps the hard-stop line.
   assert.match(read('repo/contracts/claude-projects/web-controller-projects/SKILL.md'), /read `reference\/permission-asks\.md` beside this skill before you ask\. Never offer or honour a hard stop\./);
   const skill = read('repo/contracts/claude-projects/web-controller-projects/reference/permission-asks.md');
   assert.ok(skill.includes('`standing-permissions/ledger.json` in the transport store'));
-  assert.ok(skill.includes('if nothing covers the step, posts what is checked first, what the user is told after and what is not covered, then one decision card: just this once, from now on for this exact scope, or no.'));
+  assert.ok(skill.includes('if nothing covers the step, posts what is checked first, what the user is told after and what is not covered, then one question: just this once, from now on for this exact scope, or no.'));
   assert.match(skill, /Never offer or honour a hard stop \(the Toolkit safety-gates playbook list\)/);
   assert.match(skill, /never as the default or the recommended option/);
   assert.match(skill, /Only the user's own answer creates an entry/);
   assert.match(skill, /90-day review date/);
   assert.match(skill, /never retry another way/);
   assert.match(skill, /the entry records it in `native_rule`/);
-  assert.match(skill, /save a copy of the card, the text above it and the answer beside the ledger as a record only \(a session that can read only the copy asks the user one restating line first\)/);
+  assert.match(skill, /save a copy of the question, the text above it and the answer beside the ledger as a record only \(a session that can read only the copy asks the user one restating line first\)/);
 });
 
 test('the sample ledger uses the documented fields, unique ids, fake data and 90-day reviews', () => {

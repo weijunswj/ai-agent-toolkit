@@ -50,7 +50,7 @@ A working GitHub connector is route 1 for reads and GitHub writes. Before any co
 
 Required now: (a), (b) and a reachable record write, through (d) or the verified private evidence store. Required before gates: (e). Without (c) on any route, governance is unreadable. A missing optional ability holds only its dependents. A required ability unreachable by all three routes: no record; give read-only status and the cheapest fix, then hold until the owner names a route. No surface is barred by name.
 
-When relay is needed, ask once with the native question method, else one fully bold sentence: "Which chat can you paste into on your own computer?" Choices: Claude Code (best), Codex, neither; accept another harness the owner names. Prove its abilities and account. On neither, hold only abilities no other route reaches. If its Toolkit is stale, say "say 'refresh toolkit' in that chat"; never ask the owner to type shell commands.
+When relay is needed, ask once: "Which chat can you paste into on your own computer?" Choices: Claude Code (best), Codex, neither; accept another harness the owner names. Prove its abilities and account. On neither, hold only abilities no other route reaches. If its Toolkit is stale, say "say 'refresh toolkit' in that chat"; never ask the owner to type shell commands.
 
 Report one line filled from the probes: `Surface: <harness> (<host evidence>). Probe results: <a to i, each with its proof and route, a hold or not checked here>. Relay harness: <owner's answer or not needed>.`
 
@@ -62,7 +62,7 @@ Show the checklist once. Each step is verified with evidence, supplied by user w
 
 No controller actions until the journey and harness extras are verified done: no gates, merges, closes or programme writes except step 7's record and immediately following claim. User-supplied evidence is visibly labelled and never becomes independent verification or gate/merge authority.
 
-Questions use the harness's native question method (global rules). If it leaves no conversation trail, immediately write one short question and "You picked: <chosen option>"; no other options. A relayed tap never supplies an owner-only decision or typed merge approval.
+Questions follow the global rules' question shape. If the owner answers where the conversation keeps no trail (such as a card the harness showed), immediately write one short question and "You picked: <chosen option>"; no other options. A relayed tap never supplies an owner-only decision or typed merge approval.
 
 ### 1. The capability check
 

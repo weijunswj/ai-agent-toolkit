@@ -932,7 +932,7 @@ test('the setup skill routes remove toolkit to the full plan, never the app unin
   assert.match(section, /an app's own uninstall tool may do this step for that app/);
   assert.ok(section.indexOf('toolkit-remove.cjs plan') < section.indexOf('Only after a yes'), 'the plan comes before any uninstall');
   // The owner picks the scope: Codex's remove once reached into Claude Code without asking.
-  assert.match(section, /first ask the user with the harness's native question method whether to remove Toolkit from only this app \(the one you run in\) or from every app on this computer; never pick for them/);
+  assert.match(section, /first ask the user whether to remove Toolkit from only this app \(the one you run in\) or from every app on this computer; never pick for them/);
   assert.ok(section.indexOf('every app on this computer') < section.indexOf('toolkit-remove.cjs plan --app'), 'the scope question comes before the plan');
   assert.match(section, /`apply --confirm <plan code> --app <the same app>`/);
   // The app's own uninstall tool is allowed only as a step after the user's yes, never before the plan is shown.
