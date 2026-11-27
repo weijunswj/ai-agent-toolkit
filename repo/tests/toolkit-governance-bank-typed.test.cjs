@@ -105,7 +105,7 @@ test('after the table the bank lists what it does by default, then one reply lin
   assert.equal(tail[0], [
     'Also:',
     '- Set in .github/toolkit-programme.json: parent #1, required check validate. To change them, edit that file in a pull request and merge it.',
-    '- Toolkit instruction copies: 1 file left (Toolkit default: clean up). Older setups copied the governed rules, playbooks and shims here, and sometimes CI shard workflows Toolkit has since retired; the installed Toolkit now gives sessions these rules. Your answer removes them in the working tree, keeping everything of yours, and sets min_toolkit in the programme file; you commit them and merge the one pull request. An answer that turns governance off keeps them.',
+    '- Toolkit instruction copies: 1 file left (Toolkit default: clean up). Older setups copied the governed rules, playbooks and shims here, and sometimes CI workflow copies Toolkit has since retired; the installed Toolkit now gives sessions these rules. Your answer removes them in the working tree, keeping everything of yours, and sets min_toolkit in the programme file; you commit them and merge the one pull request. An answer that turns governance off keeps them.',
   ].join('\n'));
   assert.doesNotMatch(out, /More on|Status \(nothing to answer\)|The permissions row covers/);
   const epoch = new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).get(SESSION);
