@@ -17,9 +17,9 @@ const codexSessionStartScript = require(path.join(scripts, 'toolkit-codex-sessio
 const codexSetup = require(path.join(scripts, 'setup-codex-toolkit-plugin.cjs'));
 const managedBlock = require(path.join(scripts, 'toolkit-managed-block.cjs'));
 const REMOTE = 'https://github.com/example-owner/example-repo.git';
-const QUESTION_LINE = 'Toolkit: this repository has no GitHub governance decision yet, so it counts as off. Turn on GitHub governance (issues, records, evidence store) for this repository?';
+const QUESTION_LINE = 'Toolkit: this repository has no GitHub governance decision yet, so it counts as off.';
 const AGENT_LINE = `For agents: ${gate.NEVER_OWNER_SHORT}`;
-const noticeOf = context => (/word for word(?:, and ask nothing else in that reply)?:\n([\s\S]*?)\n(?:For agents|Their next message)/.exec(context) || [])[1];
+const noticeOf = context => (/word for word(?:, and ask nothing else in that reply)?:\n([\s\S]*?)\n(?:For agents|Their next (?:message|reply))/.exec(context) || [])[1];
 function git(cwd, args) {
   return childProcess.execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }).trim();
 }
@@ -161,22 +161,20 @@ function snapshot(target) {
 }
 const UAT_REPORT = '# Codex mini UAT\nObserved: the guard in Codex did not refuse the write.\nClaude Code ran the same check.\nno\nok\nlater\nResult: no GitHub push.\n';
 const REPORT_WRITE = `cat > .tmp/uat-codex-mini3-results.md <<'EOF'\n${UAT_REPORT}EOF`;
+// A Claude Code run: the question goes out as text (how it shows is the app's choice), and `tap` is the
+// owner's tap on a question card the app chose to show, which reaches the gate through PostToolUse.
 function card(ctx, environment = {}) {
-  const prompts = new gate.PromptHold({ registryOptions: ctx.options, environment, picker: true });
-  const plain = new gate.PromptHold({ registryOptions: ctx.options, environment });
-  const toolGate = tools(ctx);
+  const prompts = new gate.PromptHold({ registryOptions: ctx.options, environment });
   return {
     start(sessionId, source = 'startup', cwd = undefined) { gate.startSession({ session_id: sessionId, source, cwd }, { registryOptions: ctx.options }); },
     send: (cwd, prompt, sessionId) => prompts.decide({ cwd, prompt, sessionId }),
-    typed: (cwd, prompt, sessionId) => plain.decide({ cwd, prompt, sessionId }),
-    ask: (cwd, sessionId, toolUseId, toolInput = gate.PICKER_INPUT) => toolGate.decide({ tool_name: 'AskUserQuestion', cwd, session_id: sessionId, tool_use_id: toolUseId, tool_input: toolInput }),
-    tap: (cwd, sessionId, toolUseId, label) => prompts.picked({ cwd, sessionId, toolUseId,
-      toolResponse: { questions: gate.PICKER_INPUT.questions, answers: label === undefined ? {} : { [gate.PICKER_QUESTION]: label } } }),
+    typed: (cwd, prompt, sessionId) => prompts.decide({ cwd, prompt, sessionId }),
+    tap: (cwd, sessionId, label) => prompts.carded({ cwd, sessionId, toolResponse: { answers: label === undefined ? {} : { [gate.QUESTION_TEXT]: label } } }),
   };
 }
 const clone = value => JSON.parse(JSON.stringify(value));
 // What a counted answer leaves in the session line: a pending no, or for yes no receipt at all,
-// because a yes opens the governance question bank instead (its script makes the one setup pull
+// because a yes opens the guided governance setup instead (its script makes the one setup pull
 // request). Callers prove the answer counted some other way (a ticket that recorded, a pass).
 function assertAnswered(line, word, message) {
   if (word === 'yes') assert.doesNotMatch(line, /is pending/, message);

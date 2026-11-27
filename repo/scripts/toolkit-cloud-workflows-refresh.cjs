@@ -8,8 +8,10 @@
 //
 // It changes only Toolkit-made files: the default cloud workflows (toolkit-cloud-workflows.cjs; a missing
 // one is added, an edited or outdated one brought back), the vendored plain-text check when it is
-// outdated, and a plain-text baseline still in the old format (migrated as --migrate-baseline does).
-// Everything else in the repository stays as it is.
+// outdated, a plain-text baseline still in the old format (migrated as --migrate-baseline does), and a
+// retired Toolkit file still there (toolkit-cloud-workflows.cjs RETIRED_COPIES), which it removes with
+// one line saying why. Everything else in the repository stays as it is. A refresh that removes a file
+// never passes the copy proof (toolkit-copies-proof.cjs), so it waits for the owner's typed merge.
 //
 //   - Governed repositories only: the merged binding must say ENABLED, read in the last 24 hours. Any
 //     other repository (off, undecided, an evidence store, the Toolkit itself) gets one note and
@@ -90,12 +92,13 @@ function vendoredCheck({ target, root, commit }) {
 
 // Every Toolkit copy a refresh from `commit` would change in the files at `target` (a checkout, or the
 // refresh's snapshot of the default branch head), in the order the refresh lists them, without writing
-// or refusing anything: { rows: [{ file, text, state, kind, toolkit, pinned, why }], unmanaged, notes }.
+// or refusing anything: { rows: [{ file, text, state, kind, toolkit, pinned, why, remove? }], unmanaged,
+// notes }. A retired file's row has `remove: true` and no text.
 // `unmanaged` is a rendered copy's path holding someone else's file, which stops a refresh. The session
 // start (through the governance check), the cloud sweep and the refresh read the same rows, so they
 // always name the same files. `workflows` is the cloud workflows installer.
-function pending({ target, root, commit, ci = null, ciShards, defaultBranch = null, workflows = require('./toolkit-cloud-workflows.cjs') }) {
-  const result = workflows.plan({ repo: target, root, commit, ...(ci ? { ci } : {}), ...(ciShards !== undefined ? { ciShards } : {}), ...(defaultBranch ? { defaultBranch } : {}) });
+function pending({ target, root, commit, ci = null, defaultBranch = null, workflows = require('./toolkit-cloud-workflows.cjs') }) {
+  const result = workflows.plan({ repo: target, root, commit, ...(ci ? { ci } : {}), ...(defaultBranch ? { defaultBranch } : {}) });
   const unmanaged = result.rows.find(row => row.kind !== 'copied' && row.state === 'unmanaged') || null;
   const notes = workflows.leftOutNotes(result);
   const rows = result.rows.filter(workflows.refreshable).map(row => ({ file: row.file, text: row.expected, state: row.state, kind: row.kind, toolkit: row.toolkit || null, pinned: Boolean(row.pinned),
@@ -105,14 +108,16 @@ function pending({ target, root, commit, ci = null, ciShards, defaultBranch = nu
   const vendored = vendoredCheck({ target, root, commit });
   if (vendored?.state === 'outdated') rows.push({ file: vendored.file, text: vendored.text, state: 'outdated', kind: 'vendored', toolkit: null, pinned: false, why: 'vendored check updated' });
   else if (vendored && vendored.state !== 'current') notes.push(`${PLAIN_TEXT.file} is ${vendored.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so it is left as it is.`);
+  for (const row of result.retired || []) rows.push({ file: row.file, text: null, state: 'retired', kind: 'retired', toolkit: null, pinned: false, why: row.why, remove: true });
   return { rows, unmanaged, notes };
 }
 
-// The Toolkit-made files this run changes, and what they become: [{ file, text, why }], plus notes
+// The Toolkit-made files this run changes, and what they become: [{ file, text, why, remove? }] (a
+// removed file has no text), plus notes
 // for Toolkit files it leaves alone. It stops on someone else's file in a rendered copy's place and on
 // a copy it would roll back.
-function changes({ target, root, commit, ci, ciShards, defaultBranch, workflows }) {
-  const { rows, unmanaged, notes } = pending({ target, root, commit, ci, ciShards, defaultBranch, workflows });
+function changes({ target, root, commit, ci, defaultBranch, workflows }) {
+  const { rows, unmanaged, notes } = pending({ target, root, commit, ci, defaultBranch, workflows });
   if (unmanaged) throw new RefreshError(`${unmanaged.file} exists and is not a Toolkit copy; move it aside in a pull request first.`);
   for (const row of rows) {
     // A copy rendered by a newer Toolkit than this checkout would be rolled back.
@@ -122,7 +127,7 @@ function changes({ target, root, commit, ci, ciShards, defaultBranch, workflows 
       throw new RefreshError(`${row.file} was made by Toolkit commit ${row.toolkit.slice(0, 7)}, which this Toolkit checkout (${commit.slice(0, 7)}) does not contain; update the Toolkit checkout to the latest main first.`);
     }
   }
-  const out = rows.map(({ file, text, why }) => ({ file, text, why }));
+  const out = rows.map(({ file, text, why, remove }) => ({ file, text, why, ...(remove ? { remove: true } : {}) }));
   const baseline = migratedBaseline(target, root, commit);
   if (baseline) out.push(baseline);
   return { files: out, notes };
@@ -141,10 +146,7 @@ class BranchSnapshot {
   #commit;
   #branch;
   #fetch;
-  #testNames;
-  // `testNames`: write the shard list's test files by name (#testNames); only a repository whose shard
-  // copies render (a yes to parallel CI shards) needs them, and listing them costs a whole-tree read.
-  constructor(target, commit, branch, { fetch = true, testNames = true } = {}) { this.#target = target; this.#commit = commit; this.#branch = branch; this.#fetch = fetch; this.#testNames = testNames; }
+  constructor(target, commit, branch, { fetch = true } = {}) { this.#target = target; this.#commit = commit; this.#branch = branch; this.#fetch = fetch; }
 
   // The folder holding the commit's files. The commit is fetched from origin's default branch first
   // when the checkout does not have it (unless `fetch` is false); a fetch only adds objects and moves
@@ -156,7 +158,6 @@ class BranchSnapshot {
       this.#copy(folder, [SNAPSHOT_FOLDER]);
       const baseline = baselineFile(folder);
       if (baseline && !baseline.startsWith(`${SNAPSHOT_FOLDER}/`)) this.#copy(folder, [baseline]);
-      if (this.#testNames) this.#listTestNames(folder);
       return folder;
     } catch (error) {
       fs.rmSync(folder, { recursive: true, force: true });
@@ -171,27 +172,6 @@ class BranchSnapshot {
     const fetched = spawnSync('git', ['fetch', '--quiet', '--no-tags', 'origin', `refs/heads/${this.#branch}`], { cwd: this.#target, encoding: 'utf8', windowsHide: true, shell: false, timeout: 120000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
     if (!fetched.error && fetched.status === 0 && have()) return;
     throw new RefreshError(`${this.#branch}'s head ${this.#commit.slice(0, 7)} on GitHub is not in this checkout, and fetching ${this.#branch} from origin did not bring it; run git fetch origin in the checkout, then run this again.`);
-  }
-
-  // The shard list's check finds the repository's test files by name (each system's discover glob),
-  // so each file of the commit a glob matches is written as an empty file: names only, no contents.
-  // Without them a valid list would read as finding no test file. No list, or one that does not read,
-  // writes nothing (the shard check then reports the list itself).
-  #listTestNames(folder) {
-    const shards = require('./governed-test-shards.cjs');
-    let manifest;
-    try { manifest = JSON.parse(fs.readFileSync(path.join(folder, ...shards.MANIFEST_REL.split('/')), 'utf8')); } catch { return; }
-    const globs = Object.values(manifest && typeof manifest.systems === 'object' && manifest.systems ? manifest.systems : {})
-      .map(entry => entry && entry.discover).filter(glob => typeof glob === 'string' && !shards.globError(glob)).map(shards.globRegExp);
-    if (!globs.length) return;
-    const listed = spawnSync('git', ['ls-tree', '-r', '-z', '--name-only', '--full-tree', this.#commit], { cwd: this.#target, windowsHide: true, shell: false, maxBuffer: 4 * GITHUB_LIMIT });
-    if (listed.error || listed.status !== 0) throw new RefreshError(`the files of ${this.#commit.slice(0, 7)} could not be read from this checkout's git objects.`);
-    for (const file of listed.stdout.toString('utf8').split('\0')) {
-      if (!file || file.startsWith(`${SNAPSHOT_FOLDER}/`) || file.split('/').some(part => !part || part === '.' || part === '..') || !globs.some(glob => glob.test(file))) continue;
-      const absolute = path.join(folder, ...file.split('/'));
-      fs.mkdirSync(path.dirname(absolute), { recursive: true });
-      fs.writeFileSync(absolute, '');
-    }
   }
 
   #copy(folder, paths) {
@@ -263,16 +243,11 @@ function bodyText(files, commit, notes) {
   ].join('\n');
 }
 
-// The merged binding's ci_shards answer for the checkout at `target`, or null when none can be read.
-function mergedCiShards(target) {
-  try { return require('./toolkit-governance-state.cjs').mergedBinding(target)?.ci_shards?.answer || null; } catch { return null; }
-}
-
 // The governed-only and Toolkit commit checks, then the files, compared on a snapshot of the default
 // branch head. { note } when there is nothing to do, else { repository, base, branch, files, notes,
 // commit }. Governance comes before the Toolkit commit, so a repository that is not governed gets its
 // one note whatever the Toolkit checkout's state.
-function prepare({ target, root, commit, ci, ciShards, workflows, governance, github }) {
+function prepare({ target, root, commit, ci, workflows, governance, github }) {
   if (workflows.isToolkitCheckout(target)) return { note: 'This is a Toolkit source checkout, which runs its own workflow files; there is nothing to refresh.' };
   const state = governance(target);
   if (state.state !== 'ENABLED') {
@@ -287,10 +262,9 @@ function prepare({ target, root, commit, ci, ciShards, workflows, governance, gi
   const branch = repo.default_branch;
   const base = github(`repos/${repository}/git/ref/heads/${encodeURIComponent(branch)}`).object.sha;
   if (!/^[0-9a-f]{40}$/.test(String(base || '')) || !/^[A-Za-z0-9_][A-Za-z0-9._\/-]{0,199}$/.test(String(branch || ''))) throw new RefreshError('the default branch and its head could not be read from GitHub.');
-  const answer = ciShards !== undefined ? ciShards : mergedCiShards(target);
-  const snapshot = new BranchSnapshot(target, base, branch, { testNames: answer === 'yes' }).write();
+  const snapshot = new BranchSnapshot(target, base, branch).write();
   try {
-    const { files, notes } = changes({ target: snapshot, root, commit: at, ci, ciShards: answer, defaultBranch: branch, workflows });
+    const { files, notes } = changes({ target: snapshot, root, commit: at, ci, defaultBranch: branch, workflows });
     if (!files.length) return { note: `The Toolkit copies in ${repository} are current; no refresh pull request is needed.${notes.length ? ` ${notes.join(' ')}` : ''}` };
     return { repository, base, branch, files, notes, commit: at };
   } finally {
@@ -337,6 +311,7 @@ function publish({ repository, base, branch, files, notes, commit, github, workf
     return held.get(file);
   };
   const textsFor = keepCopies => files.map(entry => {
+    if (entry.remove) return null;
     if (!existing || (entry.file !== GUARD_CONFIG && (!keepCopies || workflows.MARKER.exec(entry.text)?.index !== 0))) return entry.text;
     const text = heldText(entry.file);
     if (text === null) return entry.text;
@@ -344,7 +319,7 @@ function publish({ repository, base, branch, files, notes, commit, github, workf
     return workflows.copyState(text, entry.text).state === 'current' ? text : entry.text;
   });
   const baseCommit = github(`repos/${repository}/git/commits/${base}`);
-  const treeOf = texts => github(`repos/${repository}/git/trees`, { method: 'POST', input: { base_tree: baseCommit.tree.sha, tree: files.map((entry, index) => ({ path: entry.file, mode: '100644', type: 'blob', content: texts[index] })) } });
+  const treeOf = texts => github(`repos/${repository}/git/trees`, { method: 'POST', input: { base_tree: baseCommit.tree.sha, tree: files.map((entry, index) => (entry.remove ? { path: entry.file, mode: '100644', type: 'blob', sha: null } : { path: entry.file, mode: '100644', type: 'blob', content: texts[index] })) } });
   let tree = treeOf(textsFor(Boolean(named)));
   let headSha = existing;
   let moved = false;
@@ -386,18 +361,18 @@ function publish({ repository, base, branch, files, notes, commit, github, workf
 }
 
 // The files a refresh may ever change, by path: the default cloud workflows' files, the vendored
-// plain-text check and the default baseline (a renamed test shards copy or baseline is allowed only when this run
-// chose it).
+// plain-text check and the default baseline (a renamed baseline or a retired file it removes is allowed
+// only when this run chose it).
 function isToolkitFile(name, workflows) {
   return workflows.DEFAULT_FILES.includes(name) || name === PLAIN_TEXT.file || name === '.github/plain-text-baseline.json';
 }
 
 // Runs the whole refresh: { code, line }. Every failure is one line and no pull request change.
-function refreshPr({ repo, ci = null, root, commit, ciShards, workflows = require('./toolkit-cloud-workflows.cjs'), governance = target => require('./toolkit-governance-state.cjs').governanceState(target), github = ghApi }) {
+function refreshPr({ repo, ci = null, root, commit, workflows = require('./toolkit-cloud-workflows.cjs'), governance = target => require('./toolkit-governance-state.cjs').governanceState(target), github = ghApi }) {
   try {
     const target = path.resolve(repo);
     if (!fs.existsSync(path.join(target, '.git'))) throw new RefreshError(`${target} is not a git checkout.`);
-    const ready = prepare({ target, root, commit, ci, ciShards, workflows, governance, github });
+    const ready = prepare({ target, root, commit, ci, workflows, governance, github });
     if (ready.note) return { code: 0, line: ready.note };
     const result = publish({ ...ready, github, workflows });
     const verb = { opened: 'Opened', updated: 'Updated', unchanged: 'Unchanged' }[result.outcome];

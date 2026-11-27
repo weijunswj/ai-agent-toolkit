@@ -366,12 +366,12 @@ test('the setup skill carries the agent note for other stores, and nothing the o
   for (const phrase of ['private', 'read back', 'sole copy', 'one writer at a time', 'programme records stay in the GitHub store']) {
     assert.ok(section.includes(phrase), `the agent note says "${phrase}"`);
   }
-  // The owner-facing texts: the card, the bank and How To Use name only the GitHub store.
-  const { governanceBankSpecs, renderGovernanceBank } = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-bank.cjs'));
-  const adoption = { repository: 'example-owner/example-repo', store: { repository: 'example-owner/TRANSPORT-example-repo', create: true }, found_store: null, store_name: 'TRANSPORT-example-repo', parent: { create: true }, checks: [], visibility: 'private' };
-  const bankText = renderGovernanceBank(governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'example-owner/example-repo' }, adoption }));
+  // The owner-facing texts: the session-start question, the guided setup and How To Use name only the GitHub store.
+  const guided = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-guided.cjs'));
+  const state = { state: 'UNDECIDED', repository: 'example-owner/example-repo' };
+  const bankText = guided.renderGuided(guided.guidedQuestions({ state, store: { repository: 'example-owner/TRANSPORT-example-repo', path: 'state/example-owner/example-repo/', exists: false } }), { state });
   const gateText = read('repo/scripts/toolkit-governance-gate.cjs');
-  const card = /const PICKER_OPTIONS = Object\.freeze\(\[[\s\S]*?\]\);/.exec(gateText)[0] + /const QUESTION = \[[\s\S]*?\];/.exec(gateText)[0];
+  const card = /const QUESTION = \[[\s\S]*?\];/.exec(gateText)[0];
   // How To Use keeps its table of refused store kinds; it never carries the agent note's setup steps.
   for (const [name, text] of [['bank', bankText], ['card', card], ['How To Use', read('repo/docs/HOW-TO-USE.md')]]) {
     assert.doesNotMatch(text, /host's own tools|Agent note|Set the other store up/i, `${name} gives no setup advice for a non-GitHub store`);

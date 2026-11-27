@@ -1230,7 +1230,7 @@
       "expect": {
         "decision": "allow",
         "context_contains": [
-          "for this repository? Records and evidence go to this repository's own private TRANSPORT-"
+          "so it counts as off. Records and evidence would go to this repository's own private TRANSPORT-"
         ],
         "context_excludes": [
           "own private TRANSPORT-<repository name> store on GitHub, found or created."
@@ -1391,7 +1391,7 @@
       ],
       "payload": {"prompt":"Fix the failing test."},
       "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
-      "expect": {"decision":"allow","context_contains":["Reply yes, no or later. Nothing waits on your answer, and Toolkit asks again next session."],"context_excludes":["Reply `toolkit governance enable`"]},
+      "expect": {"decision":"allow","context_contains":["   - **A. Yes (my pick):**","   - **B. Later:**","   - **C. No:**","Nothing waits on your answer, and Toolkit asks again next session."],"context_excludes":["Reply `toolkit governance enable`","toolkit governance enable` or"]},
       "status": "pass"
     },
     {
@@ -1466,6 +1466,44 @@
       "payload": { "prompt": "toolkit cmd" },
       "fixture": { "repo": { "governance": "undecided" } },
       "expect": { "decision": "allow", "context_excludes": ["Toolkit command: the user typed", "Toolkit asks the user once per session, and nothing waits on the answer."] },
+      "status": "pass"
+    },
+    {
+      "id": "GOV.undecided-question-is-text-never-a-forced-card",
+      "source": "INT-TK421-1389 (27 Nov 2026): how a question shows is the app's choice; the undecided governance question told Claude to call AskUserQuestion with Toolkit's exact card",
+      "kind": "state",
+      "hosts": ["claude", "codex"],
+      "event": "UserPromptSubmit",
+      "steps": [
+        {"event":"SessionStart","payload":{"source":"startup"},"expect":{"decision":"allow"}}
+      ],
+      "payload": {"prompt":"Prepare this work."},
+      "fixture": {"repo":{"governance":"undecided","branch":"feature"}},
+      "expect": {"decision":"allow","context_contains":["**1. Question: Turn on GitHub governance (issues, records, evidence store) for this repository?**","   - **A. Yes (my pick):**"],"context_excludes":["AskUserQuestion","adding no answers field"]},
+      "postcondition": "no-local-decision-write",
+      "status": "pass"
+    },
+    {
+      "id": "GOV.card-tap-answers-open-governance-questions",
+      "source": "INT-TK421-1389 (27 Nov 2026): the owner's reply in any form the host offers counts; a tap on a question card the app chose to show was dropped, so it never reached Toolkit's governance questions",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "payload": {"tool_name":"AskUserQuestion","tool_use_id":"toolu_guided","tool_input":{"questions":[{"question":"Turn on task auto-merge with merge train?","header":"Auto-merge","multiSelect":false,"options":[{"label":"A. Yes","description":"Reviewed, green task pull requests land on their own."},{"label":"B. No","description":"Every task pull request waits for your merge approval."}]}]},"tool_response":{"questions":[{"question":"Turn on task auto-merge with merge train?","header":"Auto-merge","multiSelect":false,"options":[{"label":"A. Yes","description":"Reviewed, green task pull requests land on their own."},{"label":"B. No","description":"Every task pull request waits for your merge approval."}]}],"answers":{"Turn on task auto-merge with merge train?":"B. No"}}},
+      "fixture": { "repo": { "governance": "enabled", "branch": "feature" }, "owner_session": true, "bank_open": true },
+      "expect": {"decision":"allow","context_contains":["the user answered a question card: \"Turn on task auto-merge with merge train?\": B. No.","setup --answers \"ABCD-EFGH-JKMN-PQRS: ANSWER\" --ticket "]},
+      "status": "pass"
+    },
+    {
+      "id": "GOV.merge-card-tap-is-never-a-governance-reply",
+      "source": "control for the row above: with the governance questions open, a tap on Toolkit's merge card is still the merge approval and gets no governance ticket",
+      "kind": "state",
+      "hosts": ["claude"],
+      "event": "PostToolUse",
+      "note": "The merge card here was never noted, so the merge hold answers that no approval was recorded; what the row proves is that the merge hold reads the tap first and the governance questions never take it.",
+      "payload": {"tool_name":"AskUserQuestion","tool_use_id":"toolu_card","tool_input":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merges pull request 5 of toolkit-test-fixture/hook-pack-fixture into its base branch, at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}]},"tool_response":{"questions":[{"question":"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?","header":"Merge","multiSelect":false,"options":[{"label":"Merge","description":"Merges pull request 5 of toolkit-test-fixture/hook-pack-fixture into its base branch, at commit {head}. Nothing else is approved."},{"label":"Not now","description":"Leave it open. Nothing is merged."}]}],"answers":{"Merge toolkit-test-fixture/hook-pack-fixture#5 at {head7}?":"Merge"}}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"off","commits":[{"files":{"README.md":"fixture\n"},"message":"base"},{"files":{"notes.md":"task change\n"},"message":"task change"}]},"owner_session":true,"bank_open":true},
+      "expect": {"decision":"allow","context_contains":["Toolkit: no merge approval was recorded from that card."],"context_excludes":["the user answered a question card","--ticket"]},
       "status": "pass"
     },
     {
@@ -1767,18 +1805,8 @@
       "note": "The ticket is live, so only the curly quote refuses it. Codex runs the same tool gate inside its helper hook, so the refusing hook differs by host. The other forged forms are covered by the bank's unit tests."
     },
     {
-      "id": "BANK.explain-no-ticket-bash",
-      "source": "owner test of 19 Nov: after an answer, explain 1.4 was refused for want of a ticket; explain only reads",
-      "kind": "benign",
-      "hosts": ["claude","codex"],
-      "payload": {"tool_name":"Bash","tool_input":{"command":"node \"{plugin}/repo/scripts/toolkit-governance.cjs\" setup --answers \"ABCD-EFGH-JKMN-PQRS: explain 1.4\""}},
-      "expect": {"decision":"allow"},
-      "status": "pass",
-      "note": "No bank ticket exists here, so only the exact explain form lets it through."
-    },
-    {
       "id": "BANK.answer-no-ticket-bash",
-      "source": "owner test of 19 Nov: explain needs no ticket, but every other bank reply still does",
+      "source": "owner test of 19 Nov: every reply to the governance questions needs the owner's ticket",
       "kind": "hostile",
       "hosts": ["claude","codex"],
       "payload": {"tool_name":"Bash","tool_input":{"command":"node \"{plugin}/repo/scripts/toolkit-governance.cjs\" setup --answers \"ABCD-EFGH-JKMN-PQRS: 1.4=A\""}},

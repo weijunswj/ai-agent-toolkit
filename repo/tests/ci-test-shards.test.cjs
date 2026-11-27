@@ -606,6 +606,13 @@ test('the runner refuses unknown shards, a shard for another system, mixed modes
   result = run(['repo/tests/not-a-test.cjs']);
   assert.equal(result.code, 2);
   assert.match(result.text, /Not a test file/);
+  // The governed shard runner (a repository's own shard list) is retired: --repo-root is a usage
+  // error that names the valid options, and nothing runs.
+  for (const args of [['--repo-root', ROOT, '--check'], ['--repo-root', ROOT, '--shard', `${system}-1`, '--os', system]]) {
+    result = run(args);
+    assert.equal(result.code, 2, args.join(' '));
+    assert.match(result.text, /^Unknown option --repo-root\.\nUsage: node repo\/scripts\/run-tests\.cjs \[--changed \| --all \| --shard <id> --os <linux\|windows> /, args.join(' '));
+  }
   const fsRoot = path.parse(os.homedir()).root;
   assert.match(runner.tempRootError(fsRoot), /drive root/);
   assert.match(runner.tempRootError(path.join(fsRoot, 't')), /drive root/);

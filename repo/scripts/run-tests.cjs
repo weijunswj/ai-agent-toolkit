@@ -11,12 +11,6 @@
 //   node repo/scripts/run-tests.cjs --verify-ci <dir>  the CI aggregate check over the leg summaries
 //                                                      (--legs gate: the gate job's check of the test jobs;
 //                                                      by default the validate job's check of its needs)
-//   node repo/scripts/run-tests.cjs --repo-root <dir> --shard <id> --os <system>   one shard of a governed
-//                                                      repository's own shard list (.github/toolkit-test-shards.json,
-//                                                      any language; see governed-test-shards.cjs), or
-//                                                      --repo-root <dir> --check | --plan, or
-//                                                      --repo-root <dir> --verify <dir>: the gate check that
-//                                                      the shard summaries ran every file once on each system
 //   node repo/scripts/run-tests.cjs --clock-ahead      the test files that pin a calendar date, with
 //                                                      Node's clock moved 400 days ahead
 //
@@ -400,8 +394,6 @@ function selectFiles(root, options, out) {
 }
 
 function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.stdout, err = process.stderr } = {}) {
-  // A governed repository's own shard list: a separate runner, returning a promise of the exit code.
-  if (argv.includes('--repo-root')) return require('./governed-test-shards.cjs').main(argv, { out, err });
   let options;
   try {
     options = parseArgs(argv);

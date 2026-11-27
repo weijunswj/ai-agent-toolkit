@@ -19,9 +19,11 @@ const CONTRACT = path.join(ROOT, 'repo/contracts/cloud-workflows-layout.json');
 const COMMIT = workflows.toolkitHead(ROOT);
 const source = file => spawnSync('git', ['show', `${COMMIT}:${file}`], { cwd: ROOT, encoding: 'utf8' }).stdout;
 
-// Every copy, with every optional part present: the gate following a CI workflow, both shard systems.
+// Every copy, with every optional part present: the gate following a CI workflow. The retired shard
+// copies' calls left the contract with them: no repository carries one (a rules refresh removes any
+// left), so main need not serve them.
 function renders() {
-  const inputs = { 'programme-sweep': null, 'programme-sweep-gate': { file: 'ci.yml', name: 'CI' }, 'test-shards': { systems: { linux: ['linux-1'], windows: ['windows-1'] } }, 'shard-timings': {} };
+  const inputs = { 'programme-sweep': null, 'programme-sweep-gate': { file: 'ci.yml', name: 'CI' } };
   return workflows.DEFAULT_CLOUD_WORKFLOWS.filter(row => row.kind === 'rendered').map(row => ({ id: row.id, text: workflows.render(row.id, source(row.source), COMMIT, inputs[row.id]) }));
 }
 

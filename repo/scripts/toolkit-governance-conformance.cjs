@@ -106,7 +106,7 @@ function checkConformance(cwd, options = {}) {
     const pending = new (require('./toolkit-governance-proposal.cjs').GovernanceProposals)({ registryOptions: options }).pending(cwd);
     if (['read-only', 'unavailable'].includes(pending?.kind)) return report(pending.kind === 'read-only' ? 0 : 2, state,
       [finding(pending.kind === 'read-only' ? 'READ_ONLY_ACCOUNT' : 'GOVERNANCE_UNAVAILABLE', pending.kind === 'read-only' ? 'info' : 'unverified', pending.text)], toolkitRoot);
-    findings.push(finding('DECISION_PENDING', 'drift', pending?.text || 'No governance decision is merged on the default branch. Say toolkit governance and answer its question bank in chat; the pull request it prepares decides once you merge it.'));
+    findings.push(finding('DECISION_PENDING', 'drift', pending?.text || 'No governance decision is merged on the default branch. Say toolkit governance and answer its three setup questions in chat; the pull request it prepares decides once you merge it.'));
   }
   if (state.state === 'DISABLED') {
     if (state.rule === 'M2') findings.push(finding('REPOSITORY_DISABLED', 'info', 'The binding merged on the default branch sets governance to disabled; only an owner-merged pull request turns it back on.'));
@@ -357,12 +357,8 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
     return [finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', 'The Toolkit copies could not be checked: origin\'s default branch has not been read on this computer yet; run toolkit-governance.cjs status online, then check again.')];
   }
   const refresher = require('./toolkit-cloud-workflows-refresh.cjs');
-  // Test files are listed by name (a whole-tree read) only where the shard copies render: a yes to
-  // parallel CI shards in the merged binding.
-  let shardsYes = false;
-  try { shardsYes = (options.mergedBinding || governance.mergedBinding)(state.root, options)?.ci_shards?.answer === 'yes'; } catch { shardsYes = false; }
   let files;
-  try { files = new refresher.BranchSnapshot(state.root, fetched.commit, fetched.default_branch, { fetch: false, testNames: shardsYes }).write(); } catch (error) {
+  try { files = new refresher.BranchSnapshot(state.root, fetched.commit, fetched.default_branch, { fetch: false }).write(); } catch (error) {
     return [finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', `The Toolkit copies could not be checked: ${error.name === 'RefreshError' ? error.message : 'origin\'s default branch could not be read from this checkout.'}`)];
   }
   try { return copyFindings({ state, files, branch: fetched.default_branch, toolkitRoot, workflows, refresher, options }); } finally { fs.rmSync(files, { recursive: true, force: true }); }
@@ -371,13 +367,11 @@ function cloudWorkflowFindings(state, toolkitRoot, options = {}) {
 // The findings for the default branch's files at `files` (cloudWorkflowFindings's snapshot).
 function copyFindings({ state, files, branch, toolkitRoot, workflows, refresher, options }) {
   let result;
-  let merged = null;
   let head = null;
   try {
     // The check compares with this checkout's own commit; only an install needs it to be on main.
-    merged = (options.mergedBinding || governance.mergedBinding)(state.root, options);
     head = options.cloudWorkflowsCommit || workflows.toolkitHead(toolkitRoot);
-    result = workflows.plan({ repo: files, root: toolkitRoot, commit: head, ciShards: merged?.ci_shards?.answer || null, defaultBranch: branch });
+    result = workflows.plan({ repo: files, root: toolkitRoot, commit: head, defaultBranch: branch });
   } catch (error) {
     return [finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', `The cloud workflows could not be checked: ${error.name === 'InstallError' ? error.message : 'the Toolkit copy could not render them.'}`)];
   }
@@ -393,7 +387,7 @@ function copyFindings({ state, files, branch, toolkitRoot, workflows, refresher,
     // A held row's workflow clashes with a file Toolkit did not write, which its own row reports.
     if (row.state === 'current' || row.held) continue;
     if (row.state === 'outdated' && row.kind === 'copied') out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} ${row.why ? 'holds a setting no guard reads any more' : 'is an older Toolkit copy'}; \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`), ...refresh(row) }));
-    else if (row.state === 'outdated') out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a refresh writes now (${row.pinned ? 'it is pinned to one older Toolkit commit' : 'the Toolkit\'s workflow layout, an action pin, the CI workflow it follows or the shard list\'s shards'}); \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`), ...refresh(row) }));
+    else if (row.state === 'outdated') out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_OUTDATED', 'info', `${row.file} differs from what a refresh writes now (${row.pinned ? 'it is pinned to one older Toolkit commit' : 'the Toolkit\'s workflow layout, an action pin or the CI workflow it follows'}); \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`), ...refresh(row) }));
     else out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is ${row.state === 'missing' ? 'missing' : row.state === 'edited' ? 'edited by hand' : 'not a Toolkit copy'}, so ${row.consequence}. ${row.state === 'unmanaged' ? 'Move it aside in a pull request, then refresh the repository rules.' : 'Refresh the repository rules to fix it.'}`), ...refresh(row) }));
   }
   // The vendored plain-text check, compared with the check at the same Toolkit commit as the refresh does
@@ -402,18 +396,10 @@ function copyFindings({ state, files, branch, toolkitRoot, workflows, refresher,
   if (vendored?.state === 'outdated') out.push(Object.freeze({ ...finding('PLAIN_TEXT_CHECK_COPY_OUTDATED', 'info', `${vendored.file} is an older Toolkit copy; \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens its refresh pull request.`), ...refresh({ file: vendored.file, state: 'outdated' }) }));
   // A default branch other than main: the sweep cannot run there, so it is not expected.
   for (const row of result.not_copied || []) if (row.id.startsWith('programme-sweep')) out.push(finding('CLOUD_WORKFLOWS_UNCHECKED', 'info', `The ${row.id} workflow is not expected here: ${row.reason}.`));
-  // A shard copy an earlier list brought, while the list is now missing, not usable or not supported:
-  // nothing refreshes it, and the test shards copy runs a list it no longer matches.
-  for (const row of result.not_copied || []) {
-    for (const file of row.left || []) out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${file} is a Toolkit ${row.id === 'test-shards' ? 'test shards' : 'Shard Timings'} copy, but the shard copies are no longer copied: ${row.reason}. Repair the shard list and refresh the repository rules, or remove the shard copies in a pull request.`));
-  }
-  // A test shards copy left at an older workflow name after the list renamed it.
-  for (const row of result.renamed || []) out.push(finding('CLOUD_WORKFLOW_DRIFT', 'drift', `${row.file} is a Toolkit test shards copy at an old name; the shard list now names ${row.workflow}, so both run. Remove ${row.file} in a pull request.`));
-  // The shard gate is suggested as a required check, never set: the owner decides (info only).
-  const shards = result.rows.find(row => row.id === 'test-shards');
-  if (shards && ['current', 'outdated'].includes(shards.state) && !(merged?.required_checks || []).includes('Toolkit test shards')) {
-    out.push(finding('CI_SHARDS_GATE_NOT_REQUIRED', 'info', `${shards.file} runs the Toolkit test shards gate, but "Toolkit test shards" is not a required check here. Consider making it required on the default branch so a pull request waits for every test file to pass; Toolkit never sets it for you.`));
-  }
+  // A retired Toolkit file still here (the shard copies and list): the refresh pull request removes it,
+  // so it counts as a stale copy for the session-start line. It names no Toolkit commit, so a refresh
+  // never rolls it back.
+  for (const row of result.retired || []) out.push(Object.freeze({ ...finding('CLOUD_WORKFLOW_RETIRED', 'info', `${row.file} is a retired Toolkit file (${row.why}); \`toolkit-cloud-workflows.cjs --repo <checkout> --refresh-pr\` opens the pull request that removes it.`), ...refresh({ file: row.file, state: 'retired' }) }));
   return out;
 }
 
@@ -437,7 +423,7 @@ function cloudSweepReachFindings(state, options = {}) {
 }
 
 // Toolkit workflow copies left in a repository whose merged binding turns governance off: the sweep
-// and its gate, and the test shards and Shard Timings copies. The pull request that turns governance
+// and its gate, and the retired test shards and Shard Timings copies. The pull request that turns governance
 // off removes them; a copy still here means it was made before that, or by hand. Only a file starting
 // with the Toolkit's rendered-copy marker counts, found by that marker wherever the test shards copy's
 // list put it. Report only, never a drift.

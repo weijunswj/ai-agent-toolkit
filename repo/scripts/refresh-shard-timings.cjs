@@ -23,15 +23,6 @@
 // open for over 7 days fails the run naming it: merge or close it.
 // --warn-if-due is the report for a run without the governance App, where the App is optional: when
 // a refresh trigger crossed it stays green and writes a GitHub warning annotation with the owner's step.
-//
-// A governed repository's shard list (.github/toolkit-test-shards.json, schema v2, see
-// governed-test-shards.cjs) is refreshed the same way when --repo-root names a checkout that has one:
-// the run summaries come from the workflow the list names (`workflow`, default
-// toolkit-test-shards.yml), each system the list names gets its own discovered files, and the
-// durations and the named shards are written back to that list. Its runs, pull requests and refresh
-// branch base are on the repository's default branch: --branch <name> (the copied workflow passes it),
-// else the one `gh repo view` names. Without a v2 list the Toolkit's own v1 manifest, its Validate runs
-// and main are used, exactly as before.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -39,7 +30,6 @@ const path = require('node:path');
 const { randomBytes } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const shards = require('./ci-test-shards.cjs');
-const governed = require('./governed-test-shards.cjs');
 
 const WORKFLOW_FILE = 'validate.yml';
 const ARTIFACT_PATTERN = 'test-summary-*';
@@ -47,9 +37,8 @@ const UNTIMED_SHARE = 0.1;
 const IMBALANCE_RATIO = Object.freeze({ linux: 1.5, windows: 1.3 });
 const CONCURRENCY = 3; // run-tests.cjs default; node --test runs three files at a time per shard
 const STALE_PR_DAYS = 7;
-// What the refresh reads and writes: the Toolkit's v1 manifest and its Validate runs, or a governed
-// repository's v2 list and the workflow it names. `discover` gives the discovered files, which
-// `filesFor` splits by system (v1 discovers one list for both systems).
+// What the refresh reads and writes: the Toolkit's v1 manifest and its Validate runs. `discover` gives
+// the discovered files, one list for both systems.
 const V1 = Object.freeze({
   kind: 'v1',
   branch: 'main',
@@ -70,67 +59,12 @@ const V1 = Object.freeze({
   },
 });
 
-// The name: line of a workflow file, or null.
-function workflowNameOf(text) {
-  const match = /^name:\s*(['"]?)([^'"\n]{1,80})\1\s*$/m.exec(String(text).replace(/\r\n/g, '\n'));
-  return match ? match[2].trim() : null;
-}
-
-const BRANCH = /^[A-Za-z0-9_][A-Za-z0-9._\/-]{0,199}$/;
-
-// The repository's default branch, from GitHub, for a v2 run that was not given --branch.
-function defaultBranch(root) {
-  const name = command('gh', ['repo', 'view', '--json', 'defaultBranchRef', '--jq', '.defaultBranchRef.name'], { cwd: root }).trim();
-  if (!BRANCH.test(name)) throw new Error('the repository\'s default branch could not be read; pass --branch <name>');
-  return name;
-}
-
-function v2Profile(root, branch) {
-  const manifest = governed.loadManifest(root);
-  const workflowFile = typeof manifest.workflow === 'string' ? manifest.workflow : governed.DEFAULT_WORKFLOW;
-  let text = null;
-  try { text = fs.readFileSync(path.join(root, '.github', 'workflows', workflowFile), 'utf8'); } catch { /* reported below */ }
-  const workflowName = text === null ? null : workflowNameOf(text);
-  if (!workflowName) throw new Error(`.github/workflows/${workflowFile}, the workflow the shard list names, is missing or has no name: line`);
-  return Object.freeze({
-    kind: 'v2',
-    branch,
-    manifestRel: governed.MANIFEST_REL,
-    workflowFile,
-    workflowName,
-    load: (dir) => governed.loadManifest(dir),
-    discover: (dir) => governed.discoverAll(dir, governed.loadManifest(dir)),
-    systems: (list) => Object.keys(list.systems),
-    filesFor: (discovered, system) => discovered[system] || [],
-    systemShards: (list, system, discovered) => list.systems[system].shards.map((shard) => ({ id: shard.id, files: governed.resolveShard(list, system, shard.id, discovered) })),
-    assert: (list, discovered) => governed.assertManifest(list, discovered),
-    // A v2 list keeps budgets by system: { linux: { seconds_per_file, raised: { <file>: { seconds } } } }.
-    budget: (budgets, system, file) => {
-      const table = budgets[system] || {};
-      if (typeof table.seconds_per_file !== 'number') return undefined;
-      const raise = (table.raised || {})[file];
-      return raise && typeof raise.seconds === 'number' ? raise.seconds : table.seconds_per_file;
-    },
-  });
-}
-
-// The v2 profile when `root` has a governed shard list, otherwise the Toolkit's own v1 (on main).
-// `branch` is the governed repository's default branch, or a function that reads it.
-function profileFor(root, branch = null, readBranch = defaultBranch) {
-  if (!fs.existsSync(path.join(root, ...governed.MANIFEST_REL.split('/')))) {
-    if (branch) throw new Error('--branch goes with a governed shard list (.github/toolkit-test-shards.json); the Toolkit\'s own manifest refreshes from main');
-    return V1;
-  }
-  return v2Profile(root, branch || readBranch(root));
-}
-
-const USAGE = 'Usage: node repo/scripts/refresh-shard-timings.cjs [--repo-root <checkout>] [--branch <default branch>] [--run <id>] [--write | --open-pr | --warn-if-due]\nBalance trigger: over 1.5x on Linux, over 1.3x on Windows.';
+const USAGE = 'Usage: node repo/scripts/refresh-shard-timings.cjs [--repo-root <checkout>] [--run <id>] [--write | --open-pr | --warn-if-due]\nBalance trigger: over 1.5x on Linux, over 1.3x on Windows.';
 
 class UsageError extends Error {}
 
 function parseArgs(argv) {
   const options = { run: null, write: false, openPr: false, warnIfDue: false };
-  const BRANCH_ARG = /^[A-Za-z0-9_][A-Za-z0-9._\/-]{0,199}$/;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--write') options.write = true;
@@ -140,11 +74,6 @@ function parseArgs(argv) {
       const value = argv[index += 1];
       if (!value || !path.isAbsolute(value)) throw new UsageError('--repo-root needs an absolute checkout path');
       options.root = value;
-    }
-    else if (arg === '--branch') {
-      const value = argv[index += 1];
-      if (!BRANCH_ARG.test(value || '') || value.includes('..')) throw new UsageError('--branch needs a branch name');
-      options.branch = value;
     }
     else if (arg === '--run') {
       const value = argv[index += 1];
@@ -159,10 +88,9 @@ function parseArgs(argv) {
 
 // Per-file seconds by system from run-tests.cjs summaries, keeping only discovered test files. A
 // failed shard also uploads its summary; its times come from a failing run, so they are left out.
-// `discovered` is one list (v1) or a list per system (v2). Command mode summaries (a governed
-// repository's shards, one test per file) carry per-file seconds the same way.
+// `discovered` is the discovered test files, the same list for both systems.
 function timingsFromSummaries(summaries, discovered) {
-  const knownBySystem = Object.fromEntries(shards.SYSTEMS.map((system) => [system, new Set(Array.isArray(discovered) ? discovered : (discovered[system] || []))]));
+  const knownBySystem = Object.fromEntries(shards.SYSTEMS.map((system) => [system, new Set(discovered)]));
   const result = Object.fromEntries(shards.SYSTEMS.map((system) => [system, {}]));
   for (const summary of summaries) {
     if (!summary || summary.schema !== shards.SUMMARY_SCHEMA || !shards.SYSTEMS.includes(summary.system) || !Array.isArray(summary.files)) {
@@ -393,7 +321,7 @@ function openPr(root, run, out, profile = V1) {
   }
 }
 
-function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.stdout, err = process.stderr, readRun = latestGreenRun, readSummaries = downloadSummaries, publish = openPr, findOpen = openRefreshPrs, readBranch = defaultBranch, now = Date.now() } = {}) {
+function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.stdout, err = process.stderr, readRun = latestGreenRun, readSummaries = downloadSummaries, publish = openPr, findOpen = openRefreshPrs, now = Date.now() } = {}) {
   let options;
   try {
     options = parseArgs(argv);
@@ -405,7 +333,7 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
   if (options.help) { out.write(`${USAGE}\n`); return 0; }
   root = options.root || root;
   try {
-    const profile = profileFor(root, options.branch || null, readBranch);
+    const profile = V1;
     const run = readRun(root, options.run, profile);
     out.write(`${profile.workflowName} run ${run.databaseId} on ${run.headBranch} (${run.headSha.slice(0, 7)})\n`);
     if (options.openPr) {
@@ -431,7 +359,7 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
       fs.writeFileSync(path.join(root, ...profile.manifestRel.split('/')), manifestText(plan.manifest));
       out.write(`Updated ${profile.manifestRel}.\n`);
     } else if (options.warnIfDue) {
-      const step = `set up the governance App (TOOLKIT_GOVERNANCE_APP_CLIENT_ID and TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY) so the daily run opens the pull request, or run node ${profile.kind === 'v1' ? 'repo/scripts/refresh-shard-timings.cjs --write' : '<Toolkit>/repo/scripts/refresh-shard-timings.cjs --repo-root <checkout> --write'} and open the pull request by hand.`;
+      const step = `set up the governance App (TOOLKIT_GOVERNANCE_APP_CLIENT_ID and TOOLKIT_GOVERNANCE_APP_PRIVATE_KEY) so the daily run opens the pull request, or run node repo/scripts/refresh-shard-timings.cjs --write and open the pull request by hand.`;
       out.write(`::warning::A shard timing refresh is due and this run has no governance App to publish it. The shards still run and check every test file; they are only less balanced. Owner: ${step}\n`);
       return 0;
     } else out.write('A refresh trigger crossed; run again with --write or --open-pr to apply it.\n');
@@ -444,4 +372,4 @@ function main(argv = process.argv.slice(2), { root = shards.ROOT, out = process.
 
 if (require.main === module) process.exitCode = main();
 
-module.exports = Object.freeze({ V1, profileFor, STALE_PR_DAYS, IMBALANCE_RATIO, UNTIMED_SHARE, REFRESH_BRANCH_PREFIX, main, manifestText, parseArgs, planRefresh, publishEnv, rebalance, timingsFromSummaries });
+module.exports = Object.freeze({ V1, STALE_PR_DAYS, IMBALANCE_RATIO, UNTIMED_SHARE, REFRESH_BRANCH_PREFIX, main, manifestText, parseArgs, planRefresh, publishEnv, rebalance, timingsFromSummaries });

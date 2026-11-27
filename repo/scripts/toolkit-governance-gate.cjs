@@ -9,13 +9,13 @@
 //     or a state that could not be checked. The state lives only in the user-state files: nothing
 //     is written into the repository or folder.
 //   - PromptHold is the UserPromptSubmit core. The first own message of a run in an undecided
-//     github.com repository is let through with the question attached once: Toolkit's tap-to-answer
-//     card in Claude Code (AskUserQuestion), text for the agent to put to the user elsewhere. The
+//     github.com repository is let through with the question attached once, as text for the agent to
+//     put to the user; whether it shows as text or a card is the app's choice (INT-TK421-1389). The
 //     run is noted as asked (AskedRuns) and is not asked again; the next session is. The user
-//     answers by tapping the card, by sending `toolkit governance enable` or `disable` as a whole
-//     message (`decline` is the older word for disable), or in their own words: their next own
-//     message after the question goes to the agent with a one-use reply ticket (ReplyTickets, owner
-//     decision of 28 Oct), and the agent records what the user means with
+//     answers by sending `toolkit governance enable` or `disable` as a whole message (`decline` is
+//     the older word for disable), or in their own words or taps: their next own reply after the
+//     question (a typed message, or a card tap through PostToolUse, carded) goes to the agent with a
+//     one-use reply ticket (ReplyTickets, owner decision of 28 Oct), and the agent records what the user means with
 //     toolkit-governance-answer.cjs, or, when unsure, has the user confirm one named answer, whose
 //     reply can record only that answer. An answer counts only in the run that was asked
 //     (SessionEpochs). A session another session or a Toolkit launcher started is never asked and
@@ -23,8 +23,8 @@
 //   - ToolGate is the PreToolUse core. It refuses no tool because a repository is undecided. In
 //     every folder, exact checks stop an agent answering the question for the user: a command that
 //     runs the governance CLI with a decision (or names a host next to the full answer phrase), an
-//     edit to Toolkit's user-state files, Toolkit's card changed or pre-filled, and a prompt the
-//     agent schedules for itself while the reply is awaited or that carries the full answer.
+//     edit to Toolkit's user-state files, and a prompt the agent schedules for itself while the
+//     reply is awaited or that carries the full answer. It refuses no question card.
 //     Reading free text for a host launch or a session resume or fork is not a hook: the written
 //     rule (safety-gates playbook) covers it.
 //   - sessionLine is the one SessionStart line that states the effective state.
@@ -41,7 +41,7 @@ const governance = require('./toolkit-governance-state.cjs');
 const bindingCache = require('./toolkit-governance-binding.cjs');
 const { normaliseHost } = governance;
 const { MAX_DELIVERIES, deliveryHash, currentReceipts, deliveryReceipt } = require('./toolkit-projects-delivery.cjs');
-const { BankTickets, bankTicketContext, bankTicketCommand, bankExplainContext, bankExplainCommand, explainRequest } = require('./toolkit-governance-bank.cjs');
+const { BankTickets, bankTicketContext, bankTicketCommand } = require('./toolkit-governance-bank.cjs');
 const { programmeCommand } = require('./toolkit-user-state.cjs');
 
 // Earlier versions kept held messages in this file. Nothing is held now; the session-start hook
@@ -215,7 +215,6 @@ function proposalRun(text) {
 }
 const TICKET_ARGUMENTS =/\b(?:confirm-)?(?:yes|no|later)\s+[0-9a-f]{32}\b/i;
 const USER_STATE_PATH = /[\\/]\.ai-agent-toolkit[\\/]user-state(?:[\\/]|$)/i;
-const PICKER_TOOL = 'AskUserQuestion';
 const EDIT_TOOLS = /^(?:Edit|Write|MultiEdit|NotebookEdit|apply_patch)$/;
 const { SHELL_TOOLS, ShellCall } = require('./toolkit-shell-call.cjs');
 // Tools that schedule a prompt for the session itself.
@@ -827,31 +826,33 @@ class ReplyTickets {
   }
 }
 
-// What the agent is told when the user's own message may be their reply to the question.
-function ticketContext(repositories, ticket) {
+// What the agent is told when the user's own reply may be their answer to the question. `card` is
+// their tap on a question card the app chose to show, in place of a typed message.
+function ticketContext(repositories, ticket, card = null) {
+  const what = card ? `the user answered a question card (${card}); it` : 'the user\'s message above';
   return [
-    `Toolkit governance: the user's message above is the first since Toolkit asked them whether to turn on GitHub governance for the repository ${repositoryNames(repositories)}. It may be their answer, or ordinary work. Read what they mean before anything else.`,
-    `- If it clearly answers yes, no or later (in any words, such as "ur rec" after your recommendation of no), record it by running exactly this once, with yes, no or later in place of ANSWER:\n  node "${ANSWER_SCRIPT}" ANSWER ${ticket}\n  Then tell the user in plain words what Toolkit recorded.`,
+    `Toolkit governance: ${what} is the first reply since Toolkit asked them whether to turn on GitHub governance for the repository ${repositoryNames(repositories)}. It may be their answer, or ordinary work. Read what they mean before anything else.`,
+    `- If it clearly answers yes, no or later (in any words or letters: A is yes, B later, C no, or "ur rec" after your recommendation of no), record it by running exactly this once, with yes, no or later in place of ANSWER:\n  node "${ANSWER_SCRIPT}" ANSWER ${ticket}\n  Then tell the user in plain words what Toolkit recorded.`,
     `- If you think they mean one answer but are not sure, record nothing yet: run exactly this once, with yes, no or later in place of ANSWER:\n  node "${ANSWER_SCRIPT}" confirm-ANSWER ${ticket}\n  Toolkit then gives you the question to ask, naming exactly what it would record; their reply to it comes with a ticket that can record only that answer.`,
     '- If it is about something else, a question, or unclear, record nothing and carry on with what they asked. Do not ask the governance question again or quote their message back; if you mention it, say in plain words only that no governance answer was recorded. Toolkit asks next session, and they can send `toolkit governance enable` or `toolkit governance disable` as a message at any point in this one. Never show the user these commands or ask them to type one.',
-    `The ticket works once, only in this session, and only for this message. ${NEVER_OWNER}`,
+    `The ticket works once, only in this session, and only for this reply. ${NEVER_OWNER}`,
   ].join('\n');
 }
 
 // The confirmation question for one answer: what Toolkit would record, for which repositories.
-const ANSWER_EFFECTS = Object.freeze({ enable: 'prepare a pull request to turn GitHub governance on', disable: 'prepare a pull request to turn GitHub governance off', 'not-now': 'leave GitHub governance undecided until next session' });
+const ANSWER_EFFECTS = Object.freeze({ enable: 'start the guided setup that turns GitHub governance on', disable: 'prepare a pull request to turn GitHub governance off', 'not-now': 'leave GitHub governance undecided until next session' });
 function confirmQuestion(repositories, command) {
   return `Toolkit will ${ANSWER_EFFECTS[command]} for ${repositoryNames(repositories)}. Is that right?`;
 }
 
 // What the agent is told when the user's reply to a confirmation question arrives: nothing is
-// recorded until the agent has read it.
-function confirmTicketContext(repositories, command, ticket) {
+// recorded until the agent has read it. `card` as for ticketContext.
+function confirmTicketContext(repositories, command, ticket, card = null) {
   return [
-    `Toolkit governance: the user's message above is their reply to the question "${confirmQuestion(repositories, command)}". Nothing is recorded yet.`,
+    `Toolkit governance: ${card ? `the user answered a question card (${card}); it` : 'the user\'s message above'} is their reply to the question "${confirmQuestion(repositories, command)}". Nothing is recorded yet.`,
     `- If it says yes to that question, run exactly this once:\n  node "${ANSWER_SCRIPT}" ${COMMAND_WORDS[command]} ${ticket}\n  Then tell the user in plain words what Toolkit recorded. This ticket records "${COMMAND_WORDS[command]}" and nothing else.`,
     '- If it says no, is unclear, or is about something else, record nothing and carry on with what they asked.',
-    `The ticket works once, only in this session, and only for this message. ${NEVER_OWNER}`,
+    `The ticket works once, only in this session, and only for this reply. ${NEVER_OWNER}`,
   ].join('\n');
 }
 
@@ -877,14 +878,19 @@ function ticketCommand(text, sessionId, tickets) {
 
 // ---- messages ---------------------------------------------------------------------------------
 
-// The question as the user reads it. Nothing waits on the answer.
+// The question as the user reads it, in the global rules' question shape. Nothing waits on the answer.
+// How it shows (text, a card or the end-of-turn box) is the app's choice: Toolkit forces no card.
+const QUESTION_TEXT = 'Turn on GitHub governance (issues, records, evidence store) for this repository?';
 const QUESTION = [
-  "Toolkit: this repository has no GitHub governance decision yet, so it counts as off. Turn on GitHub governance (issues, records, evidence store) for this repository? Records and evidence go to this repository's own private TRANSPORT-<repository name> store on GitHub, found or created.",
-  'Reply yes, no or later. Nothing waits on your answer, and Toolkit asks again next session.',
+  "Toolkit: this repository has no GitHub governance decision yet, so it counts as off. Records and evidence would go to this repository's own private TRANSPORT-<repository name> store on GitHub, found or created. Nothing waits on your answer, and Toolkit asks again next session.",
+  '',
+  `**1. Question: ${QUESTION_TEXT}**`,
+  '   - **A. Yes (my pick):** Two more short questions follow (evidence store, task auto-merge), then Toolkit sets everything up.',
+  '   - **B. Later:** Nothing changes; Toolkit asks again next session.',
+  '   - **C. No:** Toolkit prepares a pull request that records governance off; the coding rules still apply.',
 ];
 
-// The text form names this repository's own store; the card stays generic, because the hook matches
-// its input exactly.
+// The text names this repository's own store.
 function questionText(verdict) {
   const slug = verdict.state.repository;
   const store = typeof slug === 'string' && /^[^/\s]+\/[^/\s]+$/.test(slug) ? `TRANSPORT-${slug.split('/')[1]}` : null;
@@ -893,59 +899,18 @@ function questionText(verdict) {
   return lines.join('\n');
 }
 
-// The tap-to-answer card in Claude Code: the one AskUserQuestion input whose answer Toolkit records,
-// and the answer each option records.
-const PICKER_QUESTION = 'Turn on GitHub governance (issues, records, evidence store) for this repository?';
-const PICKER_HEADER = 'Governance';
-const PICKER_OPTIONS = Object.freeze([
-  Object.freeze({ label: 'Yes', description: "Keep records and evidence in this repository's own private TRANSPORT-<repository name> store on GitHub, found or created; one more question follows." }),
-  Object.freeze({ label: 'No', description: 'Prepare a repository off decision through a pull request; the coding rules still apply.' }),
-  Object.freeze({ label: 'Later', description: 'Nothing is recorded, and Toolkit asks again next session.' }),
-]);
-const PICKER_COMMANDS = Object.freeze({ Yes: 'enable', No: 'disable', Later: 'not-now' });
-const PICKER_INPUT = Object.freeze({ questions: [{ question: PICKER_QUESTION, header: PICKER_HEADER, multiSelect: false, options: PICKER_OPTIONS }] });
-// The keys a model's own AskUserQuestion input may carry; an answer field set by the caller is refused.
-const PICKER_KEYS = Object.freeze(['questions', 'metadata']);
-
-// Whether a tool input is exactly the card, with no answer filled in by whoever called it.
-function pickerInput(toolInput) {
-  if (!toolInput || typeof toolInput !== 'object' || Array.isArray(toolInput)) return false;
-  if (Object.keys(toolInput).some(key => !PICKER_KEYS.includes(key))) return false;
-  const questions = toolInput.questions;
-  if (!Array.isArray(questions) || questions.length !== 1) return false;
-  const [question] = questions;
-  if (!question || typeof question !== 'object' || question.question !== PICKER_QUESTION || question.header !== PICKER_HEADER) return false;
-  if (question.multiSelect !== undefined && question.multiSelect !== false) return false;
-  if (Object.keys(question).some(key => !['question', 'header', 'multiSelect', 'options'].includes(key))) return false;
-  const options = question.options;
-  return Array.isArray(options) && options.length === PICKER_OPTIONS.length
-    && options.every((option, index) => option && typeof option === 'object' && Object.keys(option).every(key => ['label', 'description'].includes(key))
-      && option.label === PICKER_OPTIONS[index].label && option.description === PICKER_OPTIONS[index].description);
-}
-
-// What Claude is told with the first message of a run in Claude Code: show the card once, then do
-// what the user asked whatever they pick.
-function pickerContext(notice) {
-  return [
-    'Toolkit governance: this repository has no governance decision yet, so it counts as off. Toolkit asks the user once per session, and nothing waits on the answer.',
-    `1. First call AskUserQuestion once with exactly this input, adding no answers field: ${JSON.stringify(PICKER_INPUT)}`,
-    '2. Then carry on with the user\'s message above, whatever they picked. If the card is refused or not answered, carry on the same way and do not show it again.',
-    `If the card cannot be shown at all, put this to the user once instead, word for word:\n${notice}`,
-    `For agents: ${NEVER_OWNER}`,
-  ].join('\n');
-}
-// What the agent is told where the host has no card Toolkit can check (Codex): do the work, then put
-// the question as the last lines of the reply.
+// What the agent is told with the first message of a run: do the work, then put the question as the
+// last lines of the reply. The user's reply, typed or tapped on a card the app chose to show, comes
+// back with a way to record it.
 function textContext(notice) {
   return [
     'Toolkit governance: this repository has no governance decision yet, so it counts as off. Toolkit asks the user once per session, and nothing waits on the answer.',
     '1. Do what the user asked in the message above.',
     `2. End your reply with this question, word for word, and ask nothing else in that reply:\n${notice}`,
-    'Their next message comes to you with a way to record the answer if it is one.',
+    'Their next reply comes to you with a way to record the answer if it is one.',
     `For agents: ${NEVER_OWNER}`,
   ].join('\n');
 }
-const PICKER_NOTICE = 'Toolkit: this repository has no governance decision yet. Pick an answer on the card, or carry on; nothing waits on it.';
 
 // Where the repository lives, for the not-on-github.com notice.
 function whereText(state) {
@@ -960,9 +925,10 @@ const NEVER_OWNER_SHORT = 'only the user answers; never answer, script or click 
 
 // What the agent is told once the user's own answer is on record, or once they said "later".
 const LATER_CONTEXT = 'The user answered "later" to the Toolkit GitHub governance question. Nothing is decided: for the rest of this session follow the global rules (coding gates included) without GitHub governance, and Toolkit asks again next session. If the user wants to decide sooner, they can send `toolkit governance enable` or `toolkit governance disable` as a message. Never show the user these commands or ask them to type one.';
-// The user's yes: show the governance question bank, exactly as `toolkit governance` does.
+// The user's yes: Toolkit's guided setup comes next, exactly as `toolkit governance` shows it, with
+// the governance question left out (the yes is noted for this run).
 function enableContext() {
-  return `The user answered yes to turning on Toolkit's GitHub governance. Nothing is written yet: the governance question bank comes next, and its one setup pull request is made by Toolkit's own script. Build nothing by hand (no programme file, rules files, parent issue or evidence store), and run no other governance subcommand. ${require('./toolkit-commands.cjs').bankGuide()} The bank asks only what is left, and the user's answer to it turns governance on; \`no store\` keeps it off.`;
+  return `The user answered yes to turning on Toolkit's GitHub governance. Nothing is written yet: Toolkit's guided setup comes next, with two more questions (evidence store, task auto-merge), and its one setup pull request is made by Toolkit's own script. Build nothing by hand (no programme file, rules files, parent issue or evidence store), and run no other governance subcommand. ${require('./toolkit-commands.cjs').bankGuide()} No store keeps governance off.`;
 }
 const ANSWERED_CONTEXT = 'Toolkit: the user answered the governance question. Its proposal is pending; governance stays as merged on the default branch.';
 
@@ -977,10 +943,9 @@ const REASK_LINE = 'Toolkit: your reply could not be matched to the confirmation
 const REPLY_LOST = 'Toolkit: the local reply state could not be read, so nothing can be recorded from this message. Restore its read/write access or an intact local copy and keep spent delivery receipts; `toolkit governance enable` or `toolkit governance disable` as a message still works.';
 // The note that this run was asked could not be saved, so no answer in chat can be matched to it.
 const UNSAVED_LINE = `Toolkit could not note that it asked (its user-state folder could not be written), so an answer in chat cannot be recorded and this question comes with each message until that works. To decide now, run ${terminalCommand('enable')} or ${terminalCommand('disable')} in your own terminal.`;
-const BANK_MOVED = 'Toolkit: this repository\'s session mark changed since the governance bank was shown, so this message cannot answer it. If it was meant as the answer, tell the user in one line that it was not recorded because another session started here, and that they can type toolkit governance to see the bank again. Do not show the bank yourself.';
-const BANK_LOST = 'Toolkit: the reply to the governance bank could not be kept (its local state could not be written), so nothing can be recorded from this message. If it was meant as the answer, tell the user in one line that it was not recorded, and that they can type toolkit governance to see the bank again. Do not show the bank yourself.';
+const BANK_MOVED = 'Toolkit: this repository\'s session mark changed since Toolkit\'s governance questions were shown, so this reply cannot answer them. If it was meant as the answer, tell the user in one line that it was not recorded because another session started here, and that they can type toolkit governance to see the questions again. Do not show them yourself.';
+const BANK_LOST = 'Toolkit: the reply to Toolkit\'s governance questions could not be kept (its local state could not be written), so nothing can be recorded from it. If it was meant as the answer, tell the user in one line that it was not recorded, and that they can type toolkit governance to see the questions again. Do not show them yourself.';
 const MOVED_LINE = 'Toolkit: another session started in this repository since Toolkit asked, so nothing was recorded and Toolkit asks again.';
-const PICKER_UNCOUNTED = `Toolkit governance: no answer was recorded from that card. Carry on with what the user asked; they can still send \`toolkit governance enable\` or \`toolkit governance disable\` as a message. Never show the user these commands or ask them to type one. ${NEVER_OWNER}`;
 // A session the session-start hook never marked cannot be asked once or answer in chat.
 const BARE_LINE = `Toolkit governance: this repository has no governance decision yet, so it counts as off. This session started before Toolkit could note it, so the user decides in a new session or by running ${terminalCommand('enable')} or ${terminalCommand('disable')} in their own terminal. ${NEVER_OWNER}`;
 
@@ -995,11 +960,23 @@ function launchedSession(environment, sessionId) {
   return typeof host === 'string' && host !== '' && host !== sessionId;
 }
 
-// ---- picker notes -----------------------------------------------------------------------------
+// The owner's taps on a question card the app chose to show (Claude Code's PostToolUse on
+// AskUserQuestion: the host drops any answers field the model filled in, so these are the owner's), as
+// one line naming each question and the labels picked, or null when there are none.
+function cardReply(toolResponse) {
+  const answers = toolResponse && typeof toolResponse === 'object' && toolResponse.answers && typeof toolResponse.answers === 'object' && !Array.isArray(toolResponse.answers) ? toolResponse.answers : null;
+  if (!answers) return null;
+  const clean = value => String(value).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+  const pairs = Object.entries(answers).map(([question, picked]) => [clean(question), clean(Array.isArray(picked) ? picked.join(', ') : picked)]).filter(([question, picked]) => question && picked);
+  return pairs.length ? pairs.map(([question, picked]) => `"${question}": ${picked}`).join('; ') : null;
+}
 
-// The cards the tool gate let through, one small file each next to the session marks: the call's
-// tool_use_id with the session and marks of the run that made it. The answer to a call counts only
-// once, and only with its note; a note older than a day is never used.
+// ---- card notes -------------------------------------------------------------------------------
+
+// Toolkit's merge cards the tool gate let through (toolkit-merge-hold.cjs cardAsked), one small file
+// each next to the session marks: the call's tool_use_id with the session and marks of the run that
+// made it. The answer to a call counts only once, and only with its note; a note older than a day is
+// never used. The class and schema keep their names: notes already written read the same.
 const NOTE_SCHEMA = 'toolkit.governance-picker-note.v1';
 const MAX_NOTE_AGE_MS = 24 * 60 * 60 * 1000;
 class PickerNotes {
@@ -1060,24 +1037,22 @@ class PickerNotes {
 // The host-neutral UserPromptSubmit decision: { action: 'pass' } | { action: 'pass', context } |
 // { action: 'block', reason }.
 class PromptHold {
-  #gate; #asked; #epochs; #notes; #tickets; #bank; #registryOptions; #environment; #now; #picker;
+  #gate; #asked; #epochs; #tickets; #bank; #registryOptions; #environment; #now;
 
   // The UserPromptSubmit core. It never holds a message for the question: the first own message of
-  // a run in an undecided repository is let through with the question attached once, and the run is
-  // noted as asked. picker: the host can show Toolkit's tap-to-answer card (Claude Code); elsewhere
-  // the agent puts the question as text. The class keeps its name; the only messages it still blocks
-  // are answers that cannot count (an automated or unnoted session, a repeated Projects delivery).
-  constructor({ registryOptions = {}, environment = process.env, now = () => new Date(), stateReader = null, picker = false, proposalTransport = null, refreshBinding = null } = {}) {
+  // a run in an undecided repository is let through with the question attached once, as text for the
+  // agent to put to the user, and the run is noted as asked. The class keeps its name; the only
+  // messages it still blocks are answers that cannot count (an automated or unnoted session, a
+  // repeated Projects delivery).
+  constructor({ registryOptions = {}, environment = process.env, now = () => new Date(), stateReader = null, proposalTransport = null, refreshBinding = null } = {}) {
     this.#registryOptions = registryOptions;
     this.#gate = new GovernanceGate({ registryOptions, stateReader, now, environment, proposalTransport, refreshBinding });
     this.#asked = new AskedRuns({ registryOptions, now });
     this.#epochs = new SessionEpochs({ registryOptions, now });
-    this.#notes = new PickerNotes({ registryOptions, now });
     this.#tickets = new ReplyTickets({ registryOptions, now, gate: this.#gate });
     this.#bank = new BankTickets({ registryOptions, now });
     this.#environment = environment || {};
     this.#now = now;
-    this.#picker = picker === true;
   }
 
   // sessionId is the host's session id; "asked" lasts for that session's run only. Whoever reads a
@@ -1087,66 +1062,59 @@ class PromptHold {
     return result.action === 'block' && !result.reason.endsWith(NEVER_OWNER) ? { ...result, reason: withAgentLine(result.reason) } : result;
   }
 
-  // The card's answer, from Claude Code's PostToolUse on AskUserQuestion: { context } for Claude, or
-  // null when the call was not Toolkit's card. It counts only when the tool gate let this exact call
-  // through as a clean card in this run of the session that was asked, as a typed answer would.
-  picked({ cwd, sessionId = null, toolUseId = null, toolResponse = null }) {
-    const answers = toolResponse && typeof toolResponse === 'object' && toolResponse.answers && typeof toolResponse.answers === 'object' ? toolResponse.answers : {};
-    const questions = toolResponse && Array.isArray(toolResponse.questions) ? toolResponse.questions : [];
-    if (!questions.some(question => question && question.question === PICKER_QUESTION)) return null;
-    const noted = this.#notes.take(toolUseId);
-    // The card shown must still be exactly Toolkit's: options changed after the tool gate's check
-    // (relabelled, reordered) make the answer mean something else, so it counts for nothing.
-    if (!pickerInput({ questions })) return { context: PICKER_UNCOUNTED };
-    const verdict = this.#gate.evaluate(cwd, { sessionId });
-    if (!verdict.open) return null;
-    const marks = this.#marks(verdict, sessionId);
-    const id = verdict.state.repository_id;
-    const counts = verdict.reason === 'asked' && noted !== null && !this.#launched(sessionId) && noted.session_id === sessionId && noted.session === marks.session
-      && noted.repository === marks.repository && this.#asked.repositoryMark(id, sessionId) === marks.repository;
-    const label = Object.hasOwn(answers, PICKER_QUESTION) ? answers[PICKER_QUESTION] : null;
-    const command = typeof label === 'string' && Object.hasOwn(PICKER_COMMANDS, label) ? PICKER_COMMANDS[label] : null;
-    if (!counts || command === null) return { context: PICKER_UNCOUNTED };
-    try { this.#asked.closeWindow(id, sessionId); } catch { /* the window only offers a ticket */ }
-    const result = this.#answer(cwd, command, verdict, sessionId, marks);
-    return { context: result.action === 'pass' ? `${result.context}\nThen carry on with what the user asked.` : `Tell the user this, word for word, then carry on with what they asked: ${result.reason}${result.reason.endsWith(NEVER_OWNER) ? '' : `\n${NEVER_OWNER}`}` };
+  // The owner's tap on a question card the app chose to show, from Claude Code's PostToolUse on
+  // AskUserQuestion: { context } for the agent, or null when it answers nothing of Toolkit's. Where
+  // Toolkit's governance questions or the session-start question wait for the owner's reply in this
+  // run, the tap is that reply, taken the way their typed message would be: it gets the same one-use
+  // ticket, and the agent reads what they picked. The hook gives Toolkit's own merge card its answer
+  // first, so a merge tap never reaches here.
+  carded({ cwd, sessionId = null, toolResponse = null }) {
+    const card = cardReply(toolResponse);
+    if (!card || typeof sessionId !== 'string' || sessionId === '') return null;
+    const result = this.#decide({ cwd, prompt: '', sessionId, card });
+    return result.action === 'pass' && result.context ? { context: result.context } : null;
   }
 
-  // The question, attached to a message that is let through: the card where the host can show it,
-  // else text for the agent to put to the user. lead is an extra first line for the user.
+  // The question, attached to a message that is let through, as text for the agent to put to the user.
+  // lead is an extra first line for the user.
   #ask(verdict, lead = null) {
     const notice = [lead, questionText(verdict)].filter(Boolean).join('\n');
-    return this.#picker ? { action: 'pass', context: pickerContext(notice), notice: PICKER_NOTICE } : { action: 'pass', context: textContext(notice) };
+    return { action: 'pass', context: textContext(notice) };
   }
 
-  #decide({ cwd, prompt, sessionId = null }) {
-    // The owner's reply to a governance bank shown in this run comes first, in any repository state.
-    const banked = this.#bankReply(prompt, sessionId);
+  // `card` is the owner's tap on a question card (carded): the reply in place of a typed message. It
+  // is only ever read as a reply to a question that waits in this run; it never starts one.
+  #decide({ cwd, prompt, sessionId = null, card = null }) {
+    // The owner's reply to Toolkit's governance questions shown in this run comes first, in any repository state.
+    const banked = this.#bankReply(prompt, sessionId, card);
     if (banked) return banked;
-    const verdict = this.#gate.evaluate(cwd, { sessionId, refreshPending: true });
+    const verdict = this.#gate.evaluate(cwd, { sessionId, refreshPending: !card });
     if (!verdict.open) {
+      if (card) return { action: 'pass' };
       if (verdict.pending) return { action: 'pass', context: verdict.pending.text };
       return verdict.reason === 'unavailable' ? { action: 'pass', context: unavailableText(verdict.state?.state === 'UNAVAILABLE' ? causeOf(verdict.state) : PROPOSAL_CAUSE) } : { action: 'pass' };
     }
     // Answers are read from the user's own reply; every other message is ordinary work.
-    const message = ownerMessage(String(prompt || ''));
-    const answer = ownTyped(message) ? ANSWER.exec(message.text) : null;
+    const message = card ? { text: card, id: null, wrapped: false, markup: false, approvalEligible: false } : ownerMessage(String(prompt || ''));
+    const answer = !card && ownTyped(message) ? ANSWER.exec(message.text) : null;
     // A session another session or a launcher started is never asked and never answers.
     if (this.#launched(sessionId)) return answer ? { action: 'block', reason: LAUNCHED_TEXT } : { action: 'pass' };
     const marks = this.#marks(verdict, sessionId);
     // A session the session-start hook never marked cannot be noted as asked, so it is told each time.
     if (typeof sessionId !== 'string' || sessionId === '' || !EPOCH.test(String(marks.session))) {
+      if (card) return { action: 'pass' };
       return answer ? { action: 'block', reason: noMarkText(['enable', 'disable']) } : { action: 'pass', context: BARE_LINE };
     }
     const id = verdict.state.repository_id;
     if (verdict.reason === 'undecided') {
+      if (card) return { action: 'pass' };
       // The first message of the run: note the run as asked, open the reply window and let the
       // message through with the question. A first, pre-question Projects delivery stays spent, so
       // the host delivering it again cannot answer. A note that cannot be saved asks again next time.
       if (message.wrapped && ownTyped(message)) { try { this.#tickets.acceptDelivery(message, null); } catch { /* receipts are kept as they are */ } }
-      // A first message that asks for the bank (toolkit governance and its other phrases) gets the
-      // bank, which asks whether to turn governance on, so the run is noted as asked with no reply
-      // window and no question: one ask, never the question and then the bank.
+      // A first message that asks for the guided setup (toolkit governance and its other phrases) gets
+      // it, and it asks whether to turn governance on, so the run is noted as asked with no reply
+      // window and no question: one ask, never the question and then the setup.
       if (ownTyped(message) && require('./toolkit-commands.cjs').typedCommand(message.text)?.action === 'guide') {
         try { this.#asked.set(id, sessionId, marks); } catch { /* the next message is asked instead */ }
         return { action: 'pass' };
@@ -1164,10 +1132,10 @@ class PromptHold {
       try { this.#asked.closeWindow(id, sessionId); } catch { /* the next message gets a ticket that can record nothing new */ }
       return this.#afterAsked(cwd, answer, verdict, sessionId, marks);
     }
-    if (!ownTyped(message)) return { action: 'pass' };
-    // After the agent asked the user to confirm one answer, their next own message is read only as
-    // the reply to that question. Otherwise the next own message after the question may be the
-    // reply in any words, a bare yes included (without a hold, "yes" may also answer something the
+    if (!card && !ownTyped(message)) return { action: 'pass' };
+    // After the agent asked the user to confirm one answer, their next own reply is read only as
+    // the reply to that question. Otherwise the next own reply after the question may be the
+    // answer in any words, a bare yes included (without a hold, "yes" may also answer something the
     // agent asked): it goes to the agent with a one-use reply ticket. Later messages are ordinary work.
     let pending = null, lost = false, open = false;
     try { pending = this.#tickets.pending(sessionId, marks.session); } catch { lost = true; }
@@ -1185,39 +1153,37 @@ class PromptHold {
     const spent = this.#claim(message, id, sessionId);
     if (spent) return PromptHold.#unclaimed(spent);
     if (pending) {
-      const confirmed = this.#confirmReply(sessionId, marks.session);
+      const confirmed = this.#confirmReply(sessionId, marks.session, card);
       if (confirmed) return confirmed.unmatched ? PromptHold.#unclaimed({ reason: PromptHold.reask(confirmed) }) : confirmed;
     }
-    return this.#ticket(sessionId, marks.session, [{ id, root: verdict.state.root, mark: marks.repository || null }]) || { action: 'pass' };
+    return this.#ticket(sessionId, marks.session, [{ id, root: verdict.state.root, mark: marks.repository || null }], card) || { action: 'pass' };
   }
 
-  // The first own message after this run was shown a governance bank (toolkit-governance-bank.cjs)
-  // gets a one-use bank ticket; null when no bank waits in this run. A launched session, a message
-  // that is not the user's own, a repeated Projects delivery or a reply after the repository's session
-  // mark changed gets none, and the bank must be shown again.
-  #bankReply(prompt, sessionId) {
+  // The first own reply after this run was shown Toolkit's governance questions or summary
+  // (toolkit-governance.cjs setup) gets a one-use ticket; null when none waits in this run. A launched
+  // session, a message that is not the user's own, a repeated Projects delivery or a reply after the
+  // repository's session mark changed gets none, and they must be shown again. `card` is the owner's
+  // tap on a question card in place of a typed message.
+  #bankReply(prompt, sessionId, card = null) {
     if (typeof sessionId !== 'string' || sessionId === '') return null;
     const epoch = this.#epochs.get(sessionId);
     if (!EPOCH.test(String(epoch))) return null;
     let shown = null;
     try { shown = this.#bank.pendingFor(sessionId, epoch); } catch { return null; }
     if (!shown) return null;
-    const message = ownerMessage(String(prompt || ''));
+    const message = card ? { text: card, wrapped: false, markup: false } : ownerMessage(String(prompt || ''));
     const drop = () => { try { this.#bank.drop(sessionId); } catch { /* the note lapses in half an hour */ } };
     if (this.#launched(sessionId)) { drop(); return { action: 'pass' }; }
-    if (!ownTyped(message)) return null;
-    // Typing toolkit governance (or another phrase for the bank) again asks for the bank afresh, so
-    // it never answers the shown one: the note is dropped and the toolkit-setup skill shows it. As a
-    // reply it got a ticket and was told never to show the bank.
-    if (require('./toolkit-commands.cjs').typedCommand(message.text)?.action === 'guide') { drop(); return null; }
+    if (!card && !ownTyped(message)) return null;
+    // Typing toolkit governance (or another phrase for it) again asks for it afresh, so it never
+    // answers what was shown: the note is dropped and the toolkit-setup skill shows it. As a reply it
+    // got a ticket and was told never to show the questions.
+    if (!card && require('./toolkit-commands.cjs').typedCommand(message.text)?.action === 'guide') { drop(); return null; }
     if (this.#epochs.repository(shown.repository_id) !== shown.repository_mark) {
       drop();
       return { action: 'pass', context: `${BANK_MOVED}
 ${NEVER_OWNER}` };
     }
-    // "explain 1.4" only reads: it spends no ticket and no delivery, and the bank stays open.
-    const row = explainRequest(message.text);
-    if (row) return { action: 'pass', context: bankExplainContext(shown, row) };
     if (message.wrapped) {
       let accepted = false;
       try { accepted = this.#tickets.acceptDelivery(message, Date.parse(shown.at)); } catch { accepted = false; }
@@ -1225,7 +1191,7 @@ ${NEVER_OWNER}` };
     }
     let ticket = null;
     try { ticket = this.#bank.issue(sessionId, epoch); } catch { ticket = null; }
-    return { action: 'pass', context: ticket ? bankTicketContext(shown, ticket) : `${BANK_LOST}
+    return { action: 'pass', context: ticket ? bankTicketContext(shown, ticket, card) : `${BANK_LOST}
 ${NEVER_OWNER}` };
   }
 
@@ -1257,7 +1223,7 @@ ${NEVER_OWNER}` };
   // that question named, which ends the confirmation. null when none is pending; { unmatched: true } when
   // one may be pending but no ticket can be given (the store cannot be read or written, or this
   // thread message already had a ticket), so the reply is never read another way.
-  #confirmReply(sessionId, epoch) {
+  #confirmReply(sessionId, epoch, card = null) {
     let pending = null;
     try {
       pending = this.#tickets.pending(sessionId, epoch);
@@ -1265,7 +1231,7 @@ ${NEVER_OWNER}` };
     if (!pending) return null;
     let ticket = null;
     try { ticket = this.#tickets.issue(sessionId, epoch, pending.repositories, pending.command); } catch { ticket = null; }
-    return ticket ? { action: 'pass', context: confirmTicketContext(pending.repositories, pending.command, ticket) } : { unmatched: true, pending };
+    return ticket ? { action: 'pass', context: confirmTicketContext(pending.repositories, pending.command, ticket, card) } : { unmatched: true, pending };
   }
 
   // What is said when a reply cannot be matched to the confirmation: the same confirmation question
@@ -1284,11 +1250,11 @@ ${NEVER_OWNER}` };
 
   // A reply ticket for this message and these repositories, with what the agent is told; null when
   // this thread message already had one or no ticket can be kept.
-  #ticket(sessionId, epoch, repositories) {
+  #ticket(sessionId, epoch, repositories, card = null) {
     if (typeof sessionId !== 'string' || sessionId === '' || !EPOCH.test(String(epoch))) return null;
     let ticket;
     try { ticket = this.#tickets.issue(sessionId, epoch, repositories); } catch { ticket = null; }
-    return ticket ? { action: 'pass', context: ticketContext(repositories, ticket) } : null;
+    return ticket ? { action: 'pass', context: ticketContext(repositories, ticket, card) } : null;
   }
 
   // The answer the agent read from the user's reply, recorded with its ticket (toolkit-governance-
@@ -1374,9 +1340,13 @@ ${NEVER_OWNER}` };
     if (this.#launched(sessionId)) return { action: 'block', reason: LAUNCHED_TEXT };
     // "Later" records nothing: the run is already noted as asked, and the next session asks again.
     if (command === 'not-now') return { action: 'pass', context: LATER_CONTEXT };
-    // Yes records nothing either: it opens the governance question bank, whose answer is the one
-    // setup pull request Toolkit's own script makes. Nothing is built by hand.
-    if (command === 'enable') return { action: 'pass', context: enableContext() };
+    // Yes records nothing either: it opens the guided setup, whose answer is the one setup pull request
+    // Toolkit's own script makes. Nothing is built by hand. The yes is noted for this run, so the
+    // guided setup leaves the governance question out; a note that cannot be saved only asks it again.
+    if (command === 'enable') {
+      try { this.#bank.agree(sessionId, { epoch: marks.session, repositoryMark: marks.repository ?? null, repositoryId: verdict.state.repository_id }); } catch { /* asked again in the guided setup */ }
+      return { action: 'pass', context: enableContext() };
+    }
     let decided;
     try {
       const proposals = new (require('./toolkit-governance-proposal.cjs').GovernanceProposals)({ registryOptions: this.#registryOptions, now: this.#now });
@@ -1427,37 +1397,19 @@ function sessionIdOf(input) {
 const SCHEDULED_ANSWER = /toolkit\s+governance\s+(?:enable|disable|decline)/i;
 
 class ToolGate {
-  #gate; #epochs; #notes; #tickets; #asked; #bank;
+  #gate; #epochs; #tickets; #asked; #bank;
 
   // The PreToolUse core. No tool is refused because a repository is undecided: it counts as off and
   // work carries on. What stays are the checks that stop an agent answering the question for the
   // user, in every folder: a command that runs the governance CLI with a decision, an edit to
-  // Toolkit's user-state files, Toolkit's card changed or pre-filled, and a prompt the agent
-  // schedules for itself that could arrive as the user's reply.
+  // Toolkit's user-state files, and a prompt the agent schedules for itself that could arrive as the
+  // user's reply. A question card is the app's own: Toolkit refuses none and forces none.
   constructor({ registryOptions = {}, stateReader = null, now } = {}) {
     this.#gate = new GovernanceGate({ registryOptions, stateReader, now });
     this.#epochs = new SessionEpochs({ registryOptions, now });
-    this.#notes = new PickerNotes({ registryOptions, now });
     this.#tickets = new ReplyTickets({ registryOptions, now, gate: this.#gate });
     this.#asked = new AskedRuns({ registryOptions, now });
     this.#bank = new BankTickets({ registryOptions, now });
-  }
-
-  // AskUserQuestion is free for any other question. A call that carries Toolkit's own governance
-  // question, in a repository where it is open, runs only as Toolkit's card, exactly as given and
-  // with no answer filled in by the caller; the call is noted so the answer that comes back
-  // (PromptHold.picked) is known to come from that card.
-  #picker(input, sessionId) {
-    const questions = input.tool_input && Array.isArray(input.tool_input.questions) ? input.tool_input.questions : [];
-    if (!questions.some(question => question && question.question === PICKER_QUESTION)) return null;
-    const verdict = this.#gate.evaluate(input && input.cwd, { sessionId });
-    if (!verdict.open) return null;
-    const refused = { deny: `Toolkit: its governance question is shown only as Toolkit's own card, exactly as given and with no answer filled in. Carry on with what the user asked; they can answer with \`toolkit governance enable\` or \`toolkit governance disable\` as a message. ${NEVER_OWNER}` };
-    if (!pickerInput(input.tool_input)) return refused;
-    const marks = { session: this.#epochs.get(sessionId), repository: this.#epochs.repository(verdict.state.repository_id) };
-    if (typeof sessionId !== 'string' || sessionId === '' || !EPOCH.test(String(marks.session))) return refused;
-    try { this.#notes.note(input.tool_use_id, { session_id: sessionId, ...marks }); } catch { return refused; }
-    return null;
   }
 
   decide(input) {
@@ -1468,24 +1420,22 @@ class ToolGate {
       // Recording the answer the agent read from the user's own reply, with this session's live
       // ticket; the script checks the ticket again as it records.
       if (tool !== 'Monitor' && ticketCommand(text, sessionId, this.#tickets)) return null;
-      // Sending the user's reply to a governance bank, with this session's live bank ticket; the
-      // command spends the ticket again as it runs. Any other bank answer is refused below.
+      // Sending the user's reply to Toolkit's governance questions, with this session's live ticket;
+      // the command spends the ticket again as it runs. Any other answer is refused below.
       if (tool !== 'Monitor' && bankTicketCommand(text, sessionId, this.#bank)) return null;
-      // The read-only explain of one bank row ("explain 1.4"), exactly, needs no ticket.
-      if (tool !== 'Monitor' && bankExplainCommand(text)) return null;
       // Any other run of the answer script with an answer and a ticket (joined to another command,
       // from another session, through another script path) is refused, so a ticket is spent only
       // by the session it was given to, on its own.
       if (/toolkit-governance-answer/i.test(text) && TICKET_ARGUMENTS.test(text)) {
         return { deny: `Toolkit: the answer script runs only as the exact command Toolkit gave this session with the user's reply, on its own line and with nothing added. Nothing was recorded. ${NEVER_OWNER}` };
       }
-      // A bank reply in any other form: say what makes it exact, so a stray character in the user's
-      // reply is not read as a ban on sending it.
+      // A reply in any other form: say what makes it exact, so a stray character in the user's reply
+      // is not read as a ban on sending it.
       if (tool !== 'Monitor' && BANK_ANSWER_ATTEMPT.test(text)) {
-        return { deny: `Toolkit: a governance bank reply runs only as the exact command Toolkit gave this session with the user's reply and its live ticket, on its own with nothing added, and the answer between its straight double quotes holds no curly quote, straight double quote, $, backtick or %. Nothing was sent. If the answer held one of those, run the same command again without it; if the ticket was not given to this session, tell the user in one line that it was not sent. ${NEVER_OWNER}` };
+        return { deny: `Toolkit: a reply to Toolkit's governance questions runs only as the exact command Toolkit gave this session with the user's reply and its live ticket, on its own with nothing added, and the answer between its straight double quotes holds no curly quote, straight double quote, $, backtick or %. Nothing was sent. If the answer held one of those, run the same command again without it; if the ticket was not given to this session, tell the user in one line that it was not sent. ${NEVER_OWNER}` };
       }
       if (answerCommand(text)) {
-        return { deny: `Toolkit: only the user answers the governance question, on Toolkit's card or by sending \`toolkit governance enable\` or \`toolkit governance disable\` as their own message. Never show the user these commands or ask them to type one. If they asked you to decide it, tell them in plain words that only they can. ${NEVER_OWNER}` };
+        return { deny: `Toolkit: only the user answers the governance question, in their own reply or by sending \`toolkit governance enable\` or \`toolkit governance disable\` as their own message. Never show the user these commands or ask them to type one. If they asked you to decide it, tell them in plain words that only they can. ${NEVER_OWNER}` };
       }
       if (proposalRun(text)) {
         return { deny: `Toolkit: its governance proposals are made only by Toolkit itself, from the user's own answer. ${NEVER_OWNER}` };
@@ -1494,7 +1444,6 @@ class ToolGate {
     if (EDIT_TOOLS.test(tool) && editTargets(input).some(target => USER_STATE_PATH.test(resolveTarget(input, target)))) {
       return { deny: `Toolkit: its user-state files (cached observations, pending proposals and asked sessions) are changed only by Toolkit itself. ${NEVER_OWNER}` };
     }
-    if (tool === PICKER_TOOL) return this.#picker(input || {}, sessionId);
     // A prompt the agent schedules for itself arrives as bare text and could read as the user's
     // reply. None is scheduled while this run has a reply ticket, a confirmation or the reply window
     // open; after that, only one that carries the full answer is refused, in a run that was asked.
@@ -1667,8 +1616,8 @@ const FINDING_ACTIONS = Object.freeze({
 function programmeLines(state, registryOptions = {}, deps = {}) {
   const lines = [];
   const checkpoints = [];
-  // Stale copies: every row of the governance check that a refresh pull request changes (the sweep, its
-  // gate and the test shards copies; the personal data guard and dependency auto-merge, copied as they
+  // Stale copies: every row of the governance check that a refresh pull request changes (the sweep and
+  // its gate; a retired copy it removes; the personal data guard and dependency auto-merge, copied as they
   // are; the vendored plain-text check), missing, edited or outdated. Rendered copies run Toolkit main,
   // but a layout change reaches the repository only through a refresh pull request, and a copied file
   // only ever changes that way. Local reads only: git on the Toolkit checkout and the repository (about
@@ -1693,7 +1642,7 @@ function staleCopyLines(state, registryOptions = {}, deps = {}) {
 }
 
 // How each row's state reads in the line.
-const COPY_STATE_WORDS = Object.freeze({ missing: 'missing', edited: 'edited by hand', outdated: 'older copy' });
+const COPY_STATE_WORDS = Object.freeze({ missing: 'missing', edited: 'edited by hand', outdated: 'older copy', retired: 'retired, to remove' });
 
 // The refresh command only when it moves every copy forward (each pinned copy's commit is already in
 // this computer's Toolkit checkout, which is on main). Otherwise a refresh from here would roll a newer
@@ -1858,7 +1807,6 @@ function insideRepository(cwd) {
 module.exports = Object.freeze({
   ANSWER,
   LATER_CONTEXT,
-  PICKER_UNCOUNTED,
   decidedLine,
   FINDING_ACTIONS,
   HOST_SESSION_VARIABLE,
@@ -1891,8 +1839,7 @@ module.exports = Object.freeze({
   cloudSessionText,
   SESSION_TEXT_LIMIT,
   terminalCommand,
-  PICKER_INPUT,
-  PICKER_QUESTION, QUESTION,
+  cardReply,
+  QUESTION, QUESTION_TEXT,
   PickerNotes,
-  pickerInput,
 });

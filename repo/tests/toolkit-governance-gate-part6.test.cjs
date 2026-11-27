@@ -171,7 +171,7 @@ test('session marks: a later process that resumes the session is asked again and
     // The user's own run still answers once it was shown the question.
     const own = gitRepo(ctx, `own-${host}`, { remote: `https://github.com/example-owner/own-${host}.git` });
     assert.ok(asks(send({ cwd: own, session_id: `own-${host}`, prompt: 'fix the bug' }, 'startup')));
-    assert.match(send({ cwd: own, session_id: `own-${host}`, prompt: 'toolkit governance enable' }).context, /answered yes[\s\S]*question bank/, host);
+    assert.match(send({ cwd: own, session_id: `own-${host}`, prompt: 'toolkit governance enable' }).context, /answered yes[\s\S]*guided setup/, host);
   }
 });
 
@@ -208,7 +208,7 @@ test('session marks: no mark means no answer in chat; /clear and compaction keep
     assert.equal(asksIn(reply), false, source);
     const answered = raw().decide({ cwd: kept, prompt: 'toolkit governance enable', sessionId: `k-${source}` });
     assert.equal(answered.action, 'pass', source);
-    assert.match(answered.context, /answered yes[\s\S]*question bank/, source);
+    assert.match(answered.context, /answered yes[\s\S]*guided setup/, source);
   }
   // A /clear that comes with no mark yet starts one.
   const cleared = gitRepo(ctx, 'cleared', { remote: 'https://github.com/example-owner/cleared.git' });
@@ -224,7 +224,7 @@ test('session marks: no mark means no answer in chat; /clear and compaction keep
   assert.ok(asksIn(again), 'the whole question is shown again');
   assert.equal(ticketOf(again.context), undefined, 'a yes from before this run\'s question is no reply');
   const reply = raw().decide({ cwd: own, prompt: 'yes', sessionId: 'o1' });
-  assert.match(raw().answerTicket(ticketOf(reply.context), 'yes').text, /question bank/);
+  assert.match(raw().answerTicket(ticketOf(reply.context), 'yes').text, /guided setup/);
   assertAnswered(pending(own, 'o1'), 'yes');
   // After the reply, the same run carries on; a resumed run is asked again and its full answer does not count.
   const later = gitRepo(ctx, 'later', { remote: 'https://github.com/example-owner/later.git' });
@@ -293,8 +293,8 @@ test('a mark that cannot be replaced fails safe: the resumed or continued run ca
     // The user's next reply counts.
     const next = raw().decide({ cwd: continued, prompt: reply, sessionId: `first-${index}` });
     assert.equal(next.action, 'pass');
-    if (index === 0) assert.match(raw().answerTicket(ticketOf(next.context), 'yes').text, /question bank/);
-    else assert.match(next.context, /answered yes[\s\S]*question bank/, reply);
+    if (index === 0) assert.match(raw().answerTicket(ticketOf(next.context), 'yes').text, /guided setup/);
+    else assert.match(next.context, /answered yes[\s\S]*guided setup/, reply);
     assertAnswered(pending(continued, `first-${index}`), 'yes', reply);
     assert.equal(stateOf(ctx, continued).state, 'UNDECIDED');
   }
