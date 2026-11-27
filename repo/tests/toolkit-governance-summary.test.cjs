@@ -132,7 +132,7 @@ test('the summary after a GitHub Free finish says what is on and what GitHub Fre
     require(path.join(scripts, 'toolkit-cloud-workflows-copied.cjs')).SWEEP_WORKFLOW, require(path.join(scripts, 'toolkit-governance-security.cjs')).WORKFLOW_REL,
     '.github/workflows/plain-text.yml', require(path.join(scripts, 'toolkit-cloud-workflows-copied.cjs')).COPIED_FILES['personal-data-guard'][0]]);
   const facts = {
-    repository: 'weijunswj/toolkit-uat-v4', defaultBranch: 'main', store: { repository: 'weijunswj/TRANSPORT-toolkit-uat-v4', state: 'usable' }, parents: [1],
+    repository: 'example-owner/toolkit-uat-v4', defaultBranch: 'main', store: { repository: 'example-owner/TRANSPORT-toolkit-uat-v4', state: 'usable' }, parents: [1],
     task: { auto_merge: 'after-gates', merge_train: 'on' }, requiredChecks: ['plain-text', 'personal-data'],
     finish: { on: ['the free dependency and security settings'], unavailable: ['the no-force-push ruleset', 'default-branch protection'], held: [] }, drift: null,
     files, shards: 'Not applicable', permissions: { checked: true, app: 'Claude Code', missing: 0, stale: 0 }, app: { variable: 'found', secret: 'found' }, appCommand: 'x', copies: null, stale: null,
@@ -141,7 +141,7 @@ test('the summary after a GitHub Free finish says what is on and what GitHub Fre
   assert.equal(text.split('\n')[0], '**Governance: on and ready.**');
   assert.deepEqual(tableOf(text), [
     '| GitHub governance | On | Records, decisions and evidence for this repository, the same on every computer |',
-    '| Evidence store | Ready: weijunswj/TRANSPORT-toolkit-uat-v4 (private) | Keeps programme records, plans and reviews apart from the code |',
+    '| Evidence store | Ready: example-owner/TRANSPORT-toolkit-uat-v4 (private) | Keeps programme records, plans and reviews apart from the code |',
     '| Parent issue | Ready: #1 | Tracks every task as a sub-issue |',
     '| Task auto-merge with merge train | On | Reviewed, green task pull requests land on their own, in merge trains |',
     '| Required checks | Set: plain-text, personal-data | Every pull request passes these before it lands |',
@@ -154,13 +154,34 @@ test('the summary after a GitHub Free finish says what is on and what GitHub Fre
     '| Governance App | Set up | Lets the cloud workflows act on GitHub |',
   ]);
   // Held: the top line says what waits; a store that cannot be used is a step; an unread App is never missing.
-  const held = summary.renderSummary({ ...facts, store: { repository: 'weijunswj/TRANSPORT-toolkit-uat-v4', state: 'not-private' }, app: { variable: 'unverified', secret: 'found' } }, { held: true });
+  const held = summary.renderSummary({ ...facts, store: { repository: 'example-owner/TRANSPORT-toolkit-uat-v4', state: 'not-private' }, app: { variable: 'unverified', secret: 'found' } }, { held: true });
   assert.equal(held.split('\n')[0], '**Governance: on, not ready: 1 step left.** Programme records, gate records and task auto-merge are held until then.');
-  assert.match(held, /^\*\*Evidence store:\*\* weijunswj\/TRANSPORT-toolkit-uat-v4 is not private: make it private again on GitHub/m);
+  assert.match(held, /^\*\*Evidence store:\*\* example-owner\/TRANSPORT-toolkit-uat-v4 is not private: make it private again on GitHub/m);
   assert.ok(tableOf(held).includes('| Governance App | Not read | Lets the cloud workflows act on GitHub |'));
   // Missing workflow files are named.
   const missing = new Set([...files].filter(file => !file.endsWith('plain-text.yml')));
   assert.ok(tableOf(summary.renderSummary({ ...facts, files: missing })).includes('| Guards | On: personal data guard. Missing: plain-text check | Check every pull request and push |'));
+});
+
+// The cloud workflow and guard rows read the merged commit's files with git from its PATH location (the
+// binding reader's runner), never a git.exe planted in the repository.
+test('the merged files come from the merged commit, through the binding reader\'s git runner', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolkit-governance-summary-git-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const git = args => require('node:child_process').execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', windowsHide: true }).trim();
+  git(['init', '--quiet']);
+  fs.mkdirSync(path.join(root, '.github', 'workflows'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.github', 'workflows', 'plain-text.yml'), 'name: plain-text\n');
+  git(['add', '.']);
+  git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com', 'commit', '--quiet', '-m', 'base']);
+  const commit = git(['rev-parse', 'HEAD']);
+  assert.deepEqual([...summary.mergedFiles(root, commit)], ['.github/workflows/plain-text.yml']);
+  assert.equal(summary.mergedFiles(root, 'not-a-commit'), null);
+  assert.equal(summary.mergedFiles(root, 'f'.repeat(40)), null, 'a commit that is not here reads as not read');
+  const calls = [];
+  summary.mergedFiles(root, commit, { runGit: (args, options) => { calls.push([args, options.cwd]); return { status: 0, stdout: Buffer.from('') }; } });
+  assert.deepEqual(calls, [[['-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', commit, '--', '.github'], root]]);
+  assert.match(fs.readFileSync(path.join(scripts, 'toolkit-governance-summary.cjs'), 'utf8'), /defaultRunGit/, 'the default runner is the binding reader\'s');
 });
 
 test('the finish record keeps the part names the summary reads, and the parts record keeps settings drift', t => {

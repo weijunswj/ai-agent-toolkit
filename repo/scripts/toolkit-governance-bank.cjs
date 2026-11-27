@@ -81,7 +81,7 @@ function statusRow({ id, section, title, current, text = '', change = '', bound 
   };
 }
 
-// The bank for one repository. `state` is the governance state, `task` the merged switch ('after-gates',
+// The rows for one repository. `state` is the governance state, `task` the merged switch ('after-gates',
 // 'off' or 'unset'), `merged` the merged binding (or null), `permissions` { missing, checked }, and
 // `adoption` what turning governance on would make in a repository that is not prepared yet
 // (toolkit-governance-adopt.cjs adoptionPlan; null when it is prepared or already on), `train` the
@@ -95,11 +95,9 @@ function statusRow({ id, section, title, current, text = '', change = '', bound 
 // hold the cleanup and `step` what clears it, `refused` why the programme file stops it; null when not
 // read).
 //
-// The bank asks at most two questions: whether governance stays on or off where it is decided (in a
-// repository not decided yet the turn-on card already asked, so an answer turns it on), and task
-// auto-merge. Everything else is a status row: what is set, or the Toolkit default the answer applies
-// (parallel CI shards by CI time, the evidence store, the App and permission commands, the copies
-// cleanup). Merge trains keep their stored value and are not asked.
+// These rows are what Toolkit read, as data: the guided questions take the parallel CI shards default
+// from them, the summary its shards state, and the reference that binds a reply to what was shown is
+// built from them. Neither shows them as a table.
 function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, mergedRead = null, permissions = { checked: false, missing: 0 }, adoption = null, ciShards = null, app = null, copies = null, storeCheck = null }) {
   // Only a state read from the merged binding has words here; any other (GitHub could not be read)
   // gets the CLI's line to type it again, never a bank.

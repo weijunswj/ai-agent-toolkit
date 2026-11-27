@@ -202,7 +202,7 @@ class GovernanceProposals {
     const run = sessionId && EPOCH.test(epoch) ? key(`${sessionId}:${epoch}`) : null;
     const request = value.requests.find(item => item.run === run && ['yes', 'no'].includes(item.answer) && this.#now() - new Date(item.at) >= 0 && this.#now() - new Date(item.at) <= cache.FRESH_MS);
     if (!request) return null;
-    return { kind: 'preparing', ...request, text: `Toolkit: the owner's ${request.answer} is pending for this run. ${request.answer === 'yes' ? `${BANK_ONLY} Show the owner the bank again with node "${path.join(__dirname, 'toolkit-governance.cjs')}" setup and build nothing by hand.` : `Prepare and publish one governance decision pull request with node "${path.join(__dirname, 'toolkit-governance.cjs')}" publish --run ${request.run}. Then show its external effects and ask the owner to merge it now.`} Governance stays as merged on the default branch.` };
+    return { kind: 'preparing', ...request, text: `Toolkit: the owner's ${request.answer} is pending for this run. ${request.answer === 'yes' ? `${BANK_ONLY} Show the owner the setup questions again with node "${path.join(__dirname, 'toolkit-governance.cjs')}" setup and build nothing by hand.` : `Prepare and publish one governance decision pull request with node "${path.join(__dirname, 'toolkit-governance.cjs')}" publish --run ${request.run}. Then show its external effects and ask the owner to merge it now.`} Governance stays as merged on the default branch.` };
   }
   // A failed query is unknown, never "there are no proposals". Closed unmerged PRs end requests.
   // One PR-state read per minute across chats. Claim before I/O, so even a killed hook is throttled.

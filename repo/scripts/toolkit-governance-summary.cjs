@@ -10,8 +10,6 @@
 // (1.2=B), listed the owner's own permission lines as raw commands, and never said in one place what
 // was set up and what was still missing.
 
-const { spawnSync } = require('node:child_process');
-
 const fenced = command => ['```powershell', command, '```'];
 const cell = text => String(text || '').replace(/\r?\n/g, ' ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 const listed = items => (items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}` : items[0] || '');
@@ -49,11 +47,12 @@ const fileOf = entry => (typeof entry.file === 'function' ? entry.file() : entry
 
 // The files under .github at the merged commit the binding was read from, or null when they cannot be
 // read. The refresh fetched that commit into the default branch's tracking ref, so this is local only.
-function mergedFiles(root, commit) {
+// git runs as the binding reader runs it: from its PATH location, never a git.exe in the repository.
+function mergedFiles(root, commit, { runGit = require('./toolkit-governance-binding.cjs').defaultRunGit } = {}) {
   if (typeof root !== 'string' || !/^[0-9a-f]{40}$/i.test(String(commit || ''))) return null;
   try {
-    const result = spawnSync('git', ['-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', commit, '--', '.github'], { cwd: root, encoding: 'utf8', timeout: 10000, windowsHide: true, shell: false });
-    if (result.error || result.status !== 0) return null;
+    const result = runGit(['-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', commit, '--', '.github'], { cwd: root, timeout: 10000 });
+    if (result.status !== 0) return null;
     return new Set(String(result.stdout).split(/\r?\n/).filter(Boolean));
   } catch { return null; }
 }

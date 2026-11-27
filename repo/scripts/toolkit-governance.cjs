@@ -365,7 +365,7 @@ class ToolkitGovernanceCli {
     const state = this.#state();
     const entry = state.repository_id ? finishing.entryFor(this.#registryOptions, state.repository_id) : null;
     if (!entry || entry.status !== 'pending') {
-      this.#print(json, { result: 'nothing' }, ['Nothing to finish here: no governance turn-on from the question bank is waiting for its post-merge setup.']);
+      this.#print(json, { result: 'nothing' }, ['Nothing to finish here: no governance turn-on from the guided setup is waiting for its post-merge setup.']);
       return 0;
     }
     // A mark whose turn-on pull request closed without merging is cleared, never finished: governance
