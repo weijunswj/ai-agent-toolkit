@@ -3896,6 +3896,35 @@
       "status": "pass"
     },
     {
+      "id": "ASK.desktop-card-wake",
+      "source": "owner test 27 Nov 2026: a three-choice question got no card, because nothing gave the chat the next turn the asking line promised",
+      "hosts": [
+        "claude"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "kind": "state",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "asking"
+        },
+        "entrypoint": "claude-desktop"
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "right before you end the turn with the closing message, start one short background wait (a background command of about 30 seconds), then on the automatic turn it brings open the card first, with no text before it."
+        ],
+        "context_excludes": [
+          "on your next turn"
+        ]
+      },
+      "status": "pass"
+    },
+    {
       "id": "ASK.desktop-governance-off",
       "source": "owner decision on question cards (25 Nov 2026): the desktop app cuts text written before a card in the same turn",
       "hosts": [
