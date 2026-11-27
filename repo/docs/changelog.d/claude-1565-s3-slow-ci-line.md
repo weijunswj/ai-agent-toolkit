@@ -1,8 +1,9 @@
 ### Added
 
-- The daily slow-CI line: once a day per repository, this computer runs the CI check-up in the background and tells the owner once when it finds new `speed.shards` or `speed.shards-lopsided` results, at whichever comes first: the next session start (Claude Code and Codex) or the next Claude Code turn end. It stays quiet until the result changes, never waits on the check and never blocks a turn. The record (`slow-ci.v1.json` in user state) keeps finding codes, job names, times and counts only.
+- The daily slow-CI line: once a day per repository, this computer runs the CI check-up in the background and tells the owner once when it finds new `speed.shards` or `speed.shards-lopsided` results, at whichever comes first: the next session start (Claude Code and Codex) or the next Claude Code turn end, in a chat the owner started (a desktop side session leaves it for the owner's chat). It stays quiet until the result changes (new times or shard counts are the same result), never waits on the check and never blocks a turn. The record (`slow-ci.v1.json` in user state) keeps workflow paths, finding codes, job names, times and counts only.
+- Each background check adds one line to `slow-ci.log` in user state (time, repository, outcome or why it failed); a failed check keeps its reason in the record and the next start backs off 1, 2, 4 hours up to a day. An exclusive lock file lets only one chat start it.
 - CI check-up shard findings carry their facts (`facts`: the job, its time, the shard count and the tracked test count, or the two legs and their times) beside the message.
-- Hook pack rows prove the line is shown once at session start and at turn end, and not again at turn end after a session start showed it; a new `slow_ci` fixture seeds the record, and Stop rows can check the turn-end message.
+- Hook pack rows prove the line is shown once at session start and at turn end, and not again at turn end after a session start showed it; a side session stays quiet; new `slow_ci` and `desktop_self` fixtures seed the record and a side session, and Stop rows can check the turn-end message.
 
 ### Fixed
 

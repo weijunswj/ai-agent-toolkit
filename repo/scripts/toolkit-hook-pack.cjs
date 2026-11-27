@@ -157,8 +157,9 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'attention_net', 'desktop_sessions', 'gate_records', 'entrypoint', 'toolkit_helpers', 'governance_parts', 'slow_ci'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'attention_net', 'desktop_sessions', 'gate_records', 'entrypoint', 'toolkit_helpers', 'governance_parts', 'slow_ci', 'desktop_self'].includes(key)) errors.push(`fixture has unknown key ${key}`);
   if (fixture.slow_ci !== undefined && !['shards', 'lopsided'].includes(fixture.slow_ci)) errors.push('fixture.slow_ci is shards or lopsided: a daily slow-CI result not shown yet');
+  if (fixture.desktop_self !== undefined && (!fixture.desktop_self || typeof fixture.desktop_self !== 'object' || Array.isArray(fixture.desktop_self))) errors.push('fixture.desktop_self must be an object of fields for this session\'s own desktop file');
   if (fixture.governance_parts !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !fixture.governance_parts || typeof fixture.governance_parts !== 'object' || Array.isArray(fixture.governance_parts)
     || Object.keys(fixture.governance_parts).some(key => !['app', 'store'].includes(key))
     || (fixture.governance_parts.app !== undefined && !['missing', 'found'].includes(fixture.governance_parts.app))
@@ -503,11 +504,12 @@ class Fixture {
     if (spec.entrypoint) this.env.CLAUDE_CODE_ENTRYPOINT = spec.entrypoint;
     // The Claude desktop app's session files: this session's own, and each listed one it started
     // (spawnedFrom names this session unless the entry sets its own).
-    if (spec.desktop_sessions) {
+    if (spec.desktop_sessions || spec.desktop_self) {
       const folder = path.join(this.home, 'AppData', 'Local', 'Claude-Data', 'claude_fixture', 'claude-code-sessions', 'a', 'b');
       fs.mkdirSync(folder, { recursive: true });
-      fs.writeFileSync(path.join(folder, `${DESKTOP_SELF}.json`), JSON.stringify({ sessionId: DESKTOP_SELF, isArchived: false, createdAt: this.#now(86400000).getTime() }));
-      spec.desktop_sessions.forEach((entry, index) => {
+      // desktop_self adds fields to this session's own file, such as spawnedFrom for a side session.
+      fs.writeFileSync(path.join(folder, `${DESKTOP_SELF}.json`), JSON.stringify({ sessionId: DESKTOP_SELF, isArchived: false, createdAt: this.#now(86400000).getTime(), ...(spec.desktop_self || {}) }));
+      (spec.desktop_sessions || []).forEach((entry, index) => {
         const sessionId = `local_00000000-0000-4000-8000-${String(index + 2).padStart(12, '0')}`;
         fs.writeFileSync(path.join(folder, `${sessionId}.json`), JSON.stringify({ sessionId, spawnedFrom: { sessionId: DESKTOP_SELF, title: `Fixture side session ${index + 1}` }, ...entry }));
       });

@@ -40,7 +40,7 @@ function computer(fx, { offline = false, startCheck = true } = {}) {
     now: () => new Date(clock.now),
     environment: offline ? { TOOLKIT_GOVERNANCE_OFFLINE: '1' } : {},
     ...(startCheck ? { startCheck: root => starts.push(root) } : {}),
-    runCheckup: () => clock.report || null,
+    runCheckup: () => clock.run || (clock.report ? { report: clock.report } : { error: 'no report set' }),
   });
   return { record, clock, starts };
 }
@@ -63,28 +63,45 @@ test('turn end first: the owner sees it there, and the next session start stays 
   assert.equal(pc.record.note(fx.repo), null);
 });
 
-test('quiet until the result changes: new times alone say nothing, a new shard count or job does', (t) => {
+test('quiet until the result changes: new times or shard counts say nothing, a new job does', (t) => {
   const fx = checkout(t);
   const pc = computer(fx);
   pc.record.record(fx.repo, report(SHARDS));
   assert.ok(pc.record.note(fx.repo));
   pc.record.record(fx.repo, report({ ...SHARDS, facts: { ...SHARDS.facts, seconds: 2950, tests: 143 } }));
   assert.equal(pc.record.note(fx.repo), null, 'the same result a day later');
-  pc.record.record(fx.repo, report({ ...SHARDS, facts: { ...SHARDS.facts, seconds: 3700, shards: 7 } }));
-  assert.match(slowCi.turnEndLine(pc.record.note(fx.repo)), /about 7 shards/);
+  pc.record.record(fx.repo, report({ ...SHARDS, facts: { ...SHARDS.facts, seconds: 3010, shards: 6 } }));
+  assert.equal(pc.record.note(fx.repo), null, 'a job moving across a 10-minute line is the same result');
+  pc.record.record(fx.repo, report({ ...SHARDS, facts: { ...SHARDS.facts, job: 'CI / Integration' } }));
+  assert.match(slowCi.turnEndLine(pc.record.note(fx.repo)), /CI \/ Integration took up to 48 min/);
   pc.record.record(fx.repo, report());
   assert.equal(pc.record.note(fx.repo), null, 'a result with no finding gives no line');
-  pc.record.record(fx.repo, report({ ...SHARDS, facts: { ...SHARDS.facts, seconds: 3700, shards: 7 } }));
+  pc.record.record(fx.repo, report({ ...SHARDS, facts: { ...SHARDS.facts, job: 'CI / Integration' } }));
   assert.ok(pc.record.note(fx.repo), 'the finding coming back after it cleared is new again');
 });
 
-test('the background check starts at most once a day, claimed so chats starting together start one', (t) => {
+test('a workflow whose runs could not be listed keeps its earlier finding, so a partial read says nothing new', (t) => {
+  const fx = checkout(t);
+  const pc = computer(fx);
+  pc.record.record(fx.repo, report(SHARDS));
+  assert.ok(pc.record.note(fx.repo));
+  const unread = { level: 'CHECK', check: 'speed.jobs', path: '', message: 'job times not read for .github/workflows/ci.yml (gh could not list their runs; a workflow GitHub does not know yet looks the same), so their speed rows are missing', fix: '' };
+  const saved = pc.record.record(fx.repo, report(unread));
+  assert.deepEqual(saved.findings.map(f => f.job), ['CI / Validate app']);
+  assert.equal(pc.record.note(fx.repo), null);
+  assert.match(fs.readFileSync(pc.record.log, 'utf8'), / acme\/app ok: 1 finding, 1 workflow not read\n$/);
+});
+
+test('the background check starts at most once a day, and only the chat that takes the lock starts it', (t) => {
   const fx = checkout(t);
   const pc = computer(fx);
   assert.equal(pc.record.note(fx.repo), null, 'nothing checked yet: no line');
   assert.deepEqual(pc.starts, [fx.repo]);
+  const other = computer(fx);
+  other.clock.now = pc.clock.now;
+  other.record.note(fx.repo);
   pc.record.note(fx.repo);
-  assert.equal(pc.starts.length, 1, 'claimed: a second chat starts no second check');
+  assert.equal(pc.starts.length + other.starts.length, 1, 'the lock is taken: no second check from either chat');
   pc.clock.now += 30 * 60 * 1000;
   pc.clock.report = report(SHARDS);
   pc.record.check(fx.repo);
@@ -96,7 +113,7 @@ test('the background check starts at most once a day, claimed so chats starting 
   assert.equal(pc.starts.length, 2, 'a day after the last check');
 });
 
-test('a check that could not read GitHub keeps the last result and is tried again an hour after it began', (t) => {
+test('a failed check keeps the last result and its reason, logs it, and backs off 1, 2, 4 hours', (t) => {
   const fx = checkout(t);
   const pc = computer(fx);
   pc.record.record(fx.repo, report(SHARDS));
@@ -105,13 +122,54 @@ test('a check that could not read GitHub keeps the last result and is tried agai
   pc.record.note(fx.repo);
   assert.equal(pc.starts.length, 1);
   pc.clock.report = report({ level: 'CHECK', check: 'speed.jobs', path: '', message: 'job times not checked (no GitHub access)', fix: '' });
-  assert.equal(pc.record.check(fx.repo), null, 'nothing saved');
-  pc.clock.now += 30 * 60 * 1000;
+  assert.equal(pc.record.check(fx.repo), null, 'no result saved');
+  const entry = () => Object.values(pc.record.read().repositories)[0];
+  assert.equal(entry().last_error, 'not checked: no GitHub access');
+  assert.equal(entry().failures, 1);
+  assert.deepEqual(entry().findings.map(f => f.job), ['CI / Validate app'], 'the last result stays');
+  const startsAfter = hours => { pc.clock.now += hours * HOUR; pc.record.note(fx.repo); return pc.starts.length; };
+  assert.equal(startsAfter(0.9), 1, 'within an hour of the failure');
+  assert.equal(startsAfter(0.2), 2, 'an hour after it');
+  pc.clock.run = { error: 'the check-up exited with code 1' };
+  pc.record.check(fx.repo);
+  assert.equal(entry().last_error, 'the check-up exited with code 1');
+  assert.equal(startsAfter(1.5), 2, 'two hours after the second failure');
+  assert.equal(startsAfter(0.6), 3);
+  pc.record.check(fx.repo);
+  assert.equal(startsAfter(3.5), 3, 'four hours after the third');
+  assert.equal(startsAfter(0.6), 4);
+  pc.clock.run = null;
+  pc.clock.report = report(SHARDS);
+  pc.record.check(fx.repo);
+  assert.equal(entry().failures, undefined, 'a good check clears the failure');
+  assert.equal(entry().last_error, undefined);
+  const log = fs.readFileSync(pc.record.log, 'utf8').trim().split('\n').map(line => line.replace(/^\S+ /, ''));
+  assert.deepEqual(log, ['acme/app ok: 1 finding', 'acme/app failed: not checked: no GitHub access', 'acme/app failed: the check-up exited with code 1', 'acme/app failed: the check-up exited with code 1', 'acme/app ok: 1 finding']);
+});
+
+test('a check-up that crashes is a failure with a reason, and its lock is released', (t) => {
+  const fx = checkout(t);
+  const clock = { now: START };
+  const record = new slowCi.SlowCiRecord({ registryOptions: { testOnly: true, stateDirectory: fx.state }, now: () => new Date(clock.now), startCheck: () => {}, runCheckup: () => { throw Object.assign(new Error('boom'), { code: 'EPERM' }); } });
+  record.note(fx.repo);
+  const locks = () => fs.readdirSync(fx.state).filter(name => name.endsWith('.lock'));
+  assert.equal(locks().length, 1);
+  assert.equal(record.check(fx.repo), null);
+  assert.equal(Object.values(record.read().repositories)[0].last_error, 'unexpected error (EPERM)');
+  assert.deepEqual(locks(), []);
+});
+
+test('a lock left by a check that never ended is taken over once it is stale', (t) => {
+  const fx = checkout(t);
+  const pc = computer(fx);
   pc.record.note(fx.repo);
-  assert.equal(pc.starts.length, 1, 'within the hour');
-  pc.clock.now += 31 * 60 * 1000;
-  assert.equal(pc.record.note(fx.repo), null, 'the kept result was shown already');
-  assert.equal(pc.starts.length, 2, 'an hour after the failed check began');
+  assert.equal(pc.starts.length, 1);
+  pc.clock.now += 20 * 60 * 1000;
+  pc.record.note(fx.repo);
+  assert.equal(pc.starts.length, 1, 'a running check holds the lock');
+  pc.clock.now += 15 * 60 * 1000;
+  pc.record.note(fx.repo);
+  assert.equal(pc.starts.length, 2, 'past 30 minutes the lock is stale');
 });
 
 test('the record keeps codes, job names, times and counts only', (t) => {
@@ -120,7 +178,7 @@ test('the record keeps codes, job names, times and counts only', (t) => {
   pc.record.record(fx.repo, report({ ...SHARDS, facts: { ...SHARDS.facts, token: 'x' }, extra: 'y' }, { level: 'GAP', check: 'parts.docker', path: 'Dockerfile', message: 'no CI step builds this Dockerfile' }));
   const saved = JSON.parse(fs.readFileSync(pc.record.file, 'utf8'));
   const [entry] = Object.values(saved.repositories);
-  assert.deepEqual(entry.findings, [{ code: 'speed.shards', job: 'CI / Validate app', seconds: 2880, shards: 5, tests: 142 }]);
+  assert.deepEqual(entry.findings, [{ code: 'speed.shards', workflow: '.github/workflows/ci.yml', job: 'CI / Validate app', seconds: 2880, shards: 5, tests: 142 }]);
   assert.equal(entry.name, 'acme/app');
   assert.deepEqual(Object.keys(entry).sort(), ['checked_at', 'findings', 'name', 'result']);
 });
@@ -166,7 +224,37 @@ test('turn end: the owed-check hook adds the line for the owner, never in a clou
   assert.equal(owed.check(stop, { env: {}, slowCi: pc.record }).output, null, 'once');
 });
 
-const FAKE_GATE = { SESSION_TEXT_LIMIT: 10000, startSession() {}, sessionIdOf: input => input.session_id, sessionLine: () => 'Toolkit governance: off here.' };
+// The Claude desktop app's session files, as the app writes them: the controller's own chat, and a
+// side session it started (its own file names spawnedFrom).
+const CONTROLLER = 'local_11111111-1111-4111-8111-111111111111';
+const SIDE = 'local_22222222-2222-4222-8222-222222222222';
+function desktop(fx) {
+  const localAppData = path.join(path.dirname(fx.state), 'AppData', 'Local');
+  const folder = path.join(localAppData, 'Claude-Data', 'claude_acct', 'claude-code-sessions', 'a', 'b');
+  fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(path.join(folder, `${CONTROLLER}.json`), JSON.stringify({ sessionId: CONTROLLER, isArchived: false, createdAt: START }));
+  fs.writeFileSync(path.join(folder, `${SIDE}.json`), JSON.stringify({ sessionId: SIDE, isArchived: false, createdAt: START, spawnedFrom: { sessionId: CONTROLLER, title: 'g1-1565-s3' } }));
+  return { localAppData };
+}
+
+test('a side session leaves the line for the owner\'s own chat, at turn end and at session start', (t) => {
+  const { respond } = require('../scripts/toolkit-governance-hook.cjs');
+  const fx = checkout(t);
+  const pc = computer(fx);
+  const desk = desktop(fx);
+  pc.record.record(fx.repo, report(SHARDS));
+  const stop = (session, extra = {}) => owed.check({ hook_event_name: 'Stop', session_id: 'abc', cwd: fx.repo }, { env: { CLAUDE_CODE_HOST_SESSION_ID: session }, slowCi: pc.record, ...desk, ...extra }).output;
+  assert.equal(stop(SIDE), null, 'a side session\'s turn end');
+  const start = session => respond('SessionStart', { cwd: fx.repo, session_id: 's1', source: 'startup' }, {
+    environment: { CLAUDE_CODE_HOST_SESSION_ID: session }, refreshBinding: () => {}, gate: FAKE_GATE, repoCatchUp: { catchUp: () => null }, slowCi: pc.record, desktop: desk,
+  }).hookSpecificOutput?.additionalContext || '';
+  assert.equal(start(SIDE), 'Toolkit governance: off here.', 'a side session\'s start');
+  assert.equal(stop('local_33333333-3333-4333-8333-333333333333'), null, 'a desktop session whose own file is not found waits too');
+  assert.match(stop(CONTROLLER).systemMessage, /^Toolkit CI check: acme\/app's CI would gain from shards/, 'the controller\'s own chat gets it');
+  assert.equal(stop(CONTROLLER), null, 'once');
+});
+
+const FAKE_GATE ={ SESSION_TEXT_LIMIT: 10000, startSession() {}, sessionIdOf: input => input.session_id, sessionLine: () => 'Toolkit governance: off here.' };
 
 test('Claude Code session start: the line follows the governance text once, never in a launcher session', (t) => {
   const { respond } = require('../scripts/toolkit-governance-hook.cjs');

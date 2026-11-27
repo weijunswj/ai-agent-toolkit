@@ -70,19 +70,23 @@ function withAskingLine(output, environment) {
 function cloudSession(environment) { return Boolean(environment) && environment.CLAUDE_CODE_REMOTE === 'true'; }
 
 // The slow-CI line for this computer's session start, not yet marked shown: { text, markShown }, or
-// null. Never in a session a Toolkit launcher started (nobody reads its first reply), and never when
-// the record cannot be read. Called for a computer's session start only, never for a cloud session's.
+// null. Only in a chat the owner started (toolkit-owed-check-hook.cjs ownerStartedChat): a launched
+// session reads nothing, and a side session leaves a waiting line for the owner's chat, since only the
+// session that started it sees its first reply. Never when the record cannot be read. Called for a
+// computer's session start only, never for a cloud session's.
 function slowCiLine(input, options) {
   try {
     const environment = options.environment || process.env;
     const { LAUNCHER_MARKERS } = require('./toolkit-governed-repo.cjs');
     if (LAUNCHER_MARKERS.some(name => String(environment[name] || '').trim()) || typeof input.cwd !== 'string' || !input.cwd) return null;
+    const { ownerStartedChat } = require('./toolkit-owed-check-hook.cjs');
     const slowCi = require('./toolkit-slow-ci.cjs');
     const record = options.slowCi || new slowCi.SlowCiRecord({ registryOptions: options.registryOptions || {}, environment });
     const pending = record.peek(input.cwd);
     if (!pending) return null;
     // A result with no finding is saved as shown with no line.
     if (!pending.note) { pending.markShown(); return null; }
+    if (!ownerStartedChat(environment, options.desktop || {})) return null;
     return { text: slowCi.sessionStartLine(pending.note), markShown: pending.markShown };
   } catch { return null; }
 }

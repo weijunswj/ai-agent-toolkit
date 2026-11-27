@@ -5,19 +5,23 @@
 // shards are lopsided, wherever they are first after a new result (owner decision INT-TK421-1393).
 //
 // - A record per repository on this computer (user state, slow-ci.v1.json) keeps when CI was last
-//   checked, the last result and which result was last shown. It holds repository ids and names, the
-//   finding codes, job names, times and counts only.
+//   checked, the last result, which result was last shown and, after a failed check, why it failed.
+//   It holds repository ids and names, workflow paths, finding codes, job names, times and counts only.
 // - A session start or a turn end only reads that record (local files, no git, gh or network): it
 //   gives the line when the last result has a finding and differs from the one last shown, and it
 //   saves the result as shown before it returns the line, so a line is never given twice; a record
-//   that cannot be saved gives no line. A result with no finding is saved as shown with no line, so
-//   the same finding coming back later is new again.
+//   that cannot be saved gives no line. A result is its findings' codes and job names (or leg pairs),
+//   so new times or a shard count that moves are the same result. A result with no finding is saved
+//   as shown with no line, so the same finding coming back later is new again.
 // - When the last successful check is a day old it starts the check in a background process and never
-//   waits for it; the start is claimed in the record first, so chats starting together start one.
-//   A check that could not read GitHub keeps the last result and is tried again an hour after it began.
-//   Offline and test runs (TOOLKIT_GOVERNANCE_OFFLINE=1) start no check unless one is given.
+//   waits for it. The start takes an exclusive lock file first, so chats starting together start one.
+//   A failed check keeps the last result and its reason, and the next start waits 1, 2, 4 ... hours,
+//   at most a day. Offline and test runs (TOOLKIT_GOVERNANCE_OFFLINE=1) start no check unless one is
+//   given.
 // - The check runs the CI check-up (skills/secure-ci-cd/scripts/ci-checkup.cjs) as its own process and
-//   keeps its speed.shards and speed.shards-lopsided findings.
+//   keeps its speed.shards and speed.shards-lopsided findings; a workflow whose runs it could not list
+//   keeps its earlier findings. Each run adds one line to slow-ci.log in user state (time, repository,
+//   outcome or the reason it failed; never report contents), keeping the last LOG_LINES.
 // The calling hook decides where the line goes and in which sessions it runs; this file holds no host
 // detail. Only repositories with a github.com origin are checked. Any failure gives no line.
 
@@ -29,6 +33,8 @@ const { userStateDirectory } = require('./toolkit-user-state.cjs');
 
 const SCHEMA = 'toolkit.slow-ci.v1';
 const BASENAME = 'slow-ci.v1.json';
+const LOG = 'slow-ci.log';
+const LOG_LINES = 100;
 const FRESH_MS = 24 * 60 * 60 * 1000;
 const RETRY_MS = 60 * 60 * 1000;
 const MAX_ENTRIES = 32;
@@ -36,8 +42,11 @@ const MAX_SHOWN = 3;
 const CHECKUP = path.join(__dirname, '..', '..', 'skills', 'secure-ci-cd', 'scripts', 'ci-checkup.cjs');
 // The check-up reads each workflow's newest runs through gh; a large repository takes minutes.
 const CHECKUP_TIMEOUT_MS = 15 * 60 * 1000;
+// A lock older than this belongs to a check that ended without removing it, and is taken over.
+const LOCK_STALE_MS = CHECKUP_TIMEOUT_MS + 15 * 60 * 1000;
 const PLAYBOOK = 'fast-tests-and-sharding playbook, section Arrange Shards In This Repository\'s CI';
 const NOT_CHECKED = /job times not checked/;
+const UNREAD = /^job times not read for (.+?) \(gh could not list their runs/;
 
 const minutes = seconds => (seconds >= 120 ? `${Math.round(seconds / 60)} min` : `${Math.round(seconds)} s`);
 const text = (value, max = 120) => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : '');
@@ -47,23 +56,24 @@ const count = value => (Number.isInteger(value) && value >= 0 ? value : null);
 function cleanFinding(finding) {
   if (!finding || typeof finding !== 'object') return null;
   const facts = finding.facts || finding;
+  const workflow = /^\.github\/workflows\/[^/]+\.ya?ml$/.test(String(finding.path || finding.workflow || '')) ? String(finding.path || finding.workflow) : null;
   if (finding.code === 'speed.shards' || finding.check === 'speed.shards') {
     const job = text(facts.job);
     if (!job || !count(facts.seconds) || !count(facts.shards)) return null;
-    return { code: 'speed.shards', job, seconds: facts.seconds, shards: facts.shards, tests: count(facts.tests) };
+    return { code: 'speed.shards', workflow, job, seconds: facts.seconds, shards: facts.shards, tests: count(facts.tests) };
   }
   if (finding.code === 'speed.shards-lopsided' || finding.check === 'speed.shards-lopsided') {
     const slow = text(facts.slow), fast = text(facts.fast);
     if (!slow || !fast || !count(facts.slow_seconds) || !count(facts.fast_seconds)) return null;
-    return { code: 'speed.shards-lopsided', slow, slow_seconds: facts.slow_seconds, fast, fast_seconds: facts.fast_seconds };
+    return { code: 'speed.shards-lopsided', workflow, slow, slow_seconds: facts.slow_seconds, fast, fast_seconds: facts.fast_seconds };
   }
   return null;
 }
 
-// What a result says, without its times (they move a little every day): the same digest means the
-// same result, so it is not shown again.
+// What a result says, without its times or shard counts (they move a little every day): the same
+// digest means the same result, so it is not shown again.
 function digestOf(findings) {
-  const keys = findings.map(f => (f.code === 'speed.shards' ? `${f.code}|${f.job}|${f.shards}` : `${f.code}|${f.slow}|${f.fast}`)).sort();
+  const keys = findings.map(f => (f.code === 'speed.shards' ? `${f.code}|${f.job}` : `${f.code}|${f.slow}|${f.fast}`)).sort();
   return crypto.createHash('sha256').update(JSON.stringify(keys)).digest('hex').slice(0, 16);
 }
 
@@ -78,10 +88,12 @@ function defaultStartCheck(root) {
   child.unref();
 }
 
+// { report } from the check-up, or { error } with a short reason that holds no path or output.
 function defaultRunCheckup(root) {
   const result = spawnSync(process.execPath, [CHECKUP, '--repo', root, '--json'], { cwd: path.dirname(root), encoding: 'utf8', timeout: CHECKUP_TIMEOUT_MS, windowsHide: true, maxBuffer: 16 * 1024 * 1024 });
-  if (result.error || result.status !== 0) return null;
-  try { return JSON.parse(result.stdout); } catch { return null; }
+  if (result.error) return { error: result.error.code === 'ETIMEDOUT' ? `the check-up took over ${CHECKUP_TIMEOUT_MS / 60000} minutes` : `the check-up could not start (${String(result.error.code || 'unknown error').slice(0, 20)})` };
+  if (result.status !== 0) return { error: `the check-up exited with code ${result.status === null ? `none (${result.signal || 'signal'})` : result.status}` };
+  try { return { report: JSON.parse(result.stdout) }; } catch { return { error: 'the check-up printed no report' }; }
 }
 
 // The record of every repository's last check on this computer, and the decisions made from it.
@@ -104,6 +116,8 @@ class SlowCiRecord {
   }
 
   get file() { return path.join(userStateDirectory(this.#registryOptions), BASENAME); }
+  get log() { return path.join(userStateDirectory(this.#registryOptions), LOG); }
+  #lock(id) { return path.join(userStateDirectory(this.#registryOptions), `slow-ci-${String(id).slice(0, 16)}.lock`); }
 
   read() {
     try {
@@ -115,7 +129,7 @@ class SlowCiRecord {
 
   #write(value) {
     const file = this.file;
-    const at = entry => String(entry.checked_at || entry.started_at || '');
+    const at = entry => String(entry.checked_at || entry.failed_at || '');
     const entries = Object.entries(value.repositories).sort((a, b) => at(b[1]).localeCompare(at(a[1]))).slice(0, MAX_ENTRIES);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const temp = `${file}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
@@ -133,6 +147,17 @@ class SlowCiRecord {
     if (next) value.repositories[id] = next; else delete value.repositories[id];
     this.#write(value);
     return next;
+  }
+
+  // One line per background run, the last LOG_LINES kept. A log that cannot be written is skipped.
+  #logLine(name, outcome) {
+    try {
+      let lines = [];
+      try { lines = fs.readFileSync(this.log, 'utf8').split('\n').filter(Boolean); } catch { /* a new log */ }
+      lines.push(`${this.#now().toISOString()} ${name} ${text(outcome, 160)}`);
+      fs.mkdirSync(path.dirname(this.log), { recursive: true });
+      fs.writeFileSync(this.log, `${lines.slice(-LOG_LINES).join('\n')}\n`, { mode: 0o600 });
+    } catch { /* the record still holds the reason */ }
   }
 
   // { root, id, name } for a checkout whose origin is on github.com, else null. Local files only.
@@ -181,35 +206,70 @@ class SlowCiRecord {
     } catch { return null; }
   }
 
+  // Due a day after the last successful check; after a failed one, 1, 2, 4 ... hours after it, at
+  // most a day. Started only by the chat that takes the lock.
   #startIfDue(repository) {
     if (!this.#startCheck) return;
     const now = this.#now().getTime();
-    let claimed = false;
-    this.#update(repository.id, current => {
-      const checked = Date.parse(current?.checked_at || '');
-      const started = Date.parse(current?.started_at || '');
-      if (Number.isFinite(checked) && now - checked < FRESH_MS) return current;
-      if (Number.isFinite(started) && now - started < RETRY_MS) return current;
-      claimed = true;
-      return { ...(current || {}), name: repository.name, started_at: new Date(now).toISOString() };
-    });
-    if (claimed) this.#startCheck(repository.root);
+    const current = this.read().repositories[repository.id] || null;
+    const checked = Date.parse(current?.checked_at || '');
+    if (Number.isFinite(checked) && now - checked < FRESH_MS) return;
+    const failed = Date.parse(current?.failed_at || '');
+    const failures = Number.isInteger(current?.failures) && current.failures > 0 ? current.failures : 0;
+    if (failures && Number.isFinite(failed) && now - failed < Math.min(FRESH_MS, RETRY_MS * 2 ** (failures - 1))) return;
+    if (this.#takeLock(repository.id, now)) this.#startCheck(repository.root);
+  }
+
+  // An exclusive lock file per repository, holding the time it was taken: only one chat creates it.
+  #takeLock(id, now) {
+    const lock = this.#lock(id);
+    fs.mkdirSync(path.dirname(lock), { recursive: true });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { fs.writeFileSync(lock, `${new Date(now).toISOString()}\n`, { flag: 'wx', mode: 0o600 }); return true; } catch (error) { if (error.code !== 'EEXIST') return false; }
+      let taken = NaN;
+      try { taken = Date.parse(fs.readFileSync(lock, 'utf8').trim()); } catch { /* removed meanwhile: try again */ }
+      if (Number.isFinite(taken) && now - taken < LOCK_STALE_MS) return false;
+      fs.rmSync(lock, { force: true });
+    }
+    return false;
   }
 
   // Saves a check-up report for the repository at `root`. A report that could not read job times
-  // keeps the last result. Returns the saved entry, or null when nothing was saved.
+  // keeps the last result (a failure, with its reason); a workflow whose runs could not be listed
+  // keeps its earlier findings. Returns the saved entry, or null when no result was saved.
   record(root, report) {
     const repository = this.repositoryAt(root);
-    if (!repository || !report || !Array.isArray(report.items)) return null;
-    if (report.items.some(item => item && item.check === 'speed.jobs' && NOT_CHECKED.test(String(item.message || '')))) return null;
-    const findings = report.items.filter(item => item && item.level === 'GAP').map(cleanFinding).filter(Boolean);
-    return this.#update(repository.id, current => ({ ...(current || {}), name: repository.name, checked_at: this.#now().toISOString(), findings, result: digestOf(findings) }));
+    if (!repository) return null;
+    if (!report || !Array.isArray(report.items)) return this.#failed(repository, 'the check-up report had no items');
+    if (report.items.some(item => item && item.check === 'speed.jobs' && NOT_CHECKED.test(String(item.message || '')))) return this.#failed(repository, 'not checked: no GitHub access');
+    const unread = new Set(report.items.flatMap(item => (item && item.check === 'speed.jobs' && UNREAD.test(String(item.message || '')) ? String(item.message).match(UNREAD)[1].split(', ') : [])));
+    const found = report.items.filter(item => item && item.level === 'GAP').map(cleanFinding).filter(Boolean);
+    const saved = this.#update(repository.id, current => {
+      const kept = (Array.isArray(current?.findings) ? current.findings : []).map(cleanFinding).filter(f => f && f.workflow && unread.has(f.workflow));
+      const findings = [...found, ...kept];
+      const { failures, failed_at, last_error, ...rest } = current || {};
+      return { ...rest, name: repository.name, checked_at: this.#now().toISOString(), findings, result: digestOf(findings) };
+    });
+    this.#logLine(repository.name, `ok: ${saved.findings.length} finding${saved.findings.length === 1 ? '' : 's'}${unread.size ? `, ${unread.size} workflow${unread.size === 1 ? '' : 's'} not read` : ''}`);
+    return saved;
   }
 
-  // The background check: runs the check-up on the checkout at `root` and saves its result.
+  #failed(repository, reason) {
+    this.#update(repository.id, current => ({ ...(current || {}), name: repository.name, failed_at: this.#now().toISOString(), failures: (Number.isInteger(current?.failures) ? current.failures : 0) + 1, last_error: text(reason, 120) }));
+    this.#logLine(repository.name, `failed: ${reason}`);
+    return null;
+  }
+
+  // The background check: runs the check-up on the checkout at `root`, saves its result or the reason
+  // it failed, and removes the start lock.
   check(root) {
-    const report = this.#runCheckup(root);
-    return report ? this.record(root, report) : null;
+    const repository = this.repositoryAt(root);
+    if (!repository) return null;
+    try {
+      let run;
+      try { run = this.#runCheckup(root) || { error: 'the check-up gave nothing' }; } catch (error) { run = { error: `unexpected error (${String(error && error.code || 'no code').slice(0, 20)})` }; }
+      return run.error ? this.#failed(repository, run.error) : this.record(root, run.report);
+    } finally { fs.rmSync(this.#lock(repository.id), { force: true }); }
   }
 }
 
@@ -229,10 +289,10 @@ function main(argv = process.argv.slice(2)) {
   if (argv[0] !== 'check' || argv.length !== 1) return 2;
   try {
     new SlowCiRecord().check(process.cwd());
-  } catch { /* the next due session start or turn end tries again */ }
+  } catch { /* the record or its folder could not be read or written: the next due start tries again */ }
   return 0;
 }
 
-module.exports = Object.freeze({ SCHEMA, BASENAME, FRESH_MS, RETRY_MS, SlowCiRecord, sessionStartLine, turnEndLine });
+module.exports = Object.freeze({ SlowCiRecord, sessionStartLine, turnEndLine });
 
 if (require.main === module) process.exitCode = main();
