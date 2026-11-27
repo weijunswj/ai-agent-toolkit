@@ -277,7 +277,7 @@ test('the merge scope the hold reads: a proved refresh is in scope; an unproved 
   // The gate rules say the same where they list what that exit 1 sends to the typed merge, so a
   // controller reading them lands a proved refresh by --land-refresh instead of waiting.
   const rules = fs.readFileSync(path.join(ROOT, 'repo', 'contracts', 'agent-rules', 'gate-rules.md'), 'utf8');
-  assert.match(rules, /Those wait for the owner's typed `merge N` \(a proved refresh lands by `--land-refresh`\)/);
+  assert.match(rules, /Those wait for the owner's merge OK \(a proved refresh lands by `--land-refresh`\)/);
   // One differing byte: the CI workflow reasons stay, with why the proof failed.
   const edited = ctx.refreshHead({ change: repo => fs.appendFileSync(path.join(repo, '.github', 'workflows', 'personal-data-guard.yml'), '#\n') });
   const failed = scopeWithProof(ctx.repo, ctx.main, edited, { prove });

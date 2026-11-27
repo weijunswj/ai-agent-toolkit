@@ -148,8 +148,8 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
       text: adoption.found_store ? `Found: your private GitHub repository ${adoption.found_store}, used for programme records and evidence` : `None yet: Toolkit creates the private GitHub repository ${adoption.store.repository} when governance turns on, for programme records and evidence`,
       change: 'To use another private repository of yours, add store=<owner/name> to your reply' }));
     specs.push(statusRow({ id: 'parent-issue', section, title: 'Parent issue', current: adoption.parent.create ? 'None yet' : `#${adoption.parent.issue}`, text: adoption.parent.create ? 'Toolkit opens one when governance turns on' : 'Reused when governance turns on' }));
-    // With none yet, the turn-on result says how to add protection later (turnOnSummary).
-    specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: adoption.checks.length ? adoption.checks.join(', ') : 'None yet', text: adoption.checks.length ? 'Taken from what the default branch already enforces' : 'Default-branch protection waits for them' }));
+    // The turn-on adds Toolkit's own checks (plain-text, personal-data) to these itself (withOwnChecks).
+    specs.push(statusRow({ id: 'required-checks', section, title: 'Required checks', current: adoption.checks.length ? adoption.checks.join(', ') : 'None yet', text: adoption.checks.length ? 'Taken from what the default branch already enforces; the turn-on adds Toolkit\'s own checks' : 'The turn-on requires Toolkit\'s own checks' }));
     // Said before the answer, so turning on never stops afterwards to ask about it.
     if (adoption.visibility === 'public') specs.push(statusRow({ id: 'visibility', section, title: 'Repository visibility', current: 'Public', text: 'The programme file names your private evidence store (its name only, never its contents) and the parent issue is public. The store stays private' }));
   }

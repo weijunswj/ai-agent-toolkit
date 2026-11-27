@@ -135,12 +135,12 @@ function matrixState(state, result) {
   return result.unknown.length ? 'K' : 'R';
 }
 
-// What `action` does for this result: 'refuse', 'queue' or null (it runs). `role` 'cloud-sweep' runs
-// programme writes: it has no computer parts and runs only with the App and the store in place.
-function holdFor(action, result, { role = null } = {}) {
+// What `action` does for this result: 'refuse', 'queue' or null (it runs). The cloud sweep's programme
+// writes never ask: `programme.cjs` reads the merged binding online there and skips the hold, since a
+// runner has no computer parts and runs only with the App and the store in place.
+function holdFor(action, result) {
   if (!Object.hasOwn(HOLDS, action)) throw new Error(`unknown action ${action}`);
   if (!result || result.ready !== false) return null;
-  if (role === 'cloud-sweep' && action === 'programme-write') return null;
   return HOLDS[action];
 }
 

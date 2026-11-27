@@ -436,17 +436,21 @@ const PROGRAMS = Object.freeze([
 ]);
 
 // A Bash or PowerShell line in plain words for the chat list: the kind of program it runs, never the
-// command's own arguments, script names or paths (the raw line shows only on show all).
+// command's own arguments, script names or paths (the raw line shows only on show all). A line that
+// joins commands (&&, ||, ; or |, outside quotes) runs several, and a quoted program path, spaces
+// included, is read whole, so its words are its base name and never a fragment of the path.
 function shellWords(line) {
   const shell = SHELL.exec(mask(line));
-  const words = shell[2].trim().split(/\s+/);
-  let index = 0;
-  while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index])) index += 1;
-  const program = base(String(words[index] || '').replace(/^["']|["']$/g, '')).replace(/\.(?:exe|cmd|bat|ps1)$/i, '');
+  const body = shell[2].trim();
   const any = /\s*:?\*\s*$/.test(shell[2]);
+  const suffix = shell[1] === 'PowerShell' ? ' (PowerShell)' : '';
+  if (/&&|\|\||;|\|/.test(body.replace(/"[^"]*"|'[^']*'/g, ''))) return `Runs several commands${suffix}`;
+  const rest = body.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*/, '');
+  const quoted = /^(["'])([^"']*)\1/.exec(rest);
+  const program = base(quoted ? quoted[2] : rest.split(/\s+/)[0] || '').replace(/\.(?:exe|cmd|bat|ps1)$/i, '');
   const named = PROGRAMS.find(([pattern]) => pattern.test(program));
   const text = !program || program === '*' ? 'Any command' : named ? named[1] : /^[A-Za-z][A-Za-z0-9_-]{0,30}$/.test(program) ? `Runs the ${program} command` : 'Runs a command';
-  return `${text}${any && program !== '*' ? ', any arguments' : ''}${shell[1] === 'PowerShell' ? ' (PowerShell)' : ''}`;
+  return `${text}${any && program !== '*' ? ', any arguments' : ''}${suffix}`;
 }
 
 // One chat list item in plain words: no code marks and no command text (show all adds the raw line).
@@ -671,4 +675,4 @@ function shortPath(file, model) {
   return home && target.toLowerCase().startsWith(`${home.toLowerCase()}/`) ? `~${target.slice(home.length)}` : target;
 }
 
-module.exports = Object.freeze({ PermissionReview, ReviewStop, RETIRED_SCRIPTS, MAX_DROP, shippedScripts, oldToolkitLine, nodeScript, readPaths, riskyRules, riskyReason, mask, shortRaw, plainWords, readDrop, previewCode, chatList, picksText, terminalScreen, toolkitRows, backupWords, applyCommand, toolkitStatus, AUTO_WORDS });
+module.exports = Object.freeze({ PermissionReview, ReviewStop, RETIRED_SCRIPTS, MAX_DROP, shippedScripts, oldToolkitLine, nodeScript, readPaths, riskyRules, riskyReason, mask, shortRaw, plainWords, shellWords, readDrop, previewCode, chatList, picksText, terminalScreen, toolkitRows, backupWords, applyCommand, toolkitStatus, AUTO_WORDS });

@@ -64,9 +64,9 @@ test('RM-1 the closure matrix: every action in every state, for every role', () 
   assert.deepEqual(MATRIX.map(([action]) => action).sort(), Object.keys(ready.HOLDS).sort(), 'every action has a row');
   for (const [action, held] of MATRIX) {
     for (const name of ['U', 'P', 'D', 'K', 'R', 'L']) assert.equal(ready.holdFor(action, judge(name)), null, `${action} in ${name}`);
+    // A launched session holds as the owner's own does; the cloud sweep's write is RM-4's online row.
     assert.equal(ready.holdFor(action, judge('N')), held.N, `${action}, N, owner-started`);
-    assert.equal(ready.holdFor(action, judge('N'), { role: 'launched' }), held.launched, `${action}, N, launched`);
-    assert.equal(ready.holdFor(action, judge('N'), { role: 'cloud-sweep' }), action === 'programme-write' ? held.cloud : held.N, `${action}, N, cloud sweep`);
+    assert.equal(held.launched, held.N, `${action}, N, launched`);
   }
   assert.throws(() => ready.holdFor('merge-everything', judge('N')), /unknown action/);
 });
@@ -178,6 +178,20 @@ test('RM-4 programme writes refuse while not ready; reads still run; an older pr
   for (const command of ['show', 'inventory', 'attention']) assert.equal(open(held.repo, command), 'TRANSPORT_REACHED', `${command} still reads`);
   const older = chokeRepo(t, '3.137.0');
   assert.equal(open(older.repo, 'update'), 'TRANSPORT_REACHED', 'an older programme file only warns');
+  // The cloud sweep (G2 Low: its exemption was proved only on a test-only setting): the same held
+  // repository, read through the online reader at the checked-out commit, is not held; the run goes on
+  // to its next GitHub read.
+  const text = fs.readFileSync(path.join(held.repo, '.github', 'toolkit-programme.json'), 'utf8');
+  const online = { request(method, url) {
+    if (url === `repos/${SLUG}`) return { status: 200, json: { full_name: SLUG, default_branch: 'main' } };
+    if (url === `repos/${SLUG}/branches/main`) return { status: 200, json: { commit: { sha: held.head } } };
+    if (url.startsWith(`repos/${SLUG}/contents/.github/toolkit-programme.json?ref=`)) return { status: 200, json: { encoding: 'base64', content: Buffer.from(text).toString('base64') } };
+    throw Object.assign(new Error(`the run went on to ${url}`), { code: 'TRANSPORT_REACHED' });
+  } };
+  const cloud = { GITHUB_ACTIONS: 'true', TOOLKIT_PROGRAMME_CLOUD_SWEEP: '1', GITHUB_SHA: held.head };
+  let outcome;
+  try { programme.openContext({ command: 'refresh', 'repo-root': held.repo }, { transport: online, environment: cloud }); outcome = 'opened'; } catch (error) { outcome = error.code; }
+  assert.equal(outcome, 'TRANSPORT_REACHED', 'the cloud sweep\'s write is never held: it goes on to its next read');
 });
 
 test('RM-5 a gate checkpoint is queued while not ready, before any store read', t => {
