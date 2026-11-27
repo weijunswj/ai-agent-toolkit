@@ -5597,11 +5597,11 @@ function readOpenPrFacts({ reader, binding, parent, docs, open, now }) {
 // can write here) a PASS, and every required check green at that head. Pure.
 function boardingOf(read, open, required, now) {
   const { verdictFor } = require('./g2-verdict.cjs');
-  const { mainCheckMayStart } = require('../../../repo/scripts/toolkit-merge-train-finder.cjs');
+  const { mainCheckMayStart } = require('./issue-closure.cjs');
   const trains = open.filter(pr => (pr.train || []).length).sort((a, b) => b.number - a.number);
   const held = new Set(trains.flatMap(pr => pr.train.map(row => row.pr)));
   // Main's CI runs while a required check (every check when none is required) has a run not finished,
-  // or has no run at main's head yet while that head is new (the merge train finder's mainCheckMayStart:
+  // or has no run at main's head yet while that head is new (issue-closure.cjs mainCheckMayStart:
   // GitHub makes a push's check runs a little after it lands); after that, a check with no run on main
   // is not running.
   const names = required.length ? required : [...new Set(read.main.contexts.map(contextName))];

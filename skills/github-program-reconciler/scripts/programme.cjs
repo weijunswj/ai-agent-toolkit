@@ -536,18 +536,30 @@ function openPrsOf(context, parentDoc, docs, deps) {
 // the session start read). A rendered copy's path holding someone else's file raises it too, since the
 // refresh stops there. The sweep never changes workflows itself (its App holds no workflow permission);
 // a controller chat opens the refresh pull request (toolkit-cloud-workflows.cjs --refresh-pr). Local
-// reads only; any failure adds nothing, and the Toolkit's own repository is never checked.
+// reads only; a check that fails returns null (not checked), and the Toolkit's own repository is never
+// checked.
 function cloudLayoutFindings(context, deps = {}) {
   if (deps.cloudLayoutFindings) return deps.cloudLayoutFindings(context);
   try {
     const toolkitRoot = path.resolve(__dirname, '..', '..', '..');
     const workflows = require(path.join(toolkitRoot, 'repo', 'scripts', 'toolkit-cloud-workflows.cjs'));
     const refresh = require(path.join(toolkitRoot, 'repo', 'scripts', 'toolkit-cloud-workflows-refresh.cjs'));
+    if (workflows.isToolkitCheckout(context.repoRoot)) return [];
     let ciShards = null;
     try { ciShards = JSON.parse(fs.readFileSync(path.join(context.repoRoot, '.github', 'toolkit-programme.json'), 'utf8'))?.ci_shards?.answer || null; } catch { ciShards = null; }
     const found = refresh.pending({ target: context.repoRoot, root: toolkitRoot, commit: workflows.toolkitHead(toolkitRoot), ciShards, workflows });
     return found.rows.length || found.unmanaged ? ['CLOUD_LAYOUT_STALE'] : [];
-  } catch { return []; }
+  } catch { return null; }
+}
+
+// Only a pass that ran the copy check raises or resolves CLOUD_LAYOUT_STALE. The check runs on the cloud
+// sweep alone (it compares the copies with the Toolkit that sweep runs), so a computer's pass, or a cloud
+// pass whose check could not run, carries an open finding forward: a pass that never looked once
+// resolved it minutes after each cloud pass raised it while the copies stayed stale.
+function layoutFindings(context, parentDoc, deps, host) {
+  const checked = host === 'cloud' ? cloudLayoutFindings(context, deps) : null;
+  if (Array.isArray(checked)) return checked;
+  return state.openFindings(parentDoc.attention).some(entry => entry.code === 'CLOUD_LAYOUT_STALE') ? ['CLOUD_LAYOUT_STALE'] : [];
 }
 
 function readParent(context) {
@@ -833,7 +845,7 @@ const commands = {
     const lease = context.lease;
     const queued = lease ? {
       since: parentDoc.sweep && lease.record.changed_since ? new Date(Date.parse(lease.record.changed_since) - SWEEP_OVERLAP_MS).toISOString() : null,
-      queue: parentDoc.sweep?.queue || [], pass: lease.record.pass, record: lease.record, findings: [...lease.findings(), ...(lease.host === 'cloud' ? cloudLayoutFindings(context, deps) : [])], host: lease.host,
+      queue: parentDoc.sweep?.queue || [], pass: lease.record.pass, record: lease.record, findings: [...lease.findings(), ...layoutFindings(context, parentDoc, deps, lease.host)], host: lease.host,
       // The board's stuck rule, counting this pass's own reads.
       stuck: read => lease.stuck(read),
       canRead: (pages, needsPage) => context.requests.canStartTask(pages, needsPage) && context.pass.left() > state.PAGE_RESERVE_MS + state.END_RESERVE_MS,

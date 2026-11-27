@@ -68,7 +68,7 @@ const { uatVerdict } = require('./toolkit-auto-merge-eligible.cjs');
 const riskTier = require('./toolkit-risk-tier.cjs');
 const gateRoute = require('./toolkit-gate-route.cjs');
 const carry = require('./toolkit-review-carry.cjs');
-const { mergeTrainMembers } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
+const { mergeTrainMembers, mainCheckMayStart } = require('../../skills/github-program-reconciler/scripts/issue-closure.cjs');
 const g2 = require('../../skills/github-program-reconciler/scripts/g2-verdict.cjs');
 
 const { VERDICT } = g2;
@@ -152,22 +152,9 @@ function missingChecks(runs, required) {
   });
 }
 
-// GitHub makes a push's check runs a little after the commit lands, so right after a merge a required
-// check can have no run at main's head yet. For this long after main's head was committed such a check
-// counts as running; after it, a required check with no run there (one that runs on pull requests only)
-// is not running. A head with no readable commit time is past the window.
-const MAIN_CHECKS_GRACE_MS = 10 * 60 * 1000;
-
-// Whether a required check with no run at main's head may still start: main's head was committed
-// (`committedAt`, an ISO time) less than MAIN_CHECKS_GRACE_MS before `now`.
-function mainCheckMayStart(committedAt, now = Date.now()) {
-  const at = Date.parse(String(committedAt || ''));
-  return Number.isFinite(at) && now - at < MAIN_CHECKS_GRACE_MS;
-}
-
 // Whether main's CI is still running: a required check (every check when none is required) whose
 // latest run at the default branch's head has not completed, or that has no run there yet while main's
-// head is new (mainCheckMayStart).
+// head is new (mainCheckMayStart, issue-closure.cjs).
 function mainRunning(runs, required, { committedAt = null, now = Date.now() } = {}) {
   const names = required.length ? required : [...new Set(runs.map(run => run.name))];
   const mayStart = mainCheckMayStart(committedAt, now);
@@ -380,4 +367,4 @@ function find(cwd, options, maxMembers) {
     ...(onto ? { onto } : {}), next };
 }
 
-module.exports = { VERDICT, GitHubFacts, LiveFacts, MAIN_CHECKS_GRACE_MS, find, mainCheckMayStart, mainRunning, missingChecks, openTrains, packChanges, readOpenTrains, stackTip, stackedOn, verdictFor };
+module.exports = { VERDICT, GitHubFacts, LiveFacts, find, mainRunning, missingChecks, openTrains, packChanges, readOpenTrains, stackTip, stackedOn, verdictFor };
