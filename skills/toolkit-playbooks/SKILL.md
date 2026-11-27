@@ -23,7 +23,7 @@ The Toolkit's working playbooks, shipped with the plugin so no repository needs 
 - Git publication, pull requests, CI, review readiness, or status checks: read [Git completion](git-completion.md).
 - Closing, merging or asking the owner to merge a PR or issue: read [Closing comments](closing-comments.md).
 - Features touching authority, approvals, custody, state machines or host configuration (Codex, Claude Code or other app settings files): read [Invariant models](invariant-models.md) before G0 planning, G1 tests or G2 review.
-- Slow tests or CI, long or background commands, test runners, test shards, CI test jobs, or test time budgets: read [Fast tests and sharding](fast-tests-and-sharding.md).
+- Slow tests or CI, long or background commands, test runners, test shards, CI test jobs, test time budgets, or a `speed.shards` or `speed.shards-lopsided` CI check-up finding: read [Fast tests and sharding](fast-tests-and-sharding.md).
 - Unfamiliar repo, docs index, repo map, architecture notes, validation docs, source-of-truth docs, or documented workflow: read [Local docs](local-docs.md).
 
 If no match applies, continue baseline-only. If a playbook here is missing, continue safely with the global rules and report that Toolkit needs `setup toolkit`.
