@@ -10,7 +10,7 @@ const test = require('node:test');
 const { renderBlock, findBlocks } = require('../scripts/toolkit-managed-block.cjs');
 const hostile = require('./support/hostile-inputs.cjs');
 const { STEPS_TEXT } = require('../scripts/toolkit-claude-account-copy.cjs');
-const { ProjectsTasks, KEPT_LABEL, PROJECT_HEADING, LEGACY_RAISE, validateParams, checkMemory, parseArgs } = require('../scripts/toolkit-projects-tasks.cjs');
+const { ProjectsTasks, KEPT_LABEL, PROJECT_HEADING, LEGACY_RAISE, validateParams, checkMemory, BindingCheck, parseArgs } = require('../scripts/toolkit-projects-tasks.cjs');
 
 const ROOT = path.resolve(__dirname, '../..');
 const SCRIPT = path.join(ROOT, 'repo/scripts/toolkit-projects-tasks.cjs');
@@ -530,7 +530,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
   assert.ok(nudge.indexOf('nudge-state.md') > -1 && nudge.indexOf('nudge-state.md') < nudge.indexOf('list_threads'), 'cheap compare before the sweep');
   assert.match(nudge, /no change since <time>/);
   assert.doesNotMatch(nudge, /BINDING|git ls-remote|guidebook checked/);
-  // Toolkit once: decision traces and CI drift, which need the project's own checkout, run daily.
+  // Toolkit once: CI drift, which needs the project's own checkout, runs daily.
   assert.equal((nudge.match(/git clone/g) || []).length, 1);
   const guidebook = nudge.split('\n').find(line => line.startsWith('9. TOOL STEP (shell): Guidebook and controller check'));
   // The guidebook refresh runs every run, never gated on the controller check, refuses an old clone and
@@ -540,7 +540,7 @@ test('the check-in carries every prefix in the fixed order and checks both Toolk
     'run `node TK/repo/scripts/toolkit-projects-guidebook.cjs --refresh /mnt/project-files/toolkit/web-controller-projects` every run, whatever the other checks say',
     'an old clone prints `SKILL COPY FAILED STALE_CHECKOUT <head7>, main <tip7>` and writes nothing', '`GUIDEBOOK CURRENT <Version> toolkit <x.y.z>, main <commit7>`',
     '`GUIDEBOOK REFRESHED <old> -> <new>, main <commit7>` and any `BLOCK CHANGED <version>`', 'Then run `node TK/repo/scripts/toolkit-projects-guidebook.cjs --card`',
-    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --skip programme,traces,ci,guidebook`', 'adding `--repo example-owner/example-repo` when step 9a applies',
+    '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --skip programme,ci,guidebook`', 'adding `--repo example-owner/example-repo` when step 9a applies',
     '`CONTROLLER CHECK: clear ...`: write "**Controller check:** clear".',
     '"BLOCK CHANGED <version> | "', '"SKILL COPY FAILED: <reason> | "', '"SKILL CARD OUTDATED: saved <old>, main <new>, text <fp8> | " when `--card` printed it, unless memory has a "skill card" line with the same text <fp8>',
     '"CONTROLLER CHECK: <n> | "']) assert.ok(guidebook.includes(required), required);
@@ -781,7 +781,11 @@ test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {
       'a{b}c', 'a`b', 'ab', 'x'.repeat(201)
     ].map(reason => [`${binding}\n${tasksLine.replace('since 2026-10-24;', `since 2026-10-24 | raised top/high 2026-10-25: ${reason};`)}\n`, ['MEMORY FORMAT: SCHEDULED TASKS old format'], 1]),
     [`${binding}\n${tasksLine.replace('since 2026-10-24;', `since 2026-10-24 | raised top/high 2026-10-25: ${'x'.repeat(200)};`)}\n`, ['current'], 0],
-    ['', ['MEMORY FORMAT: BINDING missing', 'MEMORY FORMAT: SCHEDULED TASKS missing'], 1]
+    ['', ['MEMORY FORMAT: BINDING missing', 'MEMORY FORMAT: SCHEDULED TASKS missing'], 1],
+    // Only printable ASCII, as --rebind reads it: a trailing tab or no-break space, or a zero-width space
+    // inside the Version, which the format pattern lets through, is named so the line gets rewritten.
+    ...[`${binding}\t`, `${binding}\u00a0`, binding.replace('skill 2026-10-24.5', 'skill 2026-10-24.5\u200b')]
+      .map(line => [`${line}\n${tasksLine}\n`, ['MEMORY FORMAT: BINDING has a character outside printable ASCII'], 1])
   ];
   for (const [text, lines, exitCode] of rows) assert.deepEqual(checkMemory(text), { lines, exitCode }, text);
   // The raise reason is printable ASCII on one line: a line break or invisible character inside it is
@@ -790,6 +794,119 @@ test('memory check reads only the BINDING and SCHEDULED TASKS lines', () => {
   hostile.expectDefaultDeny(assert, text => checkMemory(withReason(text)).exitCode === 0, hostile.cases(['line-breaks', 'invisible']), {
     allow: ['crlf-line-end', 'crlf-then-lone-cr']
   });
+});
+
+// The daily check-in found BINDING STALE and handed the rebind to another controller, although the
+// rebind is the Projects coordinator's own step. --rebind gives it the exact new BINDING line and what
+// changed in CONTROLLER.md, read from the fresh Toolkit clone, so the check-in rebinds itself.
+function bindingRepo(t) {
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'tk-rebind-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const git = (...args) => {
+    const result = spawnSync('git', ['-c', 'user.name=Example', '-c', 'user.email=dev@example.com', '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false', ...args], { cwd: dir, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  const commit = (files, title) => {
+    for (const [rel, text] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+      fs.writeFileSync(path.join(dir, rel), text);
+    }
+    git('add', '-A');
+    git('commit', '-q', '-m', title);
+    const [commit, blob] = git('rev-parse', 'HEAD', 'HEAD:repo/CONTROLLER.md').split('\n');
+    return { commit, blob };
+  };
+  git('init', '-q', '-b', 'main');
+  const plugin = version => JSON.stringify({ name: 'ai-agent-toolkit', version }, null, 2);
+  const first = commit({ 'repo/CONTROLLER.md': '# Controller\n\n## Launches\n- Launch only on a pinned route.\n\n## Merges\n- Merge on the owner\'s OK.\n', '.claude-plugin/plugin.json': plugin('3.1.0') }, 'Start the controller');
+  const moved = commit({ 'README.md': 'notes\n', '.claude-plugin/plugin.json': plugin('3.1.1') }, 'Unrelated change');
+  const changed = commit({ 'repo/CONTROLLER.md': '# Controller\n\n## Launches\n- Launch only on a pinned route, read back first.\n\n## Merges\n- Merge on the owner\'s OK.\n', '.claude-plugin/plugin.json': plugin('3.2.0') }, 'Launches read the route back');
+  return { dir, git, commit, first, moved, changed };
+}
+
+const bindingLine = (commit, blob, { toolkit = '3.1.0', bound = '2026-11-20', prefix = '- ' } = {}) =>
+  `${prefix}BINDING: example-owner/ai-agent-toolkit main commit ${commit} CONTROLLER.md blob ${blob} toolkit ${toolkit} skill 2026-11-20.1 bound ${bound}`;
+
+test('--rebind prints the new BINDING line and what changed in CONTROLLER.md, or why it cannot', t => {
+  const { dir, git, commit, first, changed } = bindingRepo(t);
+  const memoryFile = path.join(dir, 'MEMORY.md');
+  // The command line once; the rest of the matrix in process (each git run is slow on Windows).
+  const rebind = (memory, checkout = dir) => {
+    const result = new BindingCheck().check(memory, { checkout, date: '2026-11-27' });
+    return { status: result.exitCode, lines: result.lines };
+  };
+  const other = '# Memory\n- Owner note: keep this line.\n';
+  // Stale: the line to write (repository, branch, skill Version and its list marker kept; commit, blob,
+  // toolkit and date from main), each changed section with its counts, and the commits that changed it.
+  fs.writeFileSync(memoryFile, `${other}${bindingLine(first.commit, first.blob)}\n`);
+  const cli = run(['--rebind', memoryFile, '--checkout', dir, '--date', '2026-11-27']);
+  assert.deepEqual({ status: cli.status, stderr: cli.stderr }, { status: 1, stderr: '' });
+  assert.deepEqual(cli.stdout.trimEnd().split('\n'), [
+    `BINDING STALE: bound ${first.blob.slice(0, 7)}, main ${changed.blob.slice(0, 7)} at ${changed.commit.slice(0, 7)}`,
+    bindingLine(changed.commit, changed.blob, { toolkit: '3.2.0', bound: '2026-11-27' }),
+    'CHANGED: ## Launches (+1 -1)',
+    `CHANGED BY: ${changed.commit.slice(0, 7)} Launches read the route back`
+  ]);
+  // Only the commit moved: the line is still rewritten (commit and toolkit), quietly, with the bound date kept.
+  git('checkout', '-q', '--detach', 'HEAD~1');
+  const moved = git('rev-parse', 'HEAD');
+  const quiet = rebind(`${bindingLine(first.commit, first.blob, { prefix: '' })}\n`);
+  assert.equal(quiet.status, 1);
+  assert.deepEqual(quiet.lines, [`BINDING CURRENT ${first.blob.slice(0, 7)}, commit moved to ${moved.slice(0, 7)}`, bindingLine(moved, first.blob, { toolkit: '3.1.1', prefix: '' })]);
+  git('checkout', '-q', 'main');
+  // Current: nothing to write.
+  assert.deepEqual(rebind(`${bindingLine(changed.commit, changed.blob, { toolkit: '3.2.0' })}\n`), { status: 0, lines: [`BINDING CURRENT ${changed.blob.slice(0, 7)}`] });
+  // A bound blob this full clone lacks (not in Toolkit's history): still rebinds, and says to read the file.
+  const missing = rebind(`${bindingLine(first.commit.replace(/^./, first.commit[0] === 'a' ? 'b' : 'a'), 'c'.repeat(40))}\n`);
+  assert.equal(missing.status, 1);
+  assert.equal(missing.lines[1], bindingLine(changed.commit, changed.blob, { toolkit: '3.2.0', bound: '2026-11-27' }));
+  assert.deepEqual(missing.lines.slice(2), ["CHANGES UNREAD: the bound blob ccccccc is not in Toolkit's history: read repo/CONTROLLER.md in the clone in full"]);
+  // Unknown: each reason on one line, nothing to write.
+  for (const [memory, reason] of [
+    [other, 'no BINDING line in memory'],
+    [`${bindingLine(first.commit, first.blob)}\n${bindingLine(first.commit, first.blob)}\n`, 'more than one BINDING line in memory'],
+    [`${bindingLine(first.commit, first.blob).replace(' toolkit 3.1.0', '')}\n`, 'the BINDING line is not in the current format (no full commit and blob to compare)']
+  ]) assert.deepEqual(rebind(memory), { status: 2, lines: [`BINDING UNKNOWN: ${reason}`] }, reason);
+  // A folder that is not the clone's top level is never read as the clone.
+  assert.deepEqual(rebind(`${bindingLine(first.commit, first.blob)}\n`, path.join(dir, 'repo')), { status: 2, lines: ['BINDING UNKNOWN: cannot read repo/CONTROLLER.md at HEAD of the Toolkit clone'] });
+  // Bad arguments refuse with the generic line.
+  for (const args of [['--rebind'], ['--rebind', memoryFile, '--date', '27 Nov'], ['--rebind', memoryFile, '--bogus', 'x']]) {
+    const result = run(args);
+    assert.equal(result.status, 2, args.join(' '));
+    assert.equal(result.stdout, '');
+  }
+  // The BINDING line is copied into the new one, so only printable ASCII is read: a hidden character or
+  // a line break inside it, even inside the skill Version, makes it unknown, never rewritten.
+  const line = bindingLine(changed.commit, changed.blob, { toolkit: '3.2.0' });
+  const reads = text => new BindingCheck().check(`${line.replace('skill 2026-11-20.1', `skill 2026-11-20.1${text}`)}\n`, { checkout: dir, date: '2026-11-27' }).exitCode !== 2;
+  hostile.expectDefaultDeny(assert, reads, [...hostile.cases(['line-breaks', 'invisible']),
+    ...['\u200b', '\u00a0', '\u202e', '\ufeff', '\u0085', '\u2028', '\r', '\t'].map(text => ({ id: `char-${text.codePointAt(0).toString(16)}`, text }))]);
+  // CRLF memory files read as usual.
+  assert.deepEqual(rebind(`${other.replace(/\n/g, '\r\n')}${line}\r\n`).lines, [`BINDING CURRENT ${changed.blob.slice(0, 7)}`]);
+  // --check-memory and --rebind agree on a line the format pattern passes but --rebind refuses, and say why.
+  for (const memory of [`${line}\t`, `${line}\u00a0`, line.replace('skill 2026-11-20.1', 'skill 2026-11-20.1\u200b')].map(text => `${text}\n`)) {
+    assert.ok(checkMemory(memory).lines.includes('MEMORY FORMAT: BINDING has a character outside printable ASCII'), JSON.stringify(memory));
+    assert.deepEqual(rebind(memory), { status: 2, lines: ['BINDING UNKNOWN: the BINDING line has a character outside printable ASCII (a tab, a no-break or zero-width space, or similar): rewrite it'] }, JSON.stringify(memory));
+  }
+  // A merge that brings in another CONTROLLER.md change: CHANGED BY lists the changes, never the merge commit.
+  git('checkout', '-q', '-b', 'side', first.commit);
+  const side = commit({ 'repo/CONTROLLER.md': '# Controller\n\n## Launches\n- Launch only on a pinned route.\n\n## Merges\n- Merge on the owner\'s OK, read back.\n' }, 'Merges read back');
+  git('checkout', '-q', 'main');
+  git('merge', '-q', '--no-ff', '-m', 'Join the side change', 'side');
+  const merged = git('rev-parse', 'HEAD');
+  const wide = rebind(`${bindingLine(first.commit, first.blob)}\n`);
+  assert.deepEqual(wide.lines.filter(entry => entry.startsWith('CHANGED: ')), ['CHANGED: ## Launches (+1 -1)', 'CHANGED: ## Merges (+1 -1)']);
+  assert.deepEqual(wide.lines.filter(entry => entry.startsWith('CHANGED BY: ')).sort(),
+    [`CHANGED BY: ${changed.commit.slice(0, 7)} Launches read the route back`, `CHANGED BY: ${side.commit.slice(0, 7)} Merges read back`].sort());
+  assert.equal(wide.lines.some(entry => entry.startsWith('CHANGED BY: ') && entry.includes(merged.slice(0, 7))), false, 'no merge commit');
+  // A shallow clone that lacks the bound blob: the unshallow advice, once.
+  const shallow = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'tk-rebind-shallow-'));
+  t.after(() => fs.rmSync(shallow, { recursive: true, force: true }));
+  const cloned = spawnSync('git', ['clone', '-q', '--depth', '1', require('node:url').pathToFileURL(dir).href, shallow], { encoding: 'utf8' });
+  assert.equal(cloned.status, 0, cloned.stderr);
+  assert.deepEqual(rebind(`${bindingLine(first.commit, first.blob)}\n`, shallow).lines.slice(2),
+    [`CHANGES UNREAD: the bound blob ${first.blob.slice(0, 7)} is not in this shallow clone: run git fetch --unshallow in it once, then --rebind again`]);
 });
 
 function inventoryStepContract(inventory, playbook) {
@@ -1115,7 +1232,7 @@ test('coordinators act on task warnings: backlog, rotation and missing set-up ar
     assert.doesNotMatch(text, /fires it once|Fire it once|Test one run now|caught up by firing it/, name);
   }
   assert.ok(device.includes('- **Rotate long Remote Control lanes too.**') && device.includes('you end its session with `stop_remote_control` once the handoff is read back'), 'Remote Control lanes rotate too');
-  assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PROJECT TASKS OUTDATED, PLUGIN BEHIND, TASK FAILING, PR ATTENTION, TRACE GAPS, WORKFLOW FAILING, CI GAPS, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
+  assert.ok(rendered('daily-check-in').includes('PROJECT TASKS MISSING, PROJECT TASKS OUTDATED, PLUGIN BEHIND, TASK FAILING, PR ATTENTION, WORKFLOW FAILING, CI GAPS, NEEDS SETUP.'), 'the check-in orders NEEDS SETUP last');
   const freshAge = full('hourly-nudge', validateParams('hourly-nudge', { ...PARAMS['hourly-nudge'], session: 'fresh' })).split('\n').find(line => line.startsWith('7. Age rebuild'));
   assert.ok(freshAge.includes('handoff.md (the state file, last report and every open warning the new home needs)'), 'a fresh render carries the handoff content inline');
   const skill = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
@@ -1175,10 +1292,10 @@ test('the check-in turns stuck work into prefixes the coordinator must act on, a
   assert.ok(firstLine.endsWith('NEEDS SETUP. A run with nothing changed or stuck posts no first line to the owner.'), firstLine);
   assert.doesNotMatch(daily, /Fold check:/);
   // The nudge's step 9 names where the checks it skips run, and no session-start stale check.
-  assert.match(nudge, /step 5b runs the programme check, and the daily check-in the decision traces and CI drift/);
+  assert.match(nudge, /step 5b runs the programme check, and the daily check-in the CI drift/);
   assert.doesNotMatch(nudge, /stale check/i);
   // The controller check has no stale check, so no Projects call names one.
-  assert.match(nudge, /toolkit-controller-check\.cjs --host projects --skip programme,traces,ci,guidebook`/);
+  assert.match(nudge, /toolkit-controller-check\.cjs --host projects --skip programme,ci,guidebook`/);
   assert.match(daily, /toolkit-controller-check\.cjs --host projects --checkout R --repo \{\{repo\}\} --skip guidebook,instructions,memory,tasks,programme,footer,refs`/);
   const ownerAsks = fs.readFileSync(path.join(projects, 'reference', 'owner-asks.md'), 'utf8');
   assert.match(ownerAsks, /\*\*Owner UAT comes after agent UAT\.\*\* Ask the owner for UAT only once every agent UAT step at that build passed[^\n]*lists only the steps no tool reaches[^\n]*links the agent UAT evidence/);
@@ -1265,15 +1382,45 @@ test('rendered hourly nudges list PROGRAMME FINDINGS and CLOUD SWEEP only in the
 });
 
 // The owner's catch-what-was-missed checks run in the daily check-in, each with its own first-line prefix.
-test('rendered daily check-ins run workflow health, and the decision trace and CI check-up through the controller check', () => {
+// The decision-trace audit is retired: its "unlinked decision comments" are no longer raised anywhere.
+test('rendered daily check-ins run workflow health and the CI check-up through the controller check, never the retired trace audit', () => {
   const text = rendered('daily-check-in');
   const step = text.slice(text.indexOf('11b. TOOL STEP (shell, GitHub): CHECKERS'), text.indexOf('12. Promises'));
-  for (const phrase of ['the hourly controller check skips them', 'R is TK when example-owner/example-repo is weijunswj/ai-agent-toolkit, else `git clone --depth 1 https://github.com/example-owner/example-repo R`',
+  for (const phrase of ['CI check-up (it runs here once a day; the hourly controller check skips it)', 'R is TK when example-owner/example-repo is weijunswj/ai-agent-toolkit, else `git clone --depth 1 https://github.com/example-owner/example-repo R`',
     '`node TK/repo/scripts/toolkit-controller-check.cjs --host projects --checkout R --repo example-owner/example-repo --skip guidebook,instructions,memory,tasks,programme,footer,refs`',
-    '"TRACE GAPS: <its counts> | "', '--repair --out <file>', 'that have a `schedule` trigger', '"WORKFLOW FAILING: <names> | "', '"CI GAPS: <n> | "']) {
+    'that have a `schedule` trigger', '"WORKFLOW FAILING: <names> | "', '"CI GAPS: <n> | "']) {
     assert.ok(step.includes(phrase), phrase);
   }
+  for (const surface of [text, rendered('hourly-nudge'), fs.readFileSync(path.join(TASKS, '..', 'reference', 'periodic-runs.md'), 'utf8')]) {
+    assert.doesNotMatch(surface, /TRACE GAPS|ATTENTION traces|decision-trace-audit|decision traces? (?:and|audit)|unlinked decision/);
+  }
   assert.ok(text.indexOf('**Checkers:**', text.indexOf('REPORT')) > 0, 'the report has a Checkers bullet');
+});
+
+// The daily check-in found BINDING STALE and handed the rebind to another controller. The check-in
+// rebinds itself: --rebind prints the new line and what changed, and the coordinator writes it.
+test('the daily check-in rebinds itself from --rebind and reports what changed; unknown still reports its reason', () => {
+  const text = rendered('daily-check-in');
+  const step = text.slice(text.indexOf('5. TOOL STEP (shell): BINDING'), text.indexOf('6. TOOL STEP'));
+  for (const phrase of ['run `node TK/repo/scripts/toolkit-projects-tasks.cjs --rebind MEMFILE`',
+    '`BINDING CURRENT <blob7>`: "**Binding:** current (<blob7>)", adding "commit moved to <commit7>" when it says so',
+    '`BINDING STALE: bound <blob7>, main <blob7> at <commit7>`: start the first line with that line plus " | "',
+    'copy its `CHANGED:` and `CHANGED BY:` lines under **Binding:**', 'on `CHANGES UNREAD`, do what it says once: run `git -C TK fetch --unshallow` and run it again, or read `TK/repo/CONTROLLER.md` in full',
+    'Whenever it prints a `BINDING:` line (stale, or only the commit moved), the coordinator rewrites the BINDING line in memory the same turn with that line\'s commit, CONTROLLER.md blob, toolkit version and bound date, keeps the `skill <Version>` the memory line holds at that moment (SKILL UPDATE, acted on first, may have recorded a newer one this turn; the printed line still carries the one from MEMFILE), and reads it back; a thread running this step only reports it. Never hand the rebind to another controller or the owner.',
+    '`BINDING UNKNOWN: <reason>`: start the first line with that line plus " | "']) {
+    assert.ok(step.includes(phrase), phrase);
+  }
+  assert.doesNotMatch(step, /git -C TK rev-parse HEAD:repo\/CONTROLLER\.md/);
+  const acting = fs.readFileSync(path.join(TASKS, '..', 'reference', 'periodic-runs.md'), 'utf8');
+  // A release that bumps the skill Version also moves main: SKILL UPDATE records the new Version first,
+  // so the rebind write keeps it rather than putting back the MEMFILE Version the printed line carries.
+  assert.ok(acting.includes('  - `BINDING STALE` or `BINDING UNKNOWN`: rebind (**Binding**) the same turn yourself: rewrite the BINDING line in memory with the commit, CONTROLLER.md blob, toolkit version and bound date of the `BINDING:` line step 5 printed, keeping the `skill <Version>` the memory line holds now (`SKILL UPDATE`, acted on first, may have recorded a newer one this turn; the printed line still carries the old one), read it back, check whether running gates need the changed instructions, and put the `CHANGED:` lines in your post as what changed. `BINDING UNKNOWN` has no line to write: report its reason and hold new launches until a read works.'));
+  assert.ok(acting.includes('(step 5 printed that line too: write it quietly the same way, keeping the skill Version)'));
+  assert.doesNotMatch(acting + text, /rewrite the BINDING line in memory as the `BINDING:` line|that line rewrites the BINDING line/);
+  // Who acts: the check-in's own Projects steps stay with the coordinator; only GitHub-side controller
+  // work in another controller's lane goes to it, and only the owner's own steps go to the owner.
+  assert.ok(acting.includes('- **Who acts.** Every prefix here is this project\'s own work: you do it the same turn, or brief a thread that can. Hand another controller of the repository (one the parent issue records a lane split with, such as a desktop controller) only a GitHub-side controller action in its own lane that no thread of yours may take, such as its merge, its programme write or its pull request. Send the owner only what is theirs: the plugin and skill cards, a merge or decision card, and the other steps under **Call-to-action pings** in `reference/owner-asks.md`. The rebind, the guidebook, the block, the Toolkit memory lines, the tasks, the nudge and the run relay are never handed on.'));
+  assert.ok(text.includes('Route each finding as **Who acts** in `reference/periodic-runs.md` says: your own steps you do, another controller gets only GitHub-side work in its lane, and the owner only their own steps.'));
 });
 
 // A session without repo access once relayed runs and wrote `.done` with the PR sweep unrun, leaving a

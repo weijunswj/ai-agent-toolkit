@@ -13,7 +13,6 @@ const CLEAN = {
   [SCRIPTS.instructions]: { status: 0, stdout: 'current\n' },
   [SCRIPTS.tasks]: { status: 0, stdout: 'current\n' },
   [SCRIPTS.programme]: { status: 0, stdout: 'Attention: clear\n' },
-  [SCRIPTS.traces]: { status: 0, stdout: JSON.stringify({ ok: true }) },
   [SCRIPTS.ci]: { status: 0, stdout: JSON.stringify({ items: [{ level: 'CHECK', check: 'speed.jobs', path: '', message: 'judge' }] }) },
   [SCRIPTS.footer]: { status: 0, stdout: 'GitHub footer sweep (report only) of acme/app: no posts with the footer\n' },
   [SCRIPTS.refs]: { status: 0, stdout: 'SCRIPT REFERENCES: clear\n' },
@@ -46,7 +45,7 @@ const ALL = ['--checkout', '/repo', '--instructions', 'i.md', '--memory', 'm.md'
 test('a clean run prints one line and exits 0', () => {
   const { code, text } = run(ALL);
   assert.equal(code, 0);
-  assert.equal(text, 'CONTROLLER CHECK: clear (ok: guidebook instructions memory tasks owner-lines programme traces ci footer refs; skipped: toolkit)\n');
+  assert.equal(text, 'CONTROLLER CHECK: clear (ok: guidebook instructions memory tasks owner-lines programme ci footer refs; skipped: toolkit)\n');
 });
 
 test('checks are segregated by host and governance, and skip cleanly with the reason', () => {
@@ -55,9 +54,9 @@ test('checks are segregated by host and governance, and skip cleanly with the re
   for (const name of ['guidebook', 'instructions', 'memory', 'tasks']) {
     assert.deepEqual(chat.checks.find(check => check.name === name), { name, state: 'skipped', lines: ['Claude Projects only'] });
   }
-  assert.deepEqual(chat.checks.filter(check => check.state === 'ok').map(check => check.name), ['owner-lines', 'programme', 'traces', 'ci', 'footer', 'refs']);
+  assert.deepEqual(chat.checks.filter(check => check.state === 'ok').map(check => check.name), ['owner-lines', 'programme', 'ci', 'footer', 'refs']);
   const off = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ binding: { ...GOVERNED, governance: 'disabled' } }).deps);
-  assert.deepEqual(off.checks.filter(check => check.state === 'skipped').map(check => `${check.name}: ${check.lines[0]}`).slice(-2), ['programme: governance off', 'traces: governance off']);
+  assert.deepEqual(off.checks.find(check => check.name === 'programme').lines, ['governance off']);
   const none = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ binding: null }).deps);
   assert.equal(none.checks.find(check => check.name === 'programme').lines[0], 'no programme binding in the checkout');
   assert.equal(none.checks.find(check => check.name === 'footer').lines[0], 'pass --repo <owner/name>');
@@ -79,7 +78,7 @@ test('findings print compactly: counts by code and the top items, full detail be
   const compact = run(ALL, { results });
   assert.equal(compact.code, 1);
   assert.deepEqual(compact.text.trimEnd().split('\n'), [
-    'CONTROLLER CHECK: 1 need attention, 0 could not run (ok: guidebook instructions memory tasks owner-lines traces ci footer refs; skipped: toolkit)',
+    'CONTROLLER CHECK: 1 need attention, 0 could not run (ok: guidebook instructions memory tasks owner-lines ci footer refs; skipped: toolkit)',
     'ATTENTION programme: Attention: 6 new, 0 acknowledged (CLOSING_STORY 4, STALE_PR 2)',
     `  ${findings[0]}`, `  ${findings[1]}`, `  ${findings[2]}`,
     `  ... 3 more (--expand, or ${require('../scripts/toolkit-user-state.cjs').programmeCommand('attention')})`,
@@ -104,7 +103,6 @@ test('each checker maps its own exit codes and output to attention or could-not-
     [SCRIPTS.instructions]: { status: 2, stdout: '', stderr: 'Project instructions could not be processed (PROJECT_INSTRUCTIONS_INVALID).\n' },
     [SCRIPTS.tasks]: { status: 1, stdout: 'outdated\n' },
     [SCRIPTS.programme]: { status: 1, stdout: 'Attention: unknown (gh not signed in)\n' },
-    [SCRIPTS.traces]: { status: 1, stdout: JSON.stringify({ ok: false, unlinked: ['1', '2', '3'], unlinked_decisions: ['1', '2'], unknown_supersedes: [], superseded_unmarked: [{ id: '3' }], index_errors: [] }) },
     [SCRIPTS.ci]: { status: 0, stdout: JSON.stringify({ items: [{ level: 'GAP', check: 'parts.docker', path: 'Dockerfile', message: 'no CI step builds this Dockerfile' }] }) },
     [SCRIPTS.footer]: { status: 3, stdout: 'FOUND pull_request https://github.com/acme/app/pull/9 (me)\nGitHub footer sweep (report only) of acme/app: 1 FOUND\n' },
     [SCRIPTS.refs]: { status: 1, stdout: 'SCRIPT REFERENCES: 1 found\nRETIRED permission row tasks-plan runs repo/scripts/old.cjs\n' },
@@ -116,15 +114,12 @@ test('each checker maps its own exit codes and output to attention or could-not-
   assert.equal(byName.memory.state, 'attention');
   assert.deepEqual(byName.tasks.lines, ['hourly-nudge: outdated']);
   assert.deepEqual(byName.programme, { name: 'programme', state: 'failed', lines: ['Attention: unknown (gh not signed in)'] });
-  assert.equal(byName.traces.state, 'attention');
-  assert.match(byName.traces.lines[0], /^#7: 2 unlinked decision comments, 1 superseded records not marked \(/);
   assert.deepEqual(byName.ci.lines, ['1 GAP, 0 CHECK (CHECK needs judgement: ci-checkup.cjs lists them)', 'parts.docker Dockerfile: no CI step builds this Dockerfile']);
   assert.equal(byName.footer.state, 'attention');
   assert.deepEqual(byName.refs.lines, ['SCRIPT REFERENCES: 1 found', 'RETIRED permission row tasks-plan runs repo/scripts/old.cjs']);
-  assert.equal(report.attention, 7);
+  assert.equal(report.attention, 6);
   assert.equal(report.failed, 2);
-  const unreadable = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ results: { [SCRIPTS.traces]: { status: 2, stdout: '', stderr: 'FAIL: gh api failed\n' }, [SCRIPTS.footer]: { status: 1, stdout: 'FAILED scan acme/app: HTTP 403\n' } } }).deps);
-  assert.deepEqual(unreadable.checks.find(check => check.name === 'traces').lines, ['#7: could not run: FAIL: gh api failed']);
+  const unreadable = controllerCheck(parseArgs(['--host', 'chat', '--checkout', '/repo']), world({ results: { [SCRIPTS.footer]: { status: 1, stdout: 'FAILED scan acme/app: HTTP 403\n' } } }).deps);
   assert.equal(unreadable.checks.find(check => check.name === 'footer').state, 'failed');
 });
 
@@ -136,7 +131,6 @@ test('every child runs in its read-only mode with the inputs given', () => {
   assert.deepEqual(args[`${SCRIPTS.tasks} --check-memory`], ['--check-memory', 'm.md']);
   assert.deepEqual(args[`${SCRIPTS.tasks} --check`], ['--check', 'hourly-nudge', 'h.md']);
   assert.deepEqual(args[`${SCRIPTS.programme} attention`], ['attention', '--repo-root', '/repo']);
-  assert.deepEqual(args[`${SCRIPTS.traces} --repo`], ['--repo', 'acme/other', '--issue', '7', '--record-prefix', 'INT-7-']);
   assert.deepEqual(args[`${SCRIPTS.ci} --repo`], ['--repo', '/repo', '--json']);
   assert.deepEqual(args[`${SCRIPTS.footer} --repo`], ['--repo', 'acme/other', '--since', '2026-11-13T00:00:00Z']);
   assert.deepEqual(calls.find(call => call.script === SCRIPTS.refs).args, []);
@@ -184,26 +178,38 @@ test('--json prints the report as data', () => {
   const report = JSON.parse(text);
   assert.equal(report.host, 'projects');
   assert.equal(report.governed, true);
-  assert.equal(report.checks.length, 11);
+  assert.equal(report.checks.length, 10);
   assert.equal(format(report).split('\n')[0].startsWith('CONTROLLER CHECK: clear'), true);
 });
 
 test('a run where every check is skipped says nothing ran and exits 1, never clear', () => {
   const { code, text } = run(['--host', 'chat', '--skip', 'refs']);
   assert.equal(code, 1);
-  assert.match(text, /^CONTROLLER CHECK: nothing ran \(skipped: toolkit guidebook instructions memory tasks owner-lines programme traces ci footer refs\): pass the inputs each skipped check names/);
+  assert.match(text, /^CONTROLLER CHECK: nothing ran \(skipped: toolkit guidebook instructions memory tasks owner-lines programme ci footer refs\): pass the inputs each skipped check names/);
   // With no inputs at all only the Toolkit's own script-reference check runs, which is not a clear run.
   const bare = run(['--host', 'chat']);
   assert.equal(bare.code, 1);
-  assert.match(bare.text, /^CONTROLLER CHECK: nothing ran \(ok: refs; skipped: toolkit guidebook instructions memory tasks owner-lines programme traces ci footer\)/);
+  assert.match(bare.text, /^CONTROLLER CHECK: nothing ran \(ok: refs; skipped: toolkit guidebook instructions memory tasks owner-lines programme ci footer\)/);
 });
 
-test('there is no stale check: a stored task prompt that still skips it runs the rest', () => {
-  assert.equal(require('../scripts/toolkit-controller-check.cjs').CHECKS.includes('stale'), false);
+test('there is no stale or traces check: a stored task prompt that still skips one runs the rest', () => {
+  for (const name of ['stale', 'traces']) assert.equal(require('../scripts/toolkit-controller-check.cjs').CHECKS.includes(name), false, name);
   const { code, text, calls } = run([...ALL, '--skip', 'programme,traces,stale,ci']);
   assert.equal(code, 0);
-  assert.equal(text, 'CONTROLLER CHECK: clear (ok: guidebook instructions memory tasks owner-lines footer refs; skipped: toolkit programme traces ci)\n');
+  assert.equal(text, 'CONTROLLER CHECK: clear (ok: guidebook instructions memory tasks owner-lines footer refs; skipped: toolkit programme ci)\n');
   assert.equal(calls.some(call => call.gh), false, 'no GitHub read of its own');
+});
+
+// Decision records are comments found by `programme.cjs trace`; the body-index audit is retired (the
+// reconcile pass no longer runs it). A daily check-in relayed its "72 unlinked decision comments" to the
+// controller as work. The controller check never runs that audit, so nothing raises it.
+test('the retired decision-trace audit never runs, so unlinked decision comments are never raised', () => {
+  for (const argv of [ALL, [...ALL, '--expand'], ['--host', 'projects', '--checkout', '/repo', '--repo', 'acme/app', '--skip', 'guidebook,instructions,memory,tasks,programme,footer,refs']]) {
+    const { text, calls } = run(argv);
+    assert.equal(calls.some(call => /decision-trace-audit/.test(String(call.script))), false, argv.join(' '));
+    assert.doesNotMatch(text, /unlinked decision|decision traces|traces/, argv.join(' '));
+  }
+  assert.equal(Object.values(SCRIPTS).some(script => /decision-trace-audit/.test(script)), false);
 });
 
 // #1242 S4: the owner's own lines are linted on any host, against the controller settings when given,
