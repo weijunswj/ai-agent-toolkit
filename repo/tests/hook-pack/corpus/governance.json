@@ -3950,6 +3950,32 @@
       "status": "pass"
     },
     {
+      "id": "ASK.desktop-merge-waits-for-running-checks",
+      "source": "owner UAT 28 Nov 2026: the turn-on pull request's checks were still running, so the agent asked its own merge question instead of running the merge",
+      "hosts": [
+        "claude"
+      ],
+      "event": "SessionStart",
+      "payload": {
+        "source": "startup"
+      },
+      "kind": "state",
+      "fixture": {
+        "repo": {
+          "governance": "enabled",
+          "name": "asking"
+        },
+        "entrypoint": "claude-desktop"
+      },
+      "expect": {
+        "decision": "allow",
+        "context_contains": [
+          "If its checks are still running, wait for them in one background wait, then run the merge; ask only if a check fails or the merge is refused for a reason other than the card."
+        ]
+      },
+      "status": "pass"
+    },
+    {
       "id": "ASK.desktop-form-left-to-app",
       "source": "owner decision 27 Nov 2026 (INT-TK421-1389): how a question shows (card, end-of-turn box or text) is the app's choice; the asking line steers no card",
       "hosts": [
@@ -3973,7 +3999,8 @@
           "2. Leave how the question shows (a card, the end-of-turn box or plain text) to the app."
         ],
         "context_excludes": [
-          "background wait",
+          "short background wait",
+          "automatic turn",
           "question card"
         ]
       },

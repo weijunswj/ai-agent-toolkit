@@ -260,7 +260,7 @@ function renderSummary(facts, { held = false } = {}) {
     top,
     '',
     ...steps.flatMap(step => [`**${step.part}:** ${step.text}`, '', ...(step.command ? [...fenced(step.command), ''] : [])]),
-    ...(steps.some(step => step.command) ? ['Say done when you have run them.', ''] : []),
+    ...(steps.some(step => step.command) ? [`Say done when you have run ${steps.filter(step => step.command).length === 1 ? 'it' : 'them'}.`, ''] : []),
     '| Part | State | What it does |',
     '|---|---|---|',
     ...rows.map(([part, state, does]) => `| ${cell(part)} | ${cell(state)} | ${cell(does)} |`),

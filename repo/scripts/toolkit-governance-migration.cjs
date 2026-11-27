@@ -325,7 +325,7 @@ class GovernanceMaintenance {
   #protectionFor(row) {
     const requiredChecks = governance.bindingRequiredChecks(row.root, this.#registryOptions);
     if (!requiredChecks) return null;
-    return { requiredChecks, result: protection.defaultBranchProtection(row.root, { requiredChecks, ...(this.#protectionReader ? { reader: this.#protectionReader } : {}) }) };
+    return { requiredChecks, result: protection.defaultBranchProtection(row.root, { requiredChecks, commit: row.state.merged?.commit, ...(this.#protectionReader ? { reader: this.#protectionReader } : {}) }) };
   }
 
   // What Toolkit's own ruleset fixes: a binding check that is not required, squash or rebase

@@ -360,9 +360,10 @@ test('K-01: check exit codes and read-only behaviour', async (t) => {
     // installed Toolkit gives its sessions the governed rules, so nothing asks to refresh it.
     conformant: [0, 'conformant', 'GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_LEFTOVER,TASK_AUTO_MERGE_UNSET'],
     // The other two checkouts share that read but not the commit it fetched, so their copies are not
-    // checked (an info note) until their own read fetches it.
-    stale: [0, 'conformant', 'CLOUD_WORKFLOWS_UNCHECKED,GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_LEFTOVER,TASK_AUTO_MERGE_UNSET'],
-    edited: [0, 'conformant', 'CLOUD_WORKFLOWS_UNCHECKED,GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_LEFTOVER,TASK_AUTO_MERGE_UNSET'],
+    // checked (an info note) until their own read fetches it, and nor are the jobs that produce the
+    // required checks, which are read at that commit, never from the checkout.
+    stale: [0, 'conformant', 'CLOUD_WORKFLOWS_UNCHECKED,GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_LEFTOVER,PROTECTION_MASKING_UNVERIFIED,PROTECTION_PRODUCER_UNVERIFIED,TASK_AUTO_MERGE_UNSET'],
+    edited: [0, 'conformant', 'CLOUD_WORKFLOWS_UNCHECKED,GOVERNANCE_APP_UNVERIFIED,GOVERNED_BLOCK_LEFTOVER,PROTECTION_MASKING_UNVERIFIED,PROTECTION_PRODUCER_UNVERIFIED,TASK_AUTO_MERGE_UNSET'],
     // Before governance is decided, a governed block is a leftover copy too (an info note).
     unasked: [1, 'drift', 'DECISION_PENDING,GOVERNED_BLOCK_LEFTOVER'],
     incomplete: [1, 'drift', 'DECISION_PENDING,GOVERNED_BLOCK_LEFTOVER'],

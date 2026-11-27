@@ -89,6 +89,8 @@ test('publication discovers, writes once and reads back; another chat sees the p
   const request = f.owner.request(f.cwd, 'no', run);
   // The agent runs the merge in the same turn so the merge hold is the only ask, never a question of its own first.
   assert.match(f.owner.publish(f.cwd, request.run).text, /run its merge in the same turn: Toolkit's merge hold asks the owner, so ask no merge question of your own first\./);
+  // Checks still running are waited for, never a reason to ask (owner UAT, 28 November 2026).
+  assert.match(f.owner.publish(f.cwd, request.run).text, /ask no merge question of your own first\. If its checks are still running, wait for them in one background wait, then run the merge; ask only if a check fails or the merge is refused for a reason other than Toolkit's merge card\. This answer grants no merge permission\./);
   f.owner.publish(f.cwd, request.run);
   assert.equal(writes, 1);
   assert.equal(f.owner.pending(f.cwd, { ...run, sessionId: 'new-chat' }).kind, 'published');
@@ -169,6 +171,8 @@ test('a failed publication readback never reports success or activates the propo
   const request = f.owner.request(f.cwd, 'no', run);
   assert.throws(() => f.owner.publish(f.cwd, request.run), /READBACK_FAILED/);
   assert.equal(f.owner.pending(f.cwd, run).kind, 'preparing');
+  // The off decision's merge runs once its checks pass, with no question of the agent's own meanwhile.
+  assert.match(f.owner.pending(f.cwd, run).text, /Toolkit's merge hold asks the owner\. If its checks are still running, wait for them in one background wait, then run the merge; ask only if a check fails or the merge is refused for a reason other than Toolkit's merge card\./);
   assert.equal(governance.governanceState(f.cwd, f.registryOptions).programme_records_bind, false);
   assert.equal(fs.existsSync(f.registryPath), false);
 });

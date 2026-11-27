@@ -76,4 +76,12 @@ function recordAbsent(repo, { home = governedHome(), registryPath = null } = {})
     default_branch: 'main', commit: '0'.repeat(40), fetched_at: new Date().toISOString(), status: 'absent', text: null, bytes_sha256: null, problem: null,
   });
 }
-module.exports = Object.freeze({ governedHome, makeGoverned, recordEnabled, recordMerged, recordAbsent });
+// Commits the test repository's working tree and returns that commit, for a fixture whose merged
+// default branch must hold its files: the protection check reads workflows at the merged commit.
+function commitFixture(repo) {
+  const git = args => require('node:child_process').execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', windowsHide: true }).trim();
+  git(['add', '--all']);
+  git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com', '-c', 'commit.gpgsign=false', 'commit', '--quiet', '--allow-empty', '-m', 'merged']);
+  return git(['rev-parse', 'HEAD']);
+}
+module.exports = Object.freeze({ governedHome, makeGoverned, recordEnabled, recordMerged, recordAbsent, commitFixture });

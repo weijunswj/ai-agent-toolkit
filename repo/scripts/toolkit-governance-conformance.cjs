@@ -156,6 +156,7 @@ function settingsReads(state, options = {}, toolkitRoot = ROOT) {
   if (requiredChecks) {
     protectionResult = protection.defaultBranchProtection(state.root, {
       requiredChecks,
+      commit: state.merged?.commit,
       offline: options.offline === true,
       ...(options.protectionReader ? { reader: options.protectionReader } : {}),
     });

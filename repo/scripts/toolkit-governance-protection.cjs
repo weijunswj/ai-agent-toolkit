@@ -32,8 +32,8 @@
 //
 // P1, P2, P5 and P6 ask GitHub through the signed-in `gh` CLI (GET /repos/{slug}, the active rules for
 // the default branch, classic branch protection, which needs admin, and the repository's rulesets,
-// to find the one Toolkit names); P3 and P4 read the
-// checked-out workflow files. `--offline` checks P3 and P4 only. Nothing here writes, except
+// to find the one Toolkit names); P3 and P4 read the workflow files at the merged default-branch
+// commit the binding was read from (readMergedWorkflows). `--offline` checks P3 and P4 only. Nothing here writes, except
 // `ghProtectionRulesetWriter`, which only `toolkit governance migrate` calls after the owner's typed
 // yes; it creates or updates the one ruleset Toolkit names and never touches any other.
 //
@@ -49,8 +49,6 @@
 // statuses a step posts with a token that can write them, are not counted.
 
 const childProcess = require('node:child_process');
-const fs = require('node:fs');
-const path = require('node:path');
 
 const { resolvePathExecutable } = require('./claude-process-launch.cjs');
 const governance = require('./toolkit-governance-state.cjs');
@@ -487,19 +485,30 @@ function readWorkflow(input) {
   return { triggers, jobs, problems };
 }
 
-// Every workflow under .github/workflows at `root`: [{ file, workflow }] or [{ file, error }].
-function readWorkflows(root) {
-  const directory = path.join(root, '.github', 'workflows');
-  let names = [];
-  try { names = fs.readdirSync(directory).filter(name => /\.ya?ml$/i.test(name)).sort(); } catch { names = []; }
-  return names.map(name => {
+// Every workflow under .github/workflows at `commit`, the default-branch head the merged binding was
+// read from: [{ file, workflow }] or [{ file, error }]. Never the working tree: governance pull
+// requests merge on GitHub and leave the checkout as it was, so the working tree can lack a workflow
+// the default branch has: right after the turn-on merge, the finish said plain-text and personal-data
+// had no producing job (owner UAT, 28 November 2026). The refresh fetched that commit, so this reads
+// locally, with the binding reader's git runner (its PATH git, never one in the repository). null when
+// the commit cannot be read here.
+function readMergedWorkflows(root, commit, { runGit = require('./toolkit-governance-binding.cjs').defaultRunGit } = {}) {
+  if (typeof root !== 'string' || !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(String(commit || ''))) return null;
+  const git = args => { try { return runGit(args, { cwd: root, timeout: GH_TIMEOUT_MS }); } catch { return null; } };
+  const listed = git(['-c', 'core.quotePath=false', 'ls-tree', '-l', '-z', commit, '--', '.github/workflows/']);
+  if (!listed || listed.status !== 0) return null;
+  const found = [];
+  for (const record of String(listed.stdout).split('\0').filter(Boolean)) {
+    const entry = /^(\d{6}) (\w+) ([0-9a-f]{40,64}) +(-|\d+)\t\.github\/workflows\/([^/]+)$/.exec(record);
+    if (!entry) return null;
+    const [, mode, type, object, size, name] = entry;
+    if (!/\.ya?ml$/i.test(name)) continue;
     const file = `.github/workflows/${name}`;
-    try {
-      const stat = fs.statSync(path.join(directory, name));
-      if (!stat.isFile() || stat.size > MAX_WORKFLOW_BYTES) return { file, error: 'unreadable' };
-      return { file, workflow: readWorkflow(fs.readFileSync(path.join(directory, name), 'utf8')) };
-    } catch { return { file, error: 'unreadable' }; }
-  });
+    if (type !== 'blob' || !/^1006(?:44|55)$/.test(mode) || Number(size) > MAX_WORKFLOW_BYTES) { found.push({ file, error: 'unreadable' }); continue; }
+    const blob = git(['cat-file', 'blob', object]);
+    found.push(blob && blob.status === 0 ? { file, workflow: readWorkflow(String(blob.stdout)) } : { file, error: 'unreadable' });
+  }
+  return found.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
 }
 
 function globMatches(pattern, value) {
@@ -800,9 +809,10 @@ function localDefaultBranch(root) {
 }
 
 // { status: conformant | drift | unverified | not-enforceable | not-applicable, reason, checks: { P1..P6 } }
-// for the repository at `root`. Options: `requiredChecks` (from the binding), `offline`, `reader(slug)`
-// (tests).
-function defaultBranchProtection(root, { requiredChecks = [], offline = false, reader = ghProtectionReader } = {}) {
+// for the repository at `root`. Options: `requiredChecks` (from the binding), `commit` (the merged
+// default-branch head the binding was read from: the workflows are read there), `offline`,
+// `reader(slug)` and `runGit` (tests).
+function defaultBranchProtection(root, { requiredChecks = [], commit = null, offline = false, reader = ghProtectionReader, runGit } = {}) {
   let identity;
   try { identity = governance.readIdentity(root); } catch { return verdict('unverified', 'identity-unreadable'); }
   const slug = identity.valid ? governance.remoteSlug(identity.remote) : null;
@@ -813,7 +823,9 @@ function defaultBranchProtection(root, { requiredChecks = [], offline = false, r
     try { read = reader(slug); } catch { read = { ok: false, reason: 'reader-failed' }; }
   }
   const defaultBranch = read && read.ok ? read.default_branch : localDefaultBranch(root);
-  const checks = { ...producerVerdict(requiredChecks, readWorkflows(root), defaultBranch) };
+  const merged = readMergedWorkflows(root, commit, runGit ? { runGit } : {});
+  const workflows = merged || [{ file: `the default branch's workflows${/^[0-9a-f]{7}/i.test(String(commit || '')) ? ` at ${String(commit).slice(0, 7)}` : ''}`, error: 'unreadable' }];
+  const checks = { ...producerVerdict(requiredChecks, workflows, defaultBranch) };
   if (offline) {
     for (const id of SETTINGS_CHECKS) checks[id] = { status: 'not-checked', details: ['offline'] };
   } else if (!read || read.ok !== true) {
