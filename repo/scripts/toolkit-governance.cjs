@@ -706,7 +706,7 @@ class ToolkitGovernanceCli {
       requiredChecks: merged?.required_checks || [],
       finish, drift,
       files: this.#mergedFiles(state),
-      shards: shardsRow ? `${shardsRow.current_short || shardsRow.current}` : null,
+      shards: shardsRow ? shardsState(shardsRow) : null,
       permissions: { ...permissions, app: permissions.app || governanceBank.APP_NAMES[permissions.host] },
       app,
       appCommand: state.repository ? governanceApp.setupCommand(state.repository, store) : null,
@@ -764,9 +764,7 @@ class ToolkitGovernanceCli {
   // One binding pull request for the owner's sharded CI answer, built from the exact merged text: it
   // sets ci_shards (answer, offered_at) and, for yes, adds a first shard list when the repository has
   // none. It waits while a pinned Toolkit copy here would read the key as invalid.
-  // `changes` are switch changes from the same answer ({ auto_merge, merge_train }), which join this
-  // one pull request, so the two never conflict.
-  #prepareCiShards(root, answer, changes = {}) {
+  #prepareCiShards(root, answer) {
     if (!this.#switchTransport) throw new GovernanceCliError('GitHub cannot be reached from here, so no pull request was prepared. Nothing was written.');
     const ready = this.#ciReaders(root);
     if (!ready.ok) throw new GovernanceCliError(`The parallel CI shards answer was not prepared: ${ready.reason}. Nothing was written.`);
@@ -777,8 +775,7 @@ class ToolkitGovernanceCli {
     if (!parsed || parsed.schema !== 'toolkit.programme-binding.v2' || parsed.governance !== 'enabled') throw new GovernanceCliError('The merged binding is not an enabled version 2 binding, so the answer cannot be recorded yet. Nothing was written.');
     const value = { answer, offered_at: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z') };
     const kept = withoutRetired(entry.text, parsed);
-    const switched = Object.keys(changes).length ? { ...kept.binding, task_prs: { ...(kept.binding.task_prs || {}), ...changes } } : kept.binding;
-    const proposal = { ...switched, ci_shards: value };
+    const proposal = { ...kept.binding, ci_shards: value };
     if (governance.bindingProblems(proposal, identity).length) throw new GovernanceCliError('The changed binding would not be valid, so no pull request was prepared. Nothing was written.');
     const lines = [];
     let list = null;
@@ -792,8 +789,7 @@ class ToolkitGovernanceCli {
     }
     let prepared;
     try {
-      const base = Object.keys(changes).length ? switchText(kept.text, kept.binding, changes) : kept.text;
-      prepared = this.#switchTransport.publishCiShards(proposal.repository, entry.text, ciOffer.ciShardsText(base, switched, value), answer, list, changes);
+      prepared = this.#switchTransport.publishCiShards(proposal.repository, entry.text, ciOffer.ciShardsText(kept.text, kept.binding, value), answer, list);
     } catch (error) {
       throw new GovernanceCliError(error.code === 'SWITCH_BASE_CHANGED'
         ? `The binding on the default branch changed since this computer read it. Run ${CMD('status')}, then ask again. Nothing was written.`
@@ -1141,6 +1137,15 @@ function switchText(mergedText, parsed, changes) {
 
 // The bank's view of a cleanup preview: the files it would remove, why the pinned sweep copies hold
 // it, or why the programme file stops it; null when there is nothing to say.
+// The summary's parallel CI shards state. Where governance is on, nothing adds them unless the owner says
+// so: an offer reads as not set up, with the words that answer it.
+function shardsState(spec) {
+  const minutes = spec.estimateShort ? ` (${spec.estimateShort})` : '';
+  if (spec.shards_default === 'yes') return `Not set up${minutes}: say shards=yes to add them, or shards=never`;
+  if (spec.shards_default === 'not-now') return `${spec.current_short || spec.current}${minutes}; say shards=yes to add them anyway, or shards=never`;
+  return spec.current_short || spec.current;
+}
+
 function copiesRow(copies) {
   if (!copies) return null;
   if (copies.ok) return { files: copies.changes.filter(change => change.action !== 'set-min-toolkit').length };
