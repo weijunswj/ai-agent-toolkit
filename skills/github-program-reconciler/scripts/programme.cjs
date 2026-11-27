@@ -552,15 +552,6 @@ function cloudLayoutFindings(context, deps = {}) {
   } catch { return null; }
 }
 
-// Only a pass that ran the copy check raises or resolves CLOUD_LAYOUT_STALE. The check runs on the cloud
-// sweep alone (it compares the copies with the Toolkit that sweep runs), so a computer's pass, or a cloud
-// pass whose check could not run, carries an open finding forward: a pass that never looked once
-// resolved it minutes after each cloud pass raised it while the copies stayed stale.
-function layoutFindings(context, parentDoc, deps, host) {
-  const checked = host === 'cloud' ? cloudLayoutFindings(context, deps) : null;
-  if (Array.isArray(checked)) return checked;
-  return state.openFindings(parentDoc.attention).some(entry => entry.code === 'CLOUD_LAYOUT_STALE') ? ['CLOUD_LAYOUT_STALE'] : [];
-}
 
 function readParent(context) {
   const { doc } = context.store.read('parent', context.binding.parent_issue);
@@ -843,9 +834,13 @@ const commands = {
     // The pass reads what changed since its predecessor started, its saved queue and its rotation
     // share; a parent without a saved queue reads every task once.
     const lease = context.lease;
+    // The copy check runs on the cloud sweep alone (it compares the copies with the Toolkit that sweep
+    // runs); `layoutChecked` tells the reconcile whether this pass ran it, since only such a pass raises
+    // or resolves CLOUD_LAYOUT_STALE (programme-state.cjs planAttention holds it on any other).
+    const layout = lease?.host === 'cloud' ? cloudLayoutFindings(context, deps) : null;
     const queued = lease ? {
       since: parentDoc.sweep && lease.record.changed_since ? new Date(Date.parse(lease.record.changed_since) - SWEEP_OVERLAP_MS).toISOString() : null,
-      queue: parentDoc.sweep?.queue || [], pass: lease.record.pass, record: lease.record, findings: [...lease.findings(), ...layoutFindings(context, parentDoc, deps, lease.host)], host: lease.host,
+      queue: parentDoc.sweep?.queue || [], pass: lease.record.pass, record: lease.record, findings: [...lease.findings(), ...(layout || [])], layoutChecked: Array.isArray(layout), host: lease.host,
       // The board's stuck rule, counting this pass's own reads.
       stuck: read => lease.stuck(read),
       canRead: (pages, needsPage) => context.requests.canStartTask(pages, needsPage) && context.pass.left() > state.PAGE_RESERVE_MS + state.END_RESERVE_MS,

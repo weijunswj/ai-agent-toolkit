@@ -7355,6 +7355,11 @@ class Reconciler {
     const sweep = observed.sweep;
     // Only a sweep pass can tell that the sweep is no longer stuck.
     const sweepStuckHolds = sweep ? [] : openFindings(parent.attention).filter(entry => entry.code === 'SWEEP_STUCK').map(entry => entry.id);
+    // Only a pass that ran the copy check (the cloud sweep, queued.layoutChecked) raises or resolves
+    // CLOUD_LAYOUT_STALE; every other pass, a computer's sweep, a cloud pass whose check failed and the
+    // controller's reconcile --apply, holds it as it is. Otherwise each such pass resolved it minutes
+    // after a cloud pass raised it, while the copies stayed stale.
+    const layoutHolds = this.queued?.layoutChecked ? [] : openFindings(parent.attention).filter(entry => entry.code === 'CLOUD_LAYOUT_STALE').map(entry => entry.id);
     const tasks = new Set(parent.outcomes.map(outcome => outcome.issue));
     // Open-pull-request findings are left out: their issue slot is a pull request, decided from the open
     // list and the stored documents, never from a task's own read (diffOpenPrs holds what it could not read).
@@ -7362,7 +7367,7 @@ class Reconciler {
       : sweep && (!sweep.changedComplete || sweep.left.length || sweep.failed.length))).map(entry => entry.id);
     if (!override) folds.push({ source: 'reconcile', complete: !only, seen: seen(),
       hold: [...this.oneTimeHolds(parent.attention, projected), ...incompletePrHolds,
-        ...refreshHolds, ...unreadOpenPrHolds, ...adoptionHolds, ...stoppedHolds, ...sweepStuckHolds, ...unread, ...(this.closeDueHolds || []), ...(this.openPrHolds || []), ...(observed.prGraph?.holdWithoutTask || []),
+        ...refreshHolds, ...unreadOpenPrHolds, ...adoptionHolds, ...stoppedHolds, ...sweepStuckHolds, ...layoutHolds, ...unread, ...(this.closeDueHolds || []), ...(this.openPrHolds || []), ...(observed.prGraph?.holdWithoutTask || []),
         ...(parent.attention || []).filter(entry=>entry.code==='CLOSING_COMMENT_MISSING' && !observed.closing?.checked.has(`${entry.kind}:${entry.issue}`)).map(entry=>entry.id)] });
     if (inventory) folds.push({ source: 'inventory', complete: inventory.complete, seen: inventory.findings });
     if (!folds.length) return;

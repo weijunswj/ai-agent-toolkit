@@ -221,4 +221,8 @@ test('a required check with no run yet at a new main head counts as running, unt
   assert.ok(waits.problems.some(problem => /^main's required checks are still running at /.test(problem)), waits.problems.join('\n'));
   const lands = train.run(['land', '--manifest', first.out, '--pr', '50', '--head', first.result.head, '--main', 'main', '--live', live(old)], f.repo, f.opts);
   assert.ok(!lands.problems.some(problem => /main's required checks/.test(problem)), lands.problems.join('\n'));
+  // G2 round 1, L-a: with no required check listed and no run at all yet, a new head counts as running too.
+  f.governed(null, { required_checks: [] });
+  assert.equal(find(f, facts(f, { ready: [[2, two]], main: [], committedAt: fresh })).result.main_ci, 'running');
+  assert.match(find(f, facts(f, { ready: [[2, two]], main: [], committedAt: old })).result.next[0], /merge #2 alone/);
 });

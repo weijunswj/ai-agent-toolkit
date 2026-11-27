@@ -737,6 +737,28 @@ test('cloud sweep: only a pass that ran the copy check resolves CLOUD_LAYOUT_STA
   assert.equal(finding()?.state, 'resolved', 'a resolved finding is not carried');
 });
 
+// G2 round 1, M1 (probe A): the controller's full reconcile --apply runs no lease and no copy check, and
+// it resolved the open finding too. It holds the finding as it is, an acknowledgement included.
+test('cloud sweep: the controller\'s reconcile --apply leaves an open CLOUD_LAYOUT_STALE as it is', t => {
+  const f = fixture(t);
+  const finding = () => (f.store.read('parent', 421).doc.attention || []).find(entry => entry.code === 'CLOUD_LAYOUT_STALE');
+  assert.equal(f.run({ cloud: true, cloudLayoutFindings: () => ['CLOUD_LAYOUT_STALE'] }).code, 0);
+  assert.equal(finding()?.state, 'new');
+  f.advance(HOUR);
+  const applied = f.run({ argv: ['reconcile', '--apply', '--controller', '--session', controller.session, '--json'], cloudLayoutFindings: () => assert.fail('reconcile --apply does not check') });
+  assert.equal(applied.code, 0, applied.output);
+  assert.equal(finding()?.state, 'new', 'a pass that never ran the copy check leaves it open');
+  f.advance(HOUR);
+  assert.equal(f.run({ argv: ['ack', '--finding', finding().id, '--next', 'open the refresh pull request', '--controller', '--session', controller.session, '--json'] }).code, 0);
+  f.advance(HOUR);
+  assert.equal(f.run({ argv: ['reconcile', '--apply', '--controller', '--session', controller.session, '--json'] }).code, 0);
+  assert.equal(finding()?.state, 'acknowledged', 'the acknowledgement stays');
+  // Only the cloud check that finds nothing stale settles it.
+  f.advance(HOUR);
+  assert.equal(f.run({ cloud: true, cloudLayoutFindings: () => [] }).code, 0);
+  assert.equal(finding()?.state, 'resolved');
+});
+
 // The real check: pinned or stale copies raise it, current copies and the Toolkit itself do not.
 test('cloud sweep: the layout check compares the copies with a render from the Toolkit the sweep runs', t => {
   const workflows = require(path.join(ROOT, 'repo/scripts/toolkit-cloud-workflows.cjs'));

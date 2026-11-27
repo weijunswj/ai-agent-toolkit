@@ -154,10 +154,12 @@ function missingChecks(runs, required) {
 
 // Whether main's CI is still running: a required check (every check when none is required) whose
 // latest run at the default branch's head has not completed, or that has no run there yet while main's
-// head is new (mainCheckMayStart, issue-closure.cjs).
+// head is new (mainCheckMayStart, issue-closure.cjs). With none required and no run at all yet, a new
+// head counts as running too.
 function mainRunning(runs, required, { committedAt = null, now = Date.now() } = {}) {
   const names = required.length ? required : [...new Set(runs.map(run => run.name))];
   const mayStart = mainCheckMayStart(committedAt, now);
+  if (!names.length) return mayStart;
   return names.some(name => {
     const latest = runs.filter(run => run.name === name).sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0];
     return latest ? latest.status !== 'completed' : mayStart;
