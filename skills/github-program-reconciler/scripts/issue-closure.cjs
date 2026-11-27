@@ -80,6 +80,18 @@ function mergeTrainMembers(body) {
   const rows = mergeTrainRows(body);
   return rows ? rows.map(row => row.pr) : null;
 }
+// GitHub makes a push's check runs a little after the commit lands, so right after a merge a required
+// check can have no run at main's head yet. For this long after main's head was committed such a check
+// counts as running (the merge train's find and land, and the sweep's boarding check); after it, a
+// required check with no run there (one that runs on pull requests only) is not running. A head with
+// no readable commit time is past the window.
+const MAIN_CHECKS_GRACE_MS = 10 * 60 * 1000;
+// Whether a required check with no run at main's head may still start: main's head was committed
+// (`committedAt`, an ISO time) less than MAIN_CHECKS_GRACE_MS before `now`.
+function mainCheckMayStart(committedAt, now = Date.now()) {
+  const at = Date.parse(String(committedAt || ''));
+  return Number.isFinite(at) && now - at < MAIN_CHECKS_GRACE_MS;
+}
 // A table alone proves nothing. A member was carried by a merged train only when GitHub marked it
 // merged with the train (an indirect merge lands seconds after it), and by an open train only while
 // that member is open at the exact head the table names.
@@ -407,4 +419,4 @@ class IssueClosureGuard {
     } catch (error) { return unknown(`PR metadata or commits could not be read completely. ${error.message} Retry with a current explicit PR and head.`); }
   }
 }
-module.exports = { closingReferences, owedUat, mergeTrainRows, mergeTrainMembers, patchChanges, trainCarried, TRAIN_MERGE_WINDOW_MS, IssueClosureGuard };
+module.exports = { closingReferences, owedUat, mergeTrainRows, mergeTrainMembers, mainCheckMayStart, patchChanges, trainCarried, TRAIN_MERGE_WINDOW_MS, IssueClosureGuard };

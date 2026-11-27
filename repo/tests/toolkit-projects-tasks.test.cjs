@@ -900,6 +900,14 @@ test('--rebind prints the new BINDING line and what changed in CONTROLLER.md, or
   assert.deepEqual(wide.lines.filter(entry => entry.startsWith('CHANGED BY: ')).sort(),
     [`CHANGED BY: ${changed.commit.slice(0, 7)} Launches read the route back`, `CHANGED BY: ${side.commit.slice(0, 7)} Merges read back`].sort());
   assert.equal(wide.lines.some(entry => entry.startsWith('CHANGED BY: ') && entry.includes(merged.slice(0, 7))), false, 'no merge commit');
+  // More changes than CHANGED BY lists: the "more" line's command leaves merges out too, so it lists
+  // exactly the listed changes plus the count it names.
+  for (let index = 0; index < 10; index += 1) commit({ 'repo/CONTROLLER.md': `# Controller\n\n## Launches\n- Launch only on a pinned route, take ${index}.\n\n## Merges\n- Merge on the owner's OK, read back.\n` }, `Launch wording ${index}`);
+  const many = rebind(`${bindingLine(first.commit, first.blob)}\n`);
+  const more = many.lines.filter(entry => / more \(/.test(entry));
+  assert.deepEqual(more, [`CHANGED BY: 2 more (git log --no-merges ${first.commit.slice(0, 7)}..HEAD -- repo/CONTROLLER.md)`]);
+  const hinted = /\(git (log .*)\)$/.exec(more[0])[1].split(' ');
+  assert.equal(git(hinted[0], '--format=%H', ...hinted.slice(1)).split('\n').filter(Boolean).length, 10 + 2, 'the hint lists the listed ten and the two more');
   // A shallow clone that lacks the bound blob: the unshallow advice, once.
   const shallow = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'tk-rebind-shallow-'));
   t.after(() => fs.rmSync(shallow, { recursive: true, force: true }));

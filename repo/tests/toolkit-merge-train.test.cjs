@@ -205,8 +205,7 @@ test('once the running train lands, catchup merges main into the stacked train, 
   // Main moving under the stacked train refuses catch-up until the running train is in.
   f.git('switch', '--quiet', 'main');
   f.git('merge', '--quiet', '--no-ff', '--no-edit', first.result.head);
-  f.git('switch', '--quiet', 'toolkit-train/two');
-  const caught = train.catchup(f.repo, manifest, { main: 'main', out });
+  const caught = train.catchup(f.repo, manifest, { main: 'main', out, branch: 'toolkit-train/two' });
   assert.equal(caught.ok, true, JSON.stringify(caught));
   assert.equal(JSON.parse(fs.readFileSync(out, 'utf8')).stacked, undefined, 'catchup drops the stacked mark');
   assert.equal(caught.level, 'minor');
@@ -214,20 +213,21 @@ test('once the running train lands, catchup merges main into the stacked train, 
   assert.equal(f.git('show', `${caught.head}:VERSION`), '1.1.0', 'the bump runs on top of the landed train');
   assert.equal(f.git('show', '-s', '--format=%P', `${caught.head}~1`).split(' ')[1], f.git('rev-parse', 'main'), 'main came in as one merge commit');
   assert.equal(f.git('status', '--porcelain'), '');
+  assert.equal(f.git('rev-parse', 'toolkit-train/two'), caught.head, 'the train branch moved forward');
+  assert.equal(f.git('rev-parse', '--abbrev-ref', 'HEAD'), 'main', 'the caller\'s checkout stays on its branch');
   const checked = train.run(['verify', '--manifest', out, '--head', 'toolkit-train/two', '--main', 'main'], f.repo, f.opts);
   assert.equal(checked.ok, true, JSON.stringify(checked));
   const live = path.join(f.root, 'live.json');
   fs.writeFileSync(live, JSON.stringify({ 9: { state: 'OPEN', head: caught.head, body: MEMBER_BODY }, 2: { state: 'OPEN', head: two, body: MEMBER_BODY } }));
   const landing = train.run(['land', '--manifest', out, '--pr', '9', '--head', caught.head, '--main', 'main', '--live', live], f.repo, f.opts);
   assert.equal(landing.ok, true, JSON.stringify(landing));
-  assert.throws(() => train.catchup(f.repo, manifest, { main: 'main' }), /main is already inside the train/);
+  assert.throws(() => train.catchup(f.repo, manifest, { main: 'main', branch: 'toolkit-train/two' }), /main is already inside the train/);
   // A train that already carries its bump never takes a second one.
   f.git('switch', '--quiet', 'main');
   f.write('e.txt', 'e\n');
   f.git('add', 'e.txt');
   f.git('commit', '--quiet', '-m', 'main moves again');
-  f.git('switch', '--quiet', 'toolkit-train/two');
-  assert.throws(() => train.catchup(f.repo, manifest, { main: 'main' }), /already carries its bump: only a stacked train/);
+  assert.throws(() => train.catchup(f.repo, manifest, { main: 'main', branch: 'toolkit-train/two' }), /already carries its bump: only a stacked train/);
 });
 
 test('a failed catch-up bump leaves the train at its pre-merge head, and verify refuses a train with no bump', t => {
@@ -243,13 +243,12 @@ test('a failed catch-up bump leaves the train at its pre-merge head, and verify 
   assert.ok(early.problems.some(problem => /the train has no bump commit/.test(problem)), early.problems.join('\n'));
   f.git('switch', '--quiet', 'main');
   f.git('merge', '--quiet', '--no-ff', '--no-edit', first.result.head);
-  f.git('switch', '--quiet', 'toolkit-train/two');
-  const before = f.git('rev-parse', 'HEAD');
+  const before = f.git('rev-parse', 'toolkit-train/two');
   const broken = { ...JSON.parse(fs.readFileSync(out, 'utf8')), bump_command: 'node scripts/missing-bump.cjs {level}' };
-  const caught = train.catchup(f.repo, broken, { main: 'main' });
+  const caught = train.catchup(f.repo, broken, { main: 'main', branch: 'toolkit-train/two' });
   assert.equal(caught.ok, false);
   assert.match(caught.problems[0], /the bump command failed/);
-  assert.equal(f.git('rev-parse', 'HEAD'), before, 'the catch-up merge is undone with the failed bump');
+  assert.equal(f.git('rev-parse', 'toolkit-train/two'), before, 'the branch does not move: the catch-up merge goes with the failed bump');
   assert.equal(f.git('status', '--porcelain'), '');
 });
 
@@ -263,12 +262,11 @@ test('catchup refuses a main that clashes with the stacked train and leaves the 
   f.git('switch', '--quiet', 'main');
   f.write('a.txt', 'one\nTWO on main\nthree\n');
   f.git('commit', '--quiet', '-am', 'clash on main');
-  f.git('switch', '--quiet', 'toolkit-train/two');
-  const before = f.git('rev-parse', 'HEAD');
-  const caught = train.catchup(f.repo, JSON.parse(fs.readFileSync(out, 'utf8')), { main: 'main' });
+  const before = f.git('rev-parse', 'toolkit-train/two');
+  const caught = train.catchup(f.repo, JSON.parse(fs.readFileSync(out, 'utf8')), { main: 'main', branch: 'toolkit-train/two' });
   assert.equal(caught.ok, false);
   assert.match(caught.problems[0], /does not merge cleanly into the train: eject the clashing member/);
-  assert.equal(f.git('rev-parse', 'HEAD'), before);
+  assert.equal(f.git('rev-parse', 'toolkit-train/two'), before);
   assert.equal(f.git('status', '--porcelain'), '');
 });
 

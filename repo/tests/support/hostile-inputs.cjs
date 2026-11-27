@@ -233,28 +233,44 @@ function indent(text, spaces) {
 // A large-input check: times fn(build(size)) and fn(build(size * 4)), growing size until the
 // smaller run takes at least minMs or the larger would pass maxSize, and fails when the time grows
 // by more than maxRatio (linear work grows about fourfold, quadratic about sixteenfold).
-// The larger size stops repeating once a run is within the limit, so a linear reader is timed
-// once there. clock returns monotonic bigint nanoseconds (real time by default).
+// The two sizes are then timed in turn, a pair per run: four back-to-back smaller runs as one
+// sample (its time per run is what counts), then one larger run. Linear work makes both samples
+// about the same length, so a busy machine that preempts long samples slows both alike; a short
+// smaller sample alone could dodge the preemption the larger one cannot, and read as growth.
+// Each size keeps its best sample over at least two pairs, so one pause of the machine, which
+// slows at most one sample, can neither fail linear work nor pass quadratic work. After two pairs
+// they stop once the larger run is within the limit, so a linear reader is timed twice there.
+// clock returns monotonic bigint nanoseconds (real time by default).
 // Returns { ok, ratio, size, times, message }.
 function timing(fn, build, { startSize = 1024, maxSize = 1 << 20, minMs = 20, maxRatio = 10, runs = 3, clock = () => process.hrtime.bigint() } = {}) {
-  const time = (size, count, enough = -1) => {
-    const input = build(size);
-    let best = Infinity;
-    for (let run = 0; run < count && best > enough; run += 1) {
-      const started = clock();
-      fn(input);
-      best = Math.min(best, Number(clock() - started) / 1e6);
-    }
-    return best;
+  const sample = (input, calls) => {
+    const started = clock();
+    for (let call = 0; call < calls; call += 1) fn(input);
+    return Number(clock() - started) / 1e6 / calls;
   };
-  time(startSize, 1);
+  const best = (input, count) => {
+    let fastest = Infinity;
+    for (let run = 0; run < count; run += 1) fastest = Math.min(fastest, sample(input, 1));
+    return fastest;
+  };
+  sample(build(startSize), 1);
   let size = startSize;
-  let small = time(size, runs);
-  while (small < minMs && size * 16 <= maxSize) {
+  let input = build(size);
+  let calibration = best(input, runs);
+  while (calibration < minMs && size * 16 <= maxSize) {
     size *= 4;
-    small = time(size, runs);
+    input = build(size);
+    calibration = best(input, runs);
   }
-  const large = time(size * 4, runs, Math.max(small, 0.5) * maxRatio);
+  const larger = build(size * 4);
+  let small = Infinity;
+  let large = Infinity;
+  let pairs = 0;
+  do {
+    small = Math.min(small, sample(input, 4));
+    large = Math.min(large, sample(larger, 1));
+    pairs += 1;
+  } while (pairs < runs && (pairs < 2 || large > Math.max(small, 0.5) * maxRatio));
   const ratio = large / Math.max(small, 0.5);
   const ok = large < minMs || ratio <= maxRatio;
   return { ok, ratio, size, times: [small, large], message: `size ${size} took ${small.toFixed(1)} ms, size ${size * 4} took ${large.toFixed(1)} ms (growth ${ratio.toFixed(1)}x, limit ${maxRatio}x)` };

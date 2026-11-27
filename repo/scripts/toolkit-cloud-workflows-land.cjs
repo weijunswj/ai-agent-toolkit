@@ -11,9 +11,10 @@
 // The route, in the order checked (the closure matrix its tests hold, toolkit-copies-carry.test.cjs):
 //   none      nothing to land: not governed, the Toolkit itself, or no open refresh pull request;
 //   hold      try again at a later turn: the merged binding was not read in the last 24 hours, or a
-//             GitHub read, the pull request's head or the named Toolkit commit cannot be read here;
+//             GitHub read, the repository's owner, the pull request's head or the named Toolkit
+//             commit cannot be read here;
 //   owner     the owner's typed merge, with the reason: task auto-merge is off, the repository's
-//             TOOLKIT_REF pins it to one Toolkit commit, or the copy proof fails (a byte differs, a
+//             TOOLKIT_REF (or its organization's, shared with it) pins it to one Toolkit commit, or the copy proof fails (a byte differs, a
 //             path a refresh does not write, a Toolkit commit not on main, the owner's settings);
 //   wait      a required check is still running: land at a later turn, nothing to ask;
 //   attention a required check failed or never ran: the controller finds out why (a copy that breaks
@@ -106,6 +107,16 @@ class RefreshLanding {
     if (answer?.auto_merge !== 'after-gates' || answer?.fresh !== true) return done('owner', `Task auto-merge is off for ${repository}, so refresh pull request #${pr.number} waits for the owner's typed merge.`, facts);
     try { pin = this.#github(`repos/${repository}/actions/variables/TOOLKIT_REF`, { missing: true }); } catch { return done('hold', 'The repository\'s TOOLKIT_REF variable could not be read; try again at a later turn.', facts); }
     if (pin) return done('owner', `${repository} holds its Toolkit copies on one Toolkit commit (its TOOLKIT_REF variable is set), so refresh pull request #${pr.number} waits for the owner's typed merge.`, facts);
+    // The copies' `vars.TOOLKIT_REF` also reads an organization's variable shared with the repository
+    // (they name no environment, so no environment variable applies). A user's repository has none, and
+    // GitHub refuses that read there, so it is read for an organization's repository only.
+    const ownerType = pr.head?.repo?.owner?.type;
+    if (ownerType !== 'User' && ownerType !== 'Organization') return done('hold', `Who owns ${repository} could not be read; try again at a later turn.`, facts);
+    if (ownerType === 'Organization') {
+      const shared = this.#organizationPin(repository);
+      if (shared === null) return done('hold', 'The organization variables shared with the repository could not be read in full; try again at a later turn.', facts);
+      if (shared) return done('owner', `${repository} holds its Toolkit copies on one Toolkit commit (its organization's TOOLKIT_REF variable is shared with it), so refresh pull request #${pr.number} waits for the owner's typed merge.`, facts);
+    }
     if (!this.#fetchBranches(this.#root, [branch, this.#refresh.BRANCH])) return done('hold', `The pull request's head and ${branch} could not be fetched here; try again at a later turn.`, facts);
     const base = spawnSync('git', ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}^{commit}`], { cwd: this.#root, encoding: 'utf8', windowsHide: true }).stdout?.trim();
     if (!SHA.test(String(base || ''))) return done('hold', `${branch} could not be read here after the fetch; try again at a later turn.`, facts);
@@ -136,6 +147,21 @@ class RefreshLanding {
       ...facts, merge, commit: proof.commit, files: proof.files,
       notice: `Landed ${repository}#${pr.number}: its Toolkit copies (${proof.files.join(', ')}) now match Toolkit main at ${short}, under this repository's task auto-merge. To undo it, revert that merge in a pull request; to hold this repository on one Toolkit commit, set its TOOLKIT_REF variable; to stop automatic landings, merge an Off switch (refresh governance).`,
     });
+  }
+
+  // Whether an organization variable named TOOLKIT_REF is shared with `repository`: true, false, or null
+  // when a page cannot be read or there are more pages than it reads (30 variables to a page).
+  #organizationPin(repository) {
+    try {
+      for (let page = 1; page <= 10; page += 1) {
+        const read = this.#github(`repos/${repository}/actions/organization-variables?per_page=30&page=${page}`) || {};
+        const variables = Array.isArray(read.variables) ? read.variables : null;
+        if (!variables) return null;
+        if (variables.some(variable => String(variable?.name || '').toUpperCase() === 'TOOLKIT_REF')) return true;
+        if (variables.length < 30) return false;
+      }
+    } catch { return null; }
+    return null;
   }
 
   #requiredChecks() {

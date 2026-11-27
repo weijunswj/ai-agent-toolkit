@@ -55,7 +55,7 @@ test('with trains off, build, catchup and land refuse; verify, body and eject st
     f.governed(...binding);
     const off = /merge trains are off here \((repository-off|fresh-enabled-binding-required)\).*Merge each ready pull request alone/;
     assert.throws(() => train.run(['build', '--manifest', f.manifestFile({ members: [f.member(1, one)] }, 'again.json'), '--branch', 'toolkit-train/two', '--main', 'main'], f.repo, f.opts), off);
-    assert.throws(() => train.run(['catchup', '--manifest', out, '--main', 'main'], f.repo, f.opts), off);
+    assert.throws(() => train.run(['catchup', '--manifest', out, '--branch', 'toolkit-train/one', '--main', 'main'], f.repo, f.opts), off);
     assert.throws(() => train.run(['land', '--manifest', out, '--pr', '50', '--head', result.head, '--main', 'main', '--live', live], f.repo, f.opts), off);
     const cli = f.cli('land', '--manifest', out, '--pr', '50', '--head', result.head, '--main', 'main', '--live', live);
     assert.equal(cli.status, 1);
@@ -63,8 +63,7 @@ test('with trains off, build, catchup and land refuse; verify, body and eject st
     assert.equal(train.run(['verify', '--manifest', out, '--head', result.head, '--main', 'main'], f.repo, f.opts).ok, true);
     assert.equal(train.run(['body', '--manifest', out], f.repo, f.opts).ok, true);
   }
-  f.git('switch', '--quiet', 'toolkit-train/one');
-  assert.equal(train.run(['eject', '--manifest', out, '--pr', '2', '--reason', 'governance turned off', '--main', 'main'], f.repo, f.opts).ok, true);
+  assert.equal(train.run(['eject', '--manifest', out, '--branch', 'toolkit-train/one', '--pr', '2', '--reason', 'governance turned off', '--main', 'main'], f.repo, f.opts).ok, true);
 });
 
 test('a stale read of the binding asks for a fresh read, not a lone merge', t => {

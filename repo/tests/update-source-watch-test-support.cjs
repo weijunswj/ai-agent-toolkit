@@ -13,9 +13,10 @@ const repoRoot = path.resolve(__dirname, '..', '..');
 const helperPath = path.join(repoRoot, 'repo', 'scripts', 'update-source-watch-review-branch.sh');
 const branchName = 'source-watch/review-active-third-party-updates';
 const reportPath = 'repo/source-watch/reviews/active-third-party-updates.md';
-const bashPath = process.platform === 'win32'
-  ? ['C:\\Program Files\\Git\\bin\\bash.exe', 'C:\\Program Files\\Git\\usr\\bin\\bash.exe'].find((candidate) => fs.existsSync(candidate)) || 'bash'
-  : 'bash';
+// On Windows, Git Bash's launcher (bin\bash.exe), which puts Git's tool folders on PATH; the bare
+// usr\bin\bash.exe would not.
+const gitBashLauncher = 'C:\\Program Files\\Git\\bin\\bash.exe';
+const bashPath = process.platform === 'win32' && fs.existsSync(gitBashLauncher) ? gitBashLauncher : 'bash';
 
 function git(cwd, args, options = {}) {
   return execFileSync('git', args, {
@@ -40,20 +41,21 @@ function bashPathValue(value) {
   return `/${resolved[0].toLowerCase()}${resolved.slice(2).replace(/\\/g, '/')}`;
 }
 
-function bashSearchPath() {
-  if (process.platform !== 'win32') return process.env.PATH;
-  const result = spawnSync(bashPath, ['-lc', 'printf "%s" "$PATH"'], { encoding: 'utf8' });
-  if (result.status !== 0) throw new Error(result.stderr || 'Unable to read Git Bash PATH');
-  return result.stdout;
-}
-
-// The git the wrappers hand off to, as Git Bash itself finds it. On Windows, where.exe can return
-// C:\Program Files\Git\bin\git.exe, which cygpath maps to /bin/git.exe, a path Git Bash cannot
-// run because its /bin is usr\bin; asking bash avoids that translation.
-function realGitPath() {
+// The helper's bash gets this process's PATH, never a login shell's: Git Bash's launcher
+// (bin\bash.exe) already puts Git's own tool folders first. A login shell runs Git Bash's whole
+// profile and starts more processes on every helper run; on a busy Windows runner one ended after
+// 7.7 s with a failing status and no message.
+//
+// The git the wrappers hand off to, as Git Bash itself finds it, looked up once per test file. On
+// Windows, where.exe can return C:\Program Files\Git\bin\git.exe, which cygpath maps to /bin/git.exe,
+// a path Git Bash cannot run because its /bin is usr\bin; asking bash avoids that translation.
+function findRealGit() {
   if (process.platform === 'win32') {
-    const result = spawnSync(bashPath, ['-lc', 'command -v git'], { encoding: 'utf8' });
-    if (result.status !== 0 || !result.stdout.trim()) throw new Error(result.stderr || 'Git Bash cannot find git');
+    const result = spawnSync(bashPath, ['-c', 'command -v git'], { encoding: 'utf8', env: { PATH: process.env.PATH } });
+    if (result.status !== 0 || !result.stdout.trim()) {
+      const cause = result.error ? `, ${result.error.message}` : '';
+      throw new Error(`Git Bash cannot find git (status ${result.status}, signal ${result.signal}${cause}): ${result.stderr || 'no message'}`);
+    }
     return result.stdout.trim();
   }
   return execFileSync('which', ['git'], { encoding: 'utf8' })
@@ -61,6 +63,8 @@ function realGitPath() {
     .map((line) => line.trim())
     .find(Boolean);
 }
+const REAL_GIT = findRealGit();
+const realGitPath = () => REAL_GIT;
 
 function writeFile(filePath, content) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -336,7 +340,7 @@ function runHelper(fixture, options = {}) {
     cwd: fixture.work,
     encoding: 'utf8',
     env: {
-      PATH: bashSearchPath(),
+      PATH: process.env.PATH,
       SOURCE_WATCH_HELPER: bashPathValue(helperPath),
       ...(wrapper ? { SOURCE_WATCH_WRAPPER_PATH: bashPathValue(wrapper.wrapperDir) } : {}),
       BRANCH: branchName,
@@ -367,7 +371,6 @@ module.exports = Object.freeze({
   git,
   gitSha,
   bashPathValue,
-  bashSearchPath,
   realGitPath,
   writeFile,
   configureGit,
