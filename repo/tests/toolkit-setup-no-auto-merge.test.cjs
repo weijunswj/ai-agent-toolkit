@@ -120,6 +120,19 @@ test('no script, skill or plugin hook runs a pull request merge', () => {
         assert.doesNotMatch(source, /\bmethod\b|(?<![.\w])(?:spawn|exec|execFile|fork|execSync|execFileSync)\s*\(|\bimport\s*\(|\bfetch\s*\(|node:https?\b|enablePullRequestAutoMerge|merge\s+--auto\b|--auto-merge\b/i);
         continue;
       }
+      // The governance bank's Agents line after the turn-on tells the agent to merge the setup pull
+      // request through the merge hold, so the owner's own approval lands it; the bank never runs a
+      // merge. Proof: the command text appears only in that one template, as an instruction that names
+      // the merge hold, and the file starts no process and makes no network call.
+      if (path.relative(root, full).split(path.sep).join('/') === 'repo/scripts/toolkit-governance-bank.cjs') {
+        const source = fs.readFileSync(full, 'utf8').replace(/\r\n/g, '\n');
+        const named = source.split('\n').filter(line => /gh\s+pr\s+merge/i.test(line));
+        assert.equal(named.length, 1, 'one line names the merge command');
+        assert.ok(named[0].startsWith('const agentsAfterTurnOn = number => `Agents: this line is for you alone.'), 'it is the turn-on Agents line');
+        assert.match(named[0], /merge it with gh pr merge \$\{number\} --merge and do what Toolkit's merge hold says: the owner approves the merge there, never you\./);
+        assert.doesNotMatch(source, /child_process|(?<![.\w])(?:spawn|exec|execFile|fork|execSync|execFileSync|spawnSync)\s*\(|\bimport\s*\(|\bfetch\s*\(|node:https?\b|enablePullRequestAutoMerge|merge\s+--auto\b|--auto-merge\b/i);
+        continue;
+      }
       const text = fs.readFileSync(full, 'utf8');
       if (/gh\s+pr\s+merge|enablePullRequestAutoMerge|merge\s+--auto\b|--auto-merge\b/i.test(text)) hits.push(path.relative(root, full));
     }

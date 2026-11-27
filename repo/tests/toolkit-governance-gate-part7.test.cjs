@@ -66,8 +66,8 @@ test('a mark that can be neither replaced nor removed fails safe: an asked run f
     assert.match(start(`new-id-${index}`, 'resume', continued), /^[a-f0-9]{32}$/);
     const next = raw().decide({ cwd: continued, prompt: reply, sessionId: `B${index}` });
     assert.equal(asksIn(next), false, reply);
-    if (index === 0) assert.match(raw().answerTicket(ticketOf(next.context), 'yes').text, /question bank/);
-    else assert.match(next.context, /answered yes[\s\S]*question bank/, reply);
+    if (index === 0) assert.match(raw().answerTicket(ticketOf(next.context), 'yes').text, /guided setup/);
+    else assert.match(next.context, /answered yes[\s\S]*guided setup/, reply);
     assertAnswered(pending(continued, `B${index}`), 'yes', reply);
     assert.equal(stateOf(ctx, continued).state, 'UNDECIDED');
   }
@@ -78,7 +78,7 @@ test('a mark that can be neither replaced nor removed fails safe: an asked run f
   assert.ok(ticketOf(raw().decide({ cwd: later, prompt: 'later', sessionId: 'L' }).context));
   locked.add(markFile('r', stateOf(ctx, later).repository_id));
   start('agent-run', 'startup', later);
-  assert.match(raw().decide({ cwd: later, prompt: 'toolkit governance enable', sessionId: 'L' }).context, /answered yes[\s\S]*question bank/);
+  assert.match(raw().decide({ cwd: later, prompt: 'toolkit governance enable', sessionId: 'L' }).context, /answered yes[\s\S]*guided setup/);
   assert.equal(stateOf(ctx, later).state, 'UNDECIDED');
 });
 
@@ -98,7 +98,6 @@ test('every governance refusal and question an agent can see tells it never to a
     'answer script outside its exact command': shell(plain, `node "${gate.ANSWER_SCRIPT}" yes ${'0'.repeat(32)}`, 'user')?.deny,
     'question, text': first.context,
     'scheduled prompt while the reply is awaited': tools(ctx).decide({ tool_name: 'CronCreate', cwd: plain, session_id: 'user', tool_input: { prompt: 'yes' } })?.deny,
-    'card changed': tools(ctx).decide({ tool_name: 'AskUserQuestion', cwd: repo, session_id: 'user', tool_use_id: 'x', tool_input: { ...gate.PICKER_INPUT, answers: { [gate.PICKER_QUESTION]: 'Yes' } } })?.deny,
     'launched session, answer': launched('toolkit governance enable').reason,
     'session line, undecided': gate.sessionLine(repo, { registryOptions: ctx.options }),
   };
@@ -119,7 +118,7 @@ test('every governance refusal and question an agent can see tells it never to a
   hold(ctx).decide({ cwd: askedOnly, prompt: 'carry on', sessionId: 'asked-only' });
   texts['scheduled answer'] = tools(ctx).decide({ tool_name: 'RemoteTrigger', cwd: plain, session_id: 'asked-only', tool_input: { prompt: 'toolkit governance enable' } })?.deny;
   const fresh = gitRepo(ctx, 'fresh', { remote: 'https://github.com/example-owner/fresh.git' });
-  texts['question, card'] = new gate.PromptHold({ registryOptions: ctx.options, environment: {}, picker: true }).decide({ cwd: fresh, prompt: 'hello', sessionId: 'user' }).context;
+  texts['question, Claude Code'] = new gate.PromptHold({ registryOptions: ctx.options, environment: {} }).decide({ cwd: fresh, prompt: 'hello', sessionId: 'user' }).context;
   texts['no mark, work'] = raw().decide({ cwd: fresh, prompt: 'yes', sessionId: 'unmarked' }).context;
   texts['no mark, answer'] = raw().decide({ cwd: fresh, prompt: 'toolkit governance enable', sessionId: 'unmarked' }).reason;
   gate.startSession({ session_id: 'user', source: 'resume', cwd: fresh }, { registryOptions: ctx.options });
@@ -131,12 +130,12 @@ test('every governance refusal and question an agent can see tells it never to a
   assert.equal(claudeHook.NEVER_OWNER, gate.NEVER_OWNER);
   assert.equal(codexHook.NEVER_OWNER, gate.NEVER_OWNER);
   texts['Codex hook failure, prompt'] = codexHook.PROMPT_FAILED;
-  // The card's texts: a tap that does not count.
+  // A tap on a card the app chose to show: the reply ticket it gets.
   const cardRepo = gitRepo(ctx, 'card-texts', { remote: 'https://github.com/example-owner/card-texts.git' });
-  const picker = new gate.PromptHold({ registryOptions: ctx.options, environment: {}, picker: true });
+  const tapper = new gate.PromptHold({ registryOptions: ctx.options, environment: {} });
   gate.startSession({ session_id: 'card', source: 'startup' }, { registryOptions: ctx.options });
-  picker.decide({ cwd: cardRepo, prompt: 'hello', sessionId: 'card' });
-  texts['card tap not counted'] = picker.picked({ cwd: cardRepo, sessionId: 'card', toolUseId: 'never-noted', toolResponse: { questions: gate.PICKER_INPUT.questions, answers: { [gate.PICKER_QUESTION]: 'Yes' } } }).context;
+  tapper.decide({ cwd: cardRepo, prompt: 'hello', sessionId: 'card' });
+  texts['card tap reply'] = tapper.carded({ cwd: cardRepo, sessionId: 'card', toolResponse: { answers: { [gate.QUESTION_TEXT]: 'A. Yes' } } }).context;
   // A refusal shown to the user ends with the short line for agents; every other text with the whole line.
   const notices = ['no mark, answer'];
   for (const [name, text] of Object.entries(texts)) {
@@ -230,7 +229,7 @@ test('a damaged asked-runs file never stops work: the question is asked, the fil
     assert.ok(JSON.parse(fs.readFileSync(askedPath, 'utf8')).repositories[stateOf(ctx, repo).repository_id].sessions.s1, 'the damaged file is replaced');
     const answered = hold(ctx).decide({ cwd: repo, prompt: reply, sessionId: 's1' });
     assert.equal(answered.action, 'pass', reply);
-    if (word === 'yes') assert.match(answered.context, /answered yes[\s\S]*question bank/, reply);
+    if (word === 'yes') assert.match(answered.context, /answered yes[\s\S]*guided setup/, reply);
     if (word) assertAnswered(pending(repo), word);
     else assert.ok(ticketOf(answered.context));
     assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');

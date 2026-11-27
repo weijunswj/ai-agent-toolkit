@@ -99,7 +99,7 @@ test('reply tickets: "no, leave it off" from the user is read by the agent and r
   const enabled = prompts().answerTicket(insideTicket, 'yes');
   assert.equal(enabled.ok, true, enabled.text);
   assert.doesNotMatch(enabled.text, /set up the site/);
-  assert.match(enabled.text, /question bank/);
+  assert.match(enabled.text, /guided setup/);
   assertAnswered(line(inside, 'inside'), 'yes');
   assert.equal(stateOf(ctx, inside).state, 'UNDECIDED');
   // Before the question was shown, no ticket: the first message only carries the question.
@@ -350,7 +350,7 @@ test('later: nothing is recorded, this session carries on under the global rules
   // The full answer in the new session still decides.
   const decided = hold(ctx).decide({ cwd: repo, prompt: 'toolkit governance enable', sessionId: 's2' });
   assert.equal(decided.action, 'pass');
-  assert.match(decided.context, /answered yes[\s\S]*question bank/);
+  assert.match(decided.context, /answered yes[\s\S]*guided setup/);
   assert.equal(stateOf(ctx, repo).state, 'UNDECIDED');
 });
 
@@ -365,7 +365,7 @@ test('after the reply: the full answer still decides, and a short reply is an or
     assert.doesNotMatch(gate.sessionLine(repo, { registryOptions: ctx.options, sessionId: 's1' }), /is pending/);
     const decided = hold(ctx).decide({ cwd: repo, prompt: answer, sessionId: 's1' });
     assert.equal(decided.action, 'pass', answer);
-    assert.match(decided.context, /enable/.test(answer) ? /answered yes[\s\S]*question bank/ : /is pending/);
+    assert.match(decided.context, /enable/.test(answer) ? /answered yes[\s\S]*guided setup/ : /is pending/);
     assert.equal(stateOf(ctx, repo).state, 'UNDECIDED', answer);
   }
   // A launcher-started session still cannot answer.
@@ -466,7 +466,7 @@ test('nested sessions: nothing is held on either host, and only the session that
       const first = send({ cwd: repo, session_id: `${slug}-first`, prompt: 'hello' });
       assert.equal(first.held, false, `${host}: the first message is let through`);
       assert.ok(first.context.includes(QUESTION_LINE));
-      if (host === 'claude') assert.match(first.notice, /Pick an answer on the card, or carry on/);
+      assert.equal(first.notice, undefined, `${host}: no card notice`);
       const second = send({ cwd: repo, session_id: `${slug}-second`, prompt: reply });
       assert.equal(second.held, false, `${host} ${reply}`);
       assert.ok(second.context.includes(QUESTION_LINE), `${host} ${reply}: the new session is asked, not answered`);
@@ -488,7 +488,7 @@ test('nested sessions: nothing is held on either host, and only the session that
     assert.doesNotMatch(pending(own, `own-${host}`), /is pending/);
     const answered = send({ cwd: own, session_id: `own-${host}`, prompt: 'toolkit governance enable' });
     assert.equal(answered.held, false, host);
-    assert.match(answered.context, /answered yes[\s\S]*question bank/);
+    assert.match(answered.context, /answered yes[\s\S]*guided setup/);
     assert.doesNotMatch(answered.context, /fix the bug/);
   }
 });
