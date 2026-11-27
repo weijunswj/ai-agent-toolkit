@@ -265,7 +265,7 @@ function shippedInstructionFiles() {
 // carry the one question shape, and how a question shows (card, end-of-turn box, text) is the harness's.
 test('the global rules carry the one question shape, and no shipped instruction steers a question card', () => {
   const communication = readText(globalPath).split('## Communication\n\n')[1];
-  assert.ok(communication.startsWith('Questions go last in the reply. Each is a numbered, fully bold question; its choices are lettered (A., B.) and nested under it, best first, each with a short plain reason; the recommended one is marked (my pick). A blank line between questions.'), communication.slice(0, 300));
+  assert.ok(communication.startsWith('Questions go last. Each is a numbered, fully bold question, its choices lettered (A., B.) and nested under it, best first, each with a short plain reason, the recommended one marked (my pick). A blank line between questions.'), communication.slice(0, 300));
   // The root-cause principle once read "make it in the shared source that copies, prompts and later runs
   // inherit", which parses two ways beside "upstream" meaning third-party code.
   assert.match(readText(globalPath), /make it at the shared source every copy, prompt and later run inherits;/);

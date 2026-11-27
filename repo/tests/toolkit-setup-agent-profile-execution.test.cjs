@@ -287,41 +287,23 @@ test('kept broader-native survives flag and piped execution without probes', () 
   const flagged = run([
     '--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
     '--claude-cli', fake.command, '--claude-topology', 'keep', '--claude-plugin-behavior', 'instructions', '--yes-recommended',
-    '--claude-app-setting', 'auto_archive_on_pr_close=off',
   ], { env, timeout: 300000 });
   assert.equal(flagged.status, 0, flagged.stderr || flagged.stdout);
   assert.match(flagged.stdout, /Selected topology: broader-native/);
-  // The desktop app's archive setting: the approved default is one change returned for the app's own card.
-  assert.match(flagged.stdout, /^Claude desktop app setting: Change for the agent to make now: auto_archive_on_pr_close=true /m);
-  assert.equal(fs.existsSync(path.join(root, '.ai-agent-toolkit', 'user-state', 'setup-owner-off.json')), false);
   assert.equal(control.readProfile('claude-code', { root: profileRootOf(root) }).topology, control.TOPOLOGIES.BROADER_NATIVE);
   clearLogs(setupRepo);
   // Piped: every setting already has a value after the first run, so the bank asks nothing and an
   // empty pipe runs setup through; a yes with its displayed reference still works.
   const pipedArgv = ['--execute', '--host', 'claude-code', '--repo-root', setupRepo, '--repo-remote', origin,
-    '--claude-cli', fake.command, '--claude-topology', 'keep', '--claude-plugin-behavior', 'instructions',
-    '--claude-app-setting=auto_archive_on_pr_close=on'];
+    '--claude-cli', fake.command, '--claude-topology', 'keep', '--claude-plugin-behavior', 'instructions'];
   const shown = run(pipedArgv, { env, timeout: 300000, input: '' });
   assert.equal(shown.status, 0, shown.stderr || shown.stdout);
   assert.match(shown.stdout, /no questions: every setting already has a value/);
-  assert.match(shown.stdout, /^Claude desktop app setting: Archive sessions when their PR closes: on\. No change to make\.$/m);
   assert.match(shown.stdout, /Selected topology: broader-native/);
   clearLogs(setupRepo);
   const piped = run(pipedArgv, { env, timeout: 300000, input: `${displayedBankReference(shown.stdout)}: yes\n` });
   assert.equal(piped.status, 0, piped.stderr || piped.stdout);
   assert.match(piped.stdout, /Selected topology: broader-native/);
-  // A listed off returns that change and is remembered; a run outside the app then says it cannot read the row.
-  clearLogs(setupRepo);
-  const off = run(pipedArgv, { env, timeout: 300000, input: `${displayedBankReference(shown.stdout)}: 3.6=off\n` });
-  assert.equal(off.status, 0, off.stderr || off.stdout);
-  assert.match(off.stdout, /^Claude desktop app setting: Change for the agent to make now: auto_archive_on_pr_close=false /m);
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, '.ai-agent-toolkit', 'user-state', 'setup-owner-off.json'), 'utf8')).off, ['claude-app-auto-archive-on-pr-close']);
-  clearLogs(setupRepo);
-  const outside = run(pipedArgv.slice(0, -1), { env, timeout: 300000, input: '' });
-  assert.equal(outside.status, 0, outside.stderr || outside.stdout);
-  assert.match(outside.stdout, /no questions: nothing to approve, and 1 setting could not be read/);
-  assert.match(outside.stdout, /\| 3\.6 \| Claude desktop app setting: Archive sessions when their PR closes\? \| Not readable here \| A\. Keep current \|/);
-  assert.match(outside.stdout, /^Claude desktop app setting: Archive sessions when their PR closes: not readable here\. No change to make\.$/m);
   const preserved = control.readProfile('claude-code', { root: profileRootOf(root) });
   assert.equal(preserved.topology, control.TOPOLOGIES.BROADER_NATIVE);
   assert.equal(preserved.capacity_mode, control.CAPACITY_MODES.ROOT_ONLY);

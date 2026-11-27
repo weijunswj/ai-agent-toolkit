@@ -695,7 +695,7 @@ test('Projects keeps its Toolkit base layer current without touching the project
   // Questions: the global rules carry the shape (numbered, lettered nested choices, (my pick), a blank line
   // between); the skill keeps only the Projects extras (INT-TK421-1390).
   assert.ok(text.includes("- **Questions.** Owner questions take the global rules' question shape, below the ELI5 line. Projects adds: each is written `1. **Question: <the ask>?**` with the link to its card or thread; its problem, fix and skip lines sit under it, above its choices;"));
-  assert.ok(read('repo/contracts/agent-rules/global-rules.md').includes('its choices are lettered (A., B.) and nested under it, best first, each with a short plain reason; the recommended one is marked (my pick). A blank line between questions.'));
+  assert.ok(read('repo/contracts/agent-rules/global-rules.md').includes('its choices lettered (A., B.) and nested under it, best first, each with a short plain reason, the recommended one marked (my pick). A blank line between questions.'));
   assert.doesNotMatch(text, /<Choice>|flatten its choices into plain bullets|with no spacer line/);
   // Plans, G0 plans, decision asks and explanations open with the problem, the fix and what skipping it costs.
   assert.ok(text.includes('**Problem, fix, skip first.** Every plan, G0 plan, decision ask and explanation, from you and from every thread, opens with three lines'));

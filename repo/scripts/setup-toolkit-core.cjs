@@ -25,7 +25,7 @@ const { GlobalRules } = require('./toolkit-global-rules.cjs');
 const { HOST_LABELS, detectAgentHost } = require('./agent-host-markers.cjs');
 const { legacyTaskAnswersPresent } = require('./toolkit-governance-state.cjs');
 const { defineCodexSetup } = require('./setup-core-codex.cjs');
-const { defineClaudeSetup, claudeSettingKey, ClaudeAppSetting, CLAUDE_APP_SETTING, CLAUDE_APP_READINGS, CLAUDE_SETTING_IDS, CLAUDE_SETTING_KEYS } = require('./setup-core-claude.cjs');
+const { defineClaudeSetup, claudeSettingKey, CLAUDE_SETTING_IDS, CLAUDE_SETTING_KEYS } = require('./setup-core-claude.cjs');
 const { userStateDirectory } = require('./toolkit-user-state.cjs');
 const updateMarker = require('./toolkit-update-marker.cjs');
 const {
@@ -174,11 +174,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     approveHighHelperCapacity: false,
     approveCodexConfigProposal: false,
     codexRuntime: RUNTIMES.UNKNOWN,
-    claudeAppSetting: '',
     setupChoices: emptySetupChoices()
   };
 
-  // --claude-settings answers all five Claude setting rows; --claude-setting <name>=<choice> wins for its row.
+  // --claude-settings answers all four Claude Code setting rows; --claude-setting <name>=<choice> wins for its row.
   let claudeSettingsAll = '';
   const claudeSettingOne = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -326,13 +325,6 @@ function parseArgs(argv = process.argv.slice(2)) {
       if (!CLAUDE_SETTING_IDS.includes(id)) throw new Error(`Unsupported --claude-setting name: ${id}`);
       if (!['enable', 'disable', 'keep'].includes(choice)) throw new Error(`Unsupported --claude-setting choice: ${choice}`);
       claudeSettingOne[id] = choice;
-    } else if (arg === '--claude-app-setting' || arg.startsWith('--claude-app-setting=')) {
-      // What an agent in the Claude desktop app read, never a choice of the owner's (ClaudeAppSetting).
-      const pair = arg === '--claude-app-setting' ? next() : arg.slice('--claude-app-setting='.length);
-      const reading = CLAUDE_APP_READINGS.find((value) => pair === `${CLAUDE_APP_SETTING.appKey}=${value}`);
-      if (!reading) throw new Error(`Unsupported --claude-app-setting value: ${pair}. It takes ${CLAUDE_APP_SETTING.appKey}=on or ${CLAUDE_APP_SETTING.appKey}=off.`);
-      if (args.claudeAppSetting && args.claudeAppSetting !== reading) throw new Error('--claude-app-setting was given twice with different values.');
-      args.claudeAppSetting = reading;
     } else if (arg === '--antigravity-skills' || arg.startsWith('--antigravity-skills=')) {
       const choice = (arg === '--antigravity-skills' ? next() : arg.slice('--antigravity-skills='.length)).toLowerCase();
       if (!['copy', 'remove', 'keep'].includes(choice)) throw new Error(`Unsupported --antigravity-skills choice: ${choice}`);
@@ -648,10 +640,8 @@ function printHelp() {
     '                               Claude Code only; verify/report, show native refresh instructions, or install/enable via claude plugin marketplace add + install --scope user',
     '  --explain <ref>              print the full text of one setup question, for example --explain 1.2',
     '  --claude-settings enable|disable|keep',
-    '                               Claude Code only; answer all five Claude setting rows (hide AI credit, let other sessions wake this one, switch models without asking on a flag, read AGENTS.md, archive sessions when their PR closes) at once with Turn on (enable), Turn off (disable) or Keep current (keep); Turn off removes the line whoever added it, except the model-switch row, which writes false, and the archive row, which only the app itself changes',
+    '                               Claude Code only; answer all four Claude setting rows (hide AI credit, let other sessions wake this one, switch models without asking on a flag, read AGENTS.md) at once with Turn on (enable), Turn off (disable) or Keep current (keep); Turn off removes the line whoever added it, except the model-switch row, which writes false',
     `  --claude-setting <name>=enable|disable|keep   answer one of those rows, overriding --claude-settings; names: ${CLAUDE_SETTING_IDS.join(', ')}`,
-    `  --claude-app-setting ${CLAUDE_APP_SETTING.appKey}=on|off`,
-    '                               Claude Code only; the value an agent in the Claude desktop app read for that app setting; it is no choice and changes nothing',
     '  --antigravity-skills copy|remove|keep   copy Toolkit\'s portable skills into Antigravity\'s global skills folder',
     '  Antigravity uses portable workspace skills only; copy with toolkit-local-bridge.cjs --copy-antigravity-skills --antigravity-project-root <path> [--write]'
   ].join('\n'));
@@ -1294,7 +1284,7 @@ function collectCurrentState(args) {
     delegation: delegationState,
     delegationMigrationPreview,
     agentProfile,
-    ...(args.host === 'claude-code' ? { claudeSubagentDepth: new ClaudeSubagentDepthSetting().inspect(), claudeSettings: new ClaudeUserSettings().inspect(), claudeAppSetting: new ClaudeAppSetting({ reading: args.claudeAppSetting, offRecord: new SetupOwnerOffRecord() }).inspect() } : {}),
+    ...(args.host === 'claude-code' ? { claudeSubagentDepth: new ClaudeSubagentDepthSetting().inspect(), claudeSettings: new ClaudeUserSettings().inspect() } : {}),
     antigravity: { ...antigravityState(args), ...(args.host === 'claude-code' ? { ownerOff: new SetupOwnerOffRecord().has('antigravity-skills') } : {}) },
     nativePlugin: args.host === 'claude-code'
       ? inspectClaudeNativePluginStatePreApproval(args)
@@ -1436,8 +1426,8 @@ function antigravitySkillsRecommendation(state) {
 }
 
 // Remembers the setup rows the owner turned off, so a strong default never puts them back. Only rows whose
-// off leaves nothing on disk to read it from are kept here (Toolkit's skill copies in Antigravity, the Claude
-// desktop app's archive setting); the Claude Code settings keep their own off record. Holds row ids only, no paths or values.
+// off leaves nothing on disk to read it from are kept here (Toolkit's skill copies in Antigravity); the Claude
+// Code settings keep their own off record. Holds row ids only, no paths or values.
 class SetupOwnerOffRecord {
   #file;
   constructor(file = path.join(userStateDirectory(), 'setup-owner-off.json')) { this.#file = file; }
@@ -2124,7 +2114,7 @@ function setupQuestionSpecs(args, current) {
       defaultOutcome: 'Let Claude Code install or refresh its own Toolkit plugin.',
       defaultReason: 'Native host commands keep cache identity, version, and hooks aligned without cross-host mutation.',
     }));
-    specs.push(...claudeSettingQuestions(args, current), claudeAppSettingQuestion(args, current));
+    specs.push(...claudeSettingQuestions(args, current));
   }
   // Both apps offer the Antigravity copy: it is one folder on this computer, whichever app sets it up.
   if (current.antigravity?.installed || current.antigravity?.copies) specs.push(antigravitySkillsQuestion(args, current));
@@ -2394,7 +2384,6 @@ function setupQuestionClaudeDocumentationSpecs() {
     agentProfile: { supported: true, topology: agentControl.TOPOLOGIES.ROOT_ONLY },
     claudeSubagentDepth: { state: SUBAGENT_DEPTH_STATES.DEFAULT },
     claudeSettings: CLAUDE_SETTINGS.map((spec) => ({ id: spec.id, label: spec.label, state: CLAUDE_SETTINGS_STATES.DEFAULT })),
-    claudeAppSetting: { reading: 'off', state: STRONG_DEFAULT_STATES.UNSET },
   };
   return plannedQuestionBank(parseArgs(['--plan', '--host', 'claude-code']), current).specs;
 }
@@ -2448,7 +2437,7 @@ function renderSetupQuestionDocumentation(specs = setupQuestionDocumentationSpec
     '',
     '# Claude Code setup questions',
     '',
-    'Setup run with `--host claude-code` asks one question instead, for the same representative state with a supported root-only Claude profile, no subagent depth setting and no Claude Code settings yet, in the Claude desktop app with its archive setting read as off (outside the app that row shows Not readable here and changes nothing). Every row below is a strong default: a yes applies the Toolkit default to each row not set yet and keeps every other row as it is; no changes nothing; a change such as `3.5=off` sets one row, and a row you do not list keeps its current value unless you also say yes. An off you chose in setup is remembered, so setup never turns it back on by default; an off you set only in the app itself looks the same as one never chosen, so the question says so for that row. `refresh toolkit` asks only when a row has no value yet.',
+    'Setup run with `--host claude-code` asks one question instead, for the same representative state with a supported root-only Claude profile, no subagent depth setting and no Claude Code settings yet. Every row below is a strong default: a yes applies the Toolkit default to each row not set yet and keeps every other row as it is; no changes nothing; a change such as `3.5=off` sets one row, and a row you do not list keeps its current value unless you also say yes. An off you chose in setup is remembered, so setup never turns it back on by default; an off you set only in the app itself looks the same as one never chosen, so the question says so for that row. `refresh toolkit` asks only when a row has no value yet.',
     '',
     // The bank as a run with no setup flags shows it; the planned specs below carry the plan's selections.
     ...renderStrongDefaultBank(claudeSpecs.map((spec) => ({ ...spec, selected: '' })), { markdown: true }).map((line) => line.replace(/^(#+) /, '$1# ')),
@@ -3796,7 +3785,7 @@ function permissionsSummaryLines(host, check = (app) => require('./toolkit-permi
     ...(other ? ['Say review permissions to see the other lines; nothing changes unless you pick lines.'] : []), ''];
 }
 
-function printFinalSummary({ args, current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, claudeAppSetting, n8nSkills, antigravitySkills, audit, questionBank, validationResults, installCheck }) {
+function printFinalSummary({ args, current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit, questionBank, validationResults, installCheck }) {
   const cleanup = audit?.update_report_cleanup || {};
   const active = activeWorktreeSummary(args);
   console.log('');
@@ -3882,7 +3871,6 @@ function printFinalSummary({ args, current, managed, localClone, nativeCache, de
     console.log(`Profile outcome this run: ${profileOutcomeSummary(delegation)}`);
     console.log(`One-layer subagent setting this run: ${subagentDepthOutcomeSummary(subagentDepth)}`);
     if (claudeSettings) console.log(`Claude Code settings this run: ${claudeSettingsOutcome(claudeSettings)}${claudeSettings.some((entry) => entry.changed) ? ' Start a new Claude Code session to use them.' : ''}`);
-    if (claudeAppSetting) console.log(`Claude desktop app setting: ${claudeAppSettingOutcome(claudeAppSetting)}`);
     console.log(`Normal folders: ${normalFolderOutcomeSummary(delegation, subagentDepth)}`);
     console.log('');
   }
@@ -4103,7 +4091,6 @@ class ToolkitSetupExecution {
     const delegation = repairedDelegation || await applyHostDelegationControl(args, this.#current, nativeCache);
     const subagentDepth = args.host === 'claude-code' ? applyClaudeSubagentDepth(args) : null;
     const claudeSettings = args.host === 'claude-code' ? applyClaudeUserSettings(args) : null;
-    const claudeAppSetting = args.host === 'claude-code' ? applyClaudeAppSetting(args) : null;
     // The Antigravity answer first: the n8n skills reach Antigravity only when Toolkit's skills are there.
     const notice = new NewSessionNotice(args.host, { antigravityTarget: newSessionAntigravityTarget(args) }).addNativePlugin(nativeCache);
     const antigravitySkills = applyAntigravitySkills(args, undefined, undefined, notice);
@@ -4112,7 +4099,7 @@ class ToolkitSetupExecution {
     // Saved only once the answers are applied: a run that stops earlier (such as the self-update rerun) leaves
     // the next refresh to ask again rather than keep answers that never took effect. Claude Code saves none.
     if (this.#questionBank.refresh_shapes) saveRefreshShapes(this.#questionBank.refresh_shapes, args.host);
-    printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, claudeAppSetting, n8nSkills, antigravitySkills, audit,
+    printFinalSummary({ args, current: this.#current, managed, localClone, nativeCache, delegation, subagentDepth, claudeSettings, n8nSkills, antigravitySkills, audit,
       questionBank: this.#questionBank, validationResults: this.#validationResults, installCheck });
     for (const line of [...leftoverTaskLines(), ...cloudSweepSkipLines()]) console.log(line);
     const globalRules = args.host === 'claude-code' ? null : runCodexGlobalRules(args);
@@ -4247,12 +4234,12 @@ const {
 });
 const {
   inspectClaudeNativePluginStatePreApproval, resolveClaudeTopology, claudeSettingsOutcome,
-  claudeSettingQuestions, claudeAppSettingQuestion, claudeAppSettingOutcome, applyClaudeUserSettings, applyClaudeAppSetting, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs,
+  claudeSettingQuestions, applyClaudeUserSettings, applyClaudeSubagentDepth, applyClaudeAgentControl, setupClaudeArgs,
   runClaudeNativePluginSetup, verifyClaudeNativePluginMetadata, runClaudeInstallCheck
 } = defineClaudeSetup({
   CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLOGY, claudeSetupBudgets,
   expectedToolkitVersion, nodeScriptArgs, readJsonFile, resolvedQuestion, runNativePluginJsonPhase,
-  scriptRootForReadOnlyProbe, setupGlobalRules, SetupOwnerOffRecord, unknown, wizardChoice
+  scriptRootForReadOnlyProbe, setupGlobalRules, unknown, wizardChoice
 });
 
 module.exports = {
@@ -4291,8 +4278,6 @@ module.exports = {
   applyHostDelegationControl,
   applyClaudeSubagentDepth,
   applyClaudeUserSettings,
-  applyClaudeAppSetting,
-  claudeAppSettingOutcome,
   SetupOwnerOffRecord,
   parseArgs,
   setupQuestionSpecs,

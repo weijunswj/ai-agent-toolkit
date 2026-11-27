@@ -624,22 +624,20 @@ const KEPT_REASONS = Object.freeze({
   unreadable: 'Setup could not read this setting, so it writes nothing.',
   unsupported: 'This Claude Code version does not have this setting, so setup writes nothing.',
 });
-// The one approval question, saying how many settings a yes would set. It makes sense on its own on a native question card.
-// With none left setup asks no question, so there is none to word. `pending` is the rows a yes would set; one whose
-// off may be the owner's own (offNote) is the exception the sentence names, with the reply that keeps it off.
+// The one approval question, saying how many settings a yes would set; it reads clearly on its own.
+// With none left setup asks no question, so there is none to word. `pending` is the rows a yes would set.
 function approvalQuestion(pending) {
   const one = pending.length === 1;
-  const unsure = pending.filter((spec) => spec.off_note).map((spec) => `${spec.presentation.question_ref}: ${spec.off_note}, and ${spec.presentation.question_ref}=off keeps it off`);
-  return `Apply Toolkit's default${one ? '' : 's'} to the ${pending.length} Claude Code setting${one ? '' : 's'} that ${one ? 'has' : 'have'} no value yet? Your own values and offs stay${unsure.length ? `, except ${unsure.join('; ')}` : ''}.`;
+  return `Apply Toolkit's default${one ? '' : 's'} to the ${pending.length} Claude Code setting${one ? '' : 's'} that ${one ? 'has' : 'have'} no value yet? Your own values and offs stay.`;
 }
 
 // definition: a resolvedQuestion definition plus defaultState, defaultChoice (the value a yes applies while the
 // row is UNSET; 'keep' for a row whose default is to leave it), defaultOutcome and defaultReason, and optionally
 // keptValue (what keeping means for this row, such as install for a plugin kept current), aliases (extra
-// words for choices, such as { on: 'enable', off: 'disable' }), unreadableNote (what setup still does beside a
-// setting it could not read) and offNote (why an UNSET row's off may be the owner's own).
+// words for choices, such as { on: 'enable', off: 'disable' }) and unreadableNote (what setup still does beside a
+// setting it could not read).
 function strongDefaultRow(definition) {
-  const { defaultState, defaultChoice, defaultOutcome, defaultReason, keptValue = 'keep', aliases = {}, unreadableNote = '', offNote = '' } = definition;
+  const { defaultState, defaultChoice, defaultOutcome, defaultReason, keptValue = 'keep', aliases = {}, unreadableNote = '' } = definition;
   const stillDone = defaultState === STRONG_DEFAULT_STATES.UNREADABLE ? unreadableNote : '';
   if (!Object.values(STRONG_DEFAULT_STATES).includes(defaultState)) throw new Error(`Setup row ${definition.id} has no strong-default state.`);
   const applies = defaultState === STRONG_DEFAULT_STATES.UNSET && defaultChoice !== 'keep';
@@ -648,7 +646,7 @@ function strongDefaultRow(definition) {
     : { value: keptValue, outcome: 'Keep it as it is.', reason: [KEPT_REASONS[defaultState], stillDone].filter(Boolean).join(' ') };
   return {
     ...resolvedQuestion({ ...definition, recommendation }),
-    strong_default: true, default_state: defaultState, default_choice: defaultChoice, applies_default: applies, aliases: { ...aliases }, still_done: stillDone, off_note: offNote,
+    strong_default: true, default_state: defaultState, default_choice: defaultChoice, applies_default: applies, aliases: { ...aliases }, still_done: stillDone,
   };
 }
 
