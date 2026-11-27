@@ -12,7 +12,7 @@
 //                                            branch (git directly), so a long-running controller
 //                                            chat updates Toolkit and rereads its rules on its own
 //   guidebook, instructions, memory, tasks   Claude Projects only
-//   programme, traces                        only where the checkout's programme binding says
+//   programme                                only where the checkout's programme binding says
 //                                            governance is enabled
 //   owner-lines                              any controller given --owner-lines <file>: the owner's own
 //                                            lines in its instructions or memory, linted against the
@@ -56,11 +56,12 @@ const { spawnSync } = require('node:child_process');
 const ROOT = path.resolve(__dirname, '..', '..');
 const LIBRARY = '/mnt/project-files/toolkit/web-controller-projects';
 const BINDING_REL = '.github/toolkit-programme.json';
-const CHECKS = ['toolkit', 'guidebook', 'instructions', 'memory', 'tasks', 'owner-lines', 'programme', 'traces', 'ci', 'footer', 'refs'];
+const CHECKS = ['toolkit', 'guidebook', 'instructions', 'memory', 'tasks', 'owner-lines', 'programme', 'ci', 'footer', 'refs'];
 // Check names --skip still accepts after the check was removed, so a stored Claude Projects task
-// prompt written before the removal still runs. Remove a name once the daily check-in has rewritten
-// every stored prompt that passes it.
-const RETIRED_CHECKS = new Set(['stale']);
+// prompt or an older guidebook copy written before the removal still runs. Remove a name once no stored
+// prompt or guidebook checklist passes it. `traces` ran the decision-trace audit, which checks the body
+// index an older Toolkit wrote; decision records are comments (`programme.cjs trace`), so it is retired.
+const RETIRED_CHECKS = new Set(['stale', 'traces']);
 const PROJECTS_ONLY = new Set(['guidebook', 'instructions', 'memory', 'tasks']);
 const TASK_KINDS = new Set(['daily-check-in', 'hourly-nudge']);
 // At most this many detail lines per check unless --expand, then a count and the command for the rest.
@@ -71,7 +72,6 @@ const SCRIPTS = {
   tasks: 'repo/scripts/toolkit-projects-tasks.cjs',
   ownerLines: 'repo/scripts/toolkit-owner-lines.cjs',
   programme: 'skills/github-program-reconciler/scripts/programme.cjs',
-  traces: 'skills/github-program-reconciler/scripts/decision-trace-audit.cjs',
   ci: 'skills/secure-ci-cd/scripts/ci-checkup.cjs',
   footer: 'repo/scripts/toolkit-github-footer-sweep.cjs',
   refs: 'repo/scripts/check-script-references.cjs',
@@ -199,26 +199,6 @@ function checkProgramme(run, checkout) {
   return { state: 'attention', lines: [byCode ? `${first} (${byCode})` : first, ...items], command: require('./toolkit-user-state.cjs').programmeCommand('attention') };
 }
 
-function checkTraces(run, repo, parents) {
-  const lines = [];
-  let state = 'ok';
-  for (const parent of parents) {
-    const args = ['--repo', repo, '--issue', String(parent.issue), ...(parent.record_prefix ? ['--record-prefix', parent.record_prefix] : [])];
-    const result = run(SCRIPTS.traces, args);
-    let report = null;
-    try { report = JSON.parse(result.stdout); } catch { /* reported below */ }
-    if (!report || ![0, 1].includes(result.status)) { state = 'failed'; lines.push(`#${parent.issue}: could not run: ${why(result)}`); continue; }
-    if (report.ok) { lines.push(`#${parent.issue}: decision traces complete`); continue; }
-    if (state === 'ok') state = 'attention';
-    const count = key => (Array.isArray(report[key]) ? report[key].length : 0);
-    const parts = [['unlinked decision comments', count('unlinked_decisions')], ['unknown SUPERSEDES records', count('unknown_supersedes')], ['superseded records not marked', count('superseded_unmarked')], ['index errors', count('index_errors')]]
-      .filter(([, n]) => n).map(([label, n]) => `${n} ${label}`);
-    if (report.over_threshold) parts.push('body at or over the size threshold');
-    lines.push(`#${parent.issue}: ${parts.join(', ') || 'audit failed'} (decision-trace-audit.cjs --repo ${repo} --issue ${parent.issue} --repair --out <file> proposes the fix)`);
-  }
-  return { state, lines };
-}
-
 const SHARD_CODES = new Set(['speed.shards', 'speed.shards-lopsided']);
 function checkCi(run, checkout) {
   const result = run(SCRIPTS.ci, ['--repo', checkout, '--json']);
@@ -251,7 +231,6 @@ function controllerCheck(options, deps = {}) {
   const binding = (deps.readBinding || readBinding)(options.checkout);
   const governed = binding && binding.governance === 'enabled';
   const repo = options.repo || (binding && typeof binding.repository === 'string' ? binding.repository : null);
-  const parents = governed && Array.isArray(binding.parents) ? binding.parents.filter(parent => Number.isInteger(parent.issue)) : [];
   const guidebook = options.guidebook || (host === 'projects' ? LIBRARY : null);
   const since = options.since || new Date(now.getTime() - 26 * 3600000).toISOString();
   const checks = [];
@@ -275,12 +254,11 @@ function controllerCheck(options, deps = {}) {
     } else if (name === 'tasks') {
       if (!options.tasks.length) { skip(name, 'pass --task <kind>=<file> (each stored task prompt)'); continue; }
       outcome = checkTasks(run, options.tasks);
-    } else if (name === 'programme' || name === 'traces') {
+    } else if (name === 'programme') {
       if (!options.checkout) { skip(name, 'pass --checkout <dir>'); continue; }
       if (!binding) { skip(name, 'no programme binding in the checkout'); continue; }
       if (!governed) { skip(name, 'governance off'); continue; }
-      if (name !== 'programme' && !repo) { skip(name, 'pass --repo <owner/name>'); continue; }
-      outcome = name === 'programme' ? checkProgramme(run, options.checkout) : checkTraces(run, repo, parents);
+      outcome = checkProgramme(run, options.checkout);
     } else if (name === 'ci') {
       if (!options.checkout) { skip(name, 'pass --checkout <dir>'); continue; }
       outcome = checkCi(run, options.checkout);
