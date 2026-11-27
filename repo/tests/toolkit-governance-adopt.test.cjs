@@ -109,55 +109,48 @@ async function run(ctx, argv, github, { answers = [], interactive = false, plain
   return { code, out, err, published, plainText, cloud };
 }
 
-test('a fresh repository after the card\'s yes asks only task auto-merge, names its store, and all recommended makes the store and parent and one turn-on pull request', async t => {
+test('a fresh repository asks the three questions, names its store, and all recommended makes the store and parent and one turn-on pull request', async t => {
   const ctx = fixture(t, { agents: '# My own rules\n\nKeep this exactly.\n' });
   const github = fakeGitHub();
   const shown = await run(ctx, ['setup', '--json'], github);
   const questions = JSON.parse(shown.out).questions;
-  assert.deepEqual(questions.map(spec => [spec.id, Boolean(spec.report_only)]), [['task-auto-merge', false], ['governance', true], ['evidence-store', true], ['parent-issue', true], ['required-checks', true], ['governance-app', true], ['permission-blocks', true]]);
-  assert.deepEqual(questions.filter(spec => !spec.report_only).map(spec => spec.presentation.question_ref), ['1.1'], 'one question: task auto-merge');
-  const table = (await run(ctx, ['setup'], github, { interactive: true, answers: [''] })).out;
-  assert.match(table, /^\| 1\.1 \| Task auto-merge with merge train \| Off \(needs governance\) \| A\. Keep current/m);
-  assert.doesNotMatch(table, /^\| 2\.1 \|/m, 'one section');
-  assert.match(table, /^\| - \| GitHub governance \| Not decided \| Your answer turns it on: Toolkit prepares one pull request, and it applies only after you merge it \| - \|$/m);
+  assert.ok(questions.some(spec => spec.id === 'evidence-store'), 'the rows Toolkit read are still given as data');
+  const guidedText = (await run(ctx, ['setup'], github, { interactive: true, answers: [''] })).out;
+  assert.match(guidedText, /^\*\*1\. Question: Turn on GitHub governance for toolkit-test-fixture\/fresh\?\*\*$/m);
   // The store is named before the answer: this repository's own TRANSPORT-<name>, to be created.
-  assert.match(table, /^\| \d\.\d \| Evidence store \| TRANSPORT-fresh \| None yet: Toolkit creates the private GitHub repository toolkit-test-fixture\/TRANSPORT-fresh when governance turns on, for programme records and evidence\./m);
-  assert.match(table, /^- Parent issue: None yet\. Toolkit opens one when governance turns on\.$/m);
-  assert.match(table, /^Reply all recommended to turn governance on as shown, or only your changes such as 1\.1=B\..* To keep governance off instead, reply no store: Toolkit then makes nothing and asks again next session\./m);
-  assert.equal(github.calls.length, 0, 'showing the bank makes nothing');
+  assert.match(guidedText, /Suggested: toolkit-test-fixture\/TRANSPORT-fresh, path `state\/toolkit-test-fixture\/fresh\/`\. Toolkit creates it if it does not exist yet\./);
+  assert.match(guidedText, /^\*\*2\. Question: Keep records in toolkit-test-fixture\/TRANSPORT-fresh\?\*\*$/m);
+  assert.match(guidedText, /^\*\*3\. Question: Turn on task auto-merge with merge train\?\*\*$/m);
+  assert.equal(github.calls.length, 0, 'showing the questions makes nothing');
 
   const before = fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8');
   const result = await run(ctx, ['setup'], github, { interactive: true, answers: ['all recommended'] });
   assert.equal(result.code, 0, result.err + result.out);
   assert.deepEqual(github.calls, [['create', STORE], ['put', STORE, 'archives/README.md'], ['issue', SLUG, 'Programme: fresh']]);
   assert.match(result.out, /Made on GitHub: private evidence store toolkit-test-fixture\/TRANSPORT-fresh, parent issue #7\./);
-  // The turn-on result names the store and how it was chosen.
   assert.match(result.out, /^Store: toolkit-test-fixture\/TRANSPORT-fresh, a private GitHub repository \(created for this repository\), for programme records and evidence\.$/m);
   assert.equal(result.published.length, 1, 'one turn-on pull request');
   const { binding, files } = result.published[0];
   assert.deepEqual(binding.parents, [{ issue: 7, record_prefix: 'INT-FRE7-' }]);
   assert.deepEqual(binding.store, { kind: 'github', repository: STORE, branch: 'main', path: `state/${SLUG}/` });
-  assert.deepEqual(binding.task_prs, { auto_merge: 'off', merge_train: 'off' });
+  assert.deepEqual(binding.task_prs, { auto_merge: 'after-gates', merge_train: 'on' }, 'task auto-merge with merge train is recommended');
+  assert.equal(binding.min_toolkit, require(path.join(scripts, 'toolkit-version.cjs')).readToolkitVersion());
   assert.deepEqual(JSON.parse(files['.github/toolkit-programme.json']), binding);
   // The installed Toolkit delivers the governed rules, so the pull request carries the programme file
-  // and the CI checks only: no AGENTS.md, CLAUDE.md, Antigravity bootstrap or playbooks.
-  // (The fake renders no cloud workflows; toolkit-default-cloud-workflows.test.cjs covers those.)
+  // and the CI checks only. (The fake renders no cloud workflows; toolkit-default-cloud-workflows.test.cjs covers those.)
   assert.deepEqual(Object.keys(files).sort(), ['.github/dependabot.yml', '.github/plain-text.json', '.github/scripts/plain-text-check.cjs',
     '.github/toolkit-programme.json', '.github/workflows/plain-text.yml']);
-  // The Dependabot settings join the same pull request, so governance never starts with its own security
-  // check failing.
   assert.match(files['.github/dependabot.yml'], /package-ecosystem: "?github-actions"?/);
   assert.match(result.out, /Added \.github\/dependabot\.yml to the turn-on pull request; nothing was written to your checkout\./);
   assert.equal(fs.readFileSync(path.join(ctx.repo, 'AGENTS.md'), 'utf8'), before, 'the repository\'s own AGENTS.md is not changed');
   assert.ok(!fs.existsSync(path.join(ctx.repo, 'CLAUDE.md')));
   assert.equal(result.plainText.length, 1);
-  // The App is not set up, so the result gives the owner's one command, with the store, by default.
-  assert.match(result.out, new RegExp(`^node "[^"]+toolkit-governance-app-setup\\.cjs" --repo ${SLUG} --store ${STORE}$`, 'm'));
-  assert.doesNotMatch(result.out, /pre-filled page|Governance GitHub App: not now/, 'no by-hand App steps and no not-now line');
-  // Task auto-merge on in the same answer: the same one pull request sets it.
-  const auto = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: ['1.1=B'] });
+  // The owner's commands (Toolkit permissions, the Governance App) come in the summary after the merge.
+  assert.doesNotMatch(result.out, /toolkit-governance-app-setup|```/, 'no command before the merge');
+  // Task auto-merge off in the same answer: both switches off.
+  const auto = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: ['1A 2A 3B'] });
   assert.equal(auto.code, 0, auto.err + auto.out);
-  assert.deepEqual(auto.published[0].binding.task_prs, { auto_merge: 'after-gates', merge_train: 'off' });
+  assert.deepEqual(auto.published[0].binding.task_prs, { auto_merge: 'off', merge_train: 'off' });
 });
 
 // Red on the parent: the pull request carried no guard, and nothing said a sweep follows.
@@ -175,8 +168,8 @@ test('the one turn-on pull request carries every default cloud workflow, says wh
   assert.equal(result.published.length, 1, 'one pull request');
   for (const file of [...SWEEPS.map(row => row.file), ...COPIED_FILES]) assert.equal(typeof result.published[0].files[file], 'string', file);
   assert.match(result.out, /^Personal data guard: checks each pull request and push on GitHub \(on a private repository that uses Actions minutes\), with no hooks on any computer\. It never scans commit author or committer addresses, and it passes images and fonts unread and names each one\.$/m);
-  assert.match(result.out, /After the merge, Toolkit also turns on, [^\n]*that check lets images and fonts through without reading them and names each one; any other file it cannot read fails until its path is listed\.$/m, 'the bank says it before the answer');
-  assert.match(result.out, /After the merge, the next session here finishes on its own: [^\n]*one report-only sweep of what is already there/);
+  // Said before the owner approves the merge, since the finish turns these on without asking again.
+  assert.match(result.out, /After the merge, Toolkit finishes the setup on its own: [^\n]*one report-only sweep of what is already there/);
   for (const name of ['personal-data-guard.yml', 'dependency-auto-merge.yml']) assert.equal(fs.existsSync(path.join(ctx.repo, '.github', 'workflows', name)), false, 'the working tree is not written');
   assert.equal(noted(ctx), true);
   // Someone's own file in the guard's place: it stays, the rest is carried, the owner is told, and no sweep is noted.
@@ -229,11 +222,8 @@ test('a turn-on leaves the checkout exactly as it was, carries the same 13 files
   for (const step of [/required_checks/, /\bmigrate\b/, /(?<![/\w])pull(?:ing)?\b(?! requests?\b)(?!\/)/, /untracked/]) assert.doesNotMatch(answered, step);
   assert.match(files['.github/dependabot.yml'], /package-ecosystem: "?github-actions"?/, 'the rendered workflows count for Dependabot');
   assert.match(result.out, /^Nothing was written to your checkout, so after the merge the next session here can bring your local default branch up to date on its own\.$/m);
-  const lines = result.out.split('\n');
-  const fences = lines.filter(line => line.startsWith('```'));
-  assert.ok(fences.length >= 2, 'the App line is fenced');
-  assert.deepEqual(fences.filter((line, index) => index % 2 === 0 && line !== '```powershell'), [], 'every block opens as powershell');
-  lines.forEach((line, index) => { if (/^node "/.test(line)) assert.equal(lines[index - 1], '```powershell', `fenced: ${line}`); });
+  // The owner's commands come in the summary after the merge (each in a PowerShell block there), never here.
+  assert.doesNotMatch(result.out, /```|^node "/m);
 
   // Checks the default branch already requires are kept next to Toolkit's own.
   const kept = fixture(t);
@@ -252,17 +242,16 @@ test('answering no store makes nothing: no pull request, store or parent issue, 
   assert.equal(answered.published.length, 0);
   assert.equal(require(path.join(scripts, 'toolkit-governance-state.cjs')).governanceState(ctx.repo, ctx.registryOptions).state, 'UNDECIDED');
   // No store goes on its own.
-  const mixed = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: ['no store, 1.1=B', ''] });
-  assert.match(mixed.out, /No store keeps governance off, so it goes on its own/);
+  const mixed = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: ['no store, 3A', ''] });
+  assert.match(mixed.out, /No store keeps governance off, so answer it on its own/);
   assert.equal(mixed.published.length, 0);
 });
 
-// 1485 G2 L3: where the bank is the turn-on question (no card came first), it refused the card's plain
-// yes, no and later, so a no waited for the next session's card. Now yes is all recommended, later is
-// no store, and no makes the one off pull request.
-test('the turn-on bank takes a plain yes, no or later', async t => {
+// 1485 G2 L3: the setup takes the session-start question's plain yes, no and later: yes is all
+// recommended, later is no store, and no makes the one off pull request.
+test('the guided setup takes a plain yes, no or later', async t => {
   const shown = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: [''] });
-  assert.match(shown.out, /A plain yes, no or later works too: yes is all recommended, later keeps governance off the same way, and no prepares one pull request that turns governance off\./);
+  assert.match(shown.out, /^   - \*\*A\. Yes \(my pick\):\*\* .*\n   - \*\*B\. Later:\*\* .*\n   - \*\*C\. No:\*\* /m);
   const yesGitHub = fakeGitHub();
   const yes = await run(fixture(t), ['setup'], yesGitHub, { interactive: true, answers: ['Yes.'] });
   assert.equal(yes.code, 0, yes.err + yes.out);
@@ -270,8 +259,7 @@ test('the turn-on bank takes a plain yes, no or later', async t => {
   assert.equal(yes.published[0].binding.governance, 'enabled');
   assert.deepEqual(yesGitHub.calls, [['create', STORE], ['put', STORE, 'archives/README.md'], ['issue', SLUG, yesGitHub.calls[2][2]]], 'the same as all recommended');
   const laterGitHub = fakeGitHub();
-  const laterCtx = fixture(t);
-  const later = await run(laterCtx, ['setup'], laterGitHub, { interactive: true, answers: ['later'] });
+  const later = await run(fixture(t), ['setup'], laterGitHub, { interactive: true, answers: ['later'] });
   assert.equal(later.code, 0, later.err + later.out);
   assert.match(later.out, /^Later: nothing was written, and governance stays off\. Toolkit asks again next session\.$/m);
   assert.deepEqual(laterGitHub.calls, []);
@@ -284,32 +272,34 @@ test('the turn-on bank takes a plain yes, no or later', async t => {
   assert.equal(no.published.length, 1);
   assert.deepEqual(no.published[0].binding, { schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' });
   assert.equal(governance.governanceState(noCtx.repo, noCtx.registryOptions).state, 'UNDECIDED', 'nothing decides until it merges');
-  // Anything more than the plain word is read as an ordinary bank answer.
+  // Anything more than a plain word or the letters is not read.
   const unclear = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: ['no thanks', ''] });
-  assert.match(unclear.out, /Governance question bank answer was not read/);
+  assert.match(unclear.out, /This part of the answer was not read: "no thanks"/);
   assert.equal(unclear.published.length, 0);
 });
 
-// The bank stays open after a used answer, so a yes or a no meant for something else could reach it: after
-// "later", a stray yes made the store, the parent issue and the pull request. Plain words answer it once.
-test('the plain words answer a turn-on bank once: after a used answer a yes or a no is not read, and a listed change still is', async t => {
+// The questions stay open after a used answer, so a yes or a no meant for something else could reach
+// them: after "later", a stray yes made the store, the parent issue and the pull request. Plain words
+// answer them once; the letters still do.
+test('the plain words answer the guided setup once: after a used answer a yes or a no is not read, and the letters still are', async t => {
   const ctx = fixture(t);
   const github = fakeGitHub();
   const epochs = new gate.SessionEpochs({ registryOptions: ctx.registryOptions });
   epochs.start('session-adopt', 'startup', governance.governanceState(ctx.repo, ctx.registryOptions).repository_id);
   const tickets = new BankTickets({ registryOptions: ctx.registryOptions });
-  const reference = /Bank reference: (\S+)/.exec((await run(ctx, ['setup'], github)).out)[1];
+  await run(ctx, ['setup'], github);
+  const reference = tickets.pendingFor('session-adopt', epochs.get('session-adopt')).bank_reference;
   const reply = answer => run(ctx, ['setup', '--answers', `${reference}: ${answer}`, '--ticket', tickets.issue('session-adopt', epochs.get('session-adopt'))], github);
   // An answer that could not be read is not a used one: the plain word after it is the first answer.
-  assert.match((await reply('maybe')).out, /answer was not read/);
+  assert.match((await reply('maybe')).out, /This part of the answer was not read/);
   const later = await reply('later');
   assert.match(later.out, /^Later: nothing was written, and governance stays off\./m);
   for (const word of ['yes', 'no', 'later', 'Yes.']) {
     const stray = await reply(word);
-    assert.match(stray.out, /^Your earlier answer to this bank was already used, and this reply changes nothing\. Nothing more was written\.$/m, word);
+    assert.match(stray.out, /^Your earlier answer was already used, and this reply changes nothing\. Nothing more was written\.$/m, word);
     assert.deepEqual([github.calls, stray.published], [[], []], word);
   }
-  const listed = await reply('all recommended');
+  const listed = await reply('1A 2A 3A');
   assert.equal(listed.code, 0, listed.err + listed.out);
   assert.equal(listed.published[0].binding.governance, 'enabled');
 });
@@ -322,12 +312,11 @@ test('a failed step stops with what was made, and answering again reuses it inst
   assert.match(failed.out, /The parent issue could not be opened \(gh-request-failed\)\. No pull request was prepared\./);
   assert.match(failed.out, /Already made, and reused when you answer again: private evidence store toolkit-test-fixture\/TRANSPORT-fresh\./);
   assert.match(failed.out, /^Once the cause is fixed, type toolkit governance and answer again\.$/m);
-  assert.doesNotMatch(failed.out, /Show the bank/, 'the failure never tells an agent to show the bank');
   assert.equal(failed.published.length, 0);
 
   const retry = fakeGitHub({ repos: github.world.repos });
   const shown = await run(ctx, ['setup'], retry, { interactive: true, answers: [''] });
-  assert.match(shown.out, /^\| \d\.\d \| Evidence store \| TRANSPORT-fresh \| Found: your private GitHub repository toolkit-test-fixture\/TRANSPORT-fresh, used for programme records and evidence\./m, 'the store made last time is found, not offered again');
+  assert.match(shown.out, /Suggested: toolkit-test-fixture\/TRANSPORT-fresh, path `[^`]+`\. It already exists\./, 'the store made last time is found, not offered again');
   const done = await run(ctx, ['setup'], retry, { interactive: true, answers: ['all recommended'] });
   assert.equal(done.code, 0, done.err + done.out);
   assert.deepEqual(retry.calls, [['issue', SLUG, 'Programme: fresh']], 'no second store');
@@ -349,18 +338,17 @@ test('another repository\'s store is never picked on its own: the own TRANSPORT 
   const parent = { number: 3, title: 'Programme tracker', state: 'open', labels: [] };
   const github = fakeGitHub({ repos: { [other]: { private: true, dirs: ['archives', 'state'] }, [`${OWNER}/fresh-evidence`]: { private: true, dirs: ['archives'] } }, issues: [parent] });
   const shown = await run(ctx, ['setup'], github, { interactive: true, answers: [''] });
-  assert.match(shown.out, /^\| \d\.\d \| Evidence store \| TRANSPORT-fresh \| None yet: Toolkit creates the private GitHub repository toolkit-test-fixture\/TRANSPORT-fresh when governance turns on/m);
+  assert.match(shown.out, /Suggested: toolkit-test-fixture\/TRANSPORT-fresh, path `[^`]+`\. Toolkit creates it if it does not exist yet\./);
   assert.doesNotMatch(shown.out, /TRANSPORT-elsewhere|fresh-evidence/, 'the other stores are not offered');
-  assert.match(shown.out, /^- Parent issue: #3\. Reused when governance turns on\.$/m);
   const made = await run(ctx, ['setup'], github, { interactive: true, answers: ['all recommended'] });
   assert.equal(made.code, 0, made.err + made.out);
   assert.deepEqual(github.calls, [['create', STORE], ['put', STORE, 'archives/README.md']]);
   assert.equal(made.published[0].binding.store.repository, STORE);
   assert.equal(made.published[0].binding.parents[0].issue, 3);
 
-  // Named: used when it reads back as a private store of the same owner, and nothing is created.
+  // Named (Another repository): used when it reads back as a private store of the same owner, and nothing is created.
   const named = fakeGitHub({ repos: { [other]: { private: true, dirs: ['archives'] } }, issues: [parent] });
-  const used = await run(fixture(t), ['setup'], named, { interactive: true, answers: [`store=${other}`] });
+  const used = await run(fixture(t), ['setup'], named, { interactive: true, answers: [`1A 2B ${other} 3A`] });
   assert.equal(used.code, 0, used.err + used.out);
   assert.deepEqual(named.calls, []);
   assert.equal(used.published[0].binding.store.repository, other);
@@ -380,27 +368,26 @@ test('another repository\'s store is never picked on its own: the own TRANSPORT 
   assert.notEqual(self.code, 0);
   assert.match(self.out, /^TOOLKIT-TEST-FIXTURE\/FRESH is this repository itself, so it was not used as the evidence store: the store must be a separate private repository\. No pull request was prepared\.$/m);
   assert.match(self.out, /^Nothing was made on GitHub\.$/m);
-  assert.doesNotMatch(self.out, /not ready/);
   assert.deepEqual(itself.calls, [], 'no parent issue, store or file');
   assert.equal(self.published.length, 0);
   assert.equal(fs.existsSync(path.join(selfCtx.repo, '.github', 'plain-text.json')), false, 'no local write either');
   // A malformed name is refused as unreadable, nothing written.
   const bad = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: ['store=not a repo', ''] });
-  assert.match(bad.out, /store= needs a repository as owner\/name/);
+  assert.match(bad.out, /This part of the answer was not read: "store=not a repo"/);
   assert.equal(bad.published.length, 0);
 });
 
-test('when GitHub cannot be searched, turning on makes nothing and says why', async t => {
+test('when GitHub cannot be searched, the questions are not shown and nothing is made', async t => {
   const ctx = fixture(t);
   const github = fakeGitHub();
   const offline = { ...github, discoveryGh: () => ({ ok: false, reason: 'gh-unavailable' }) };
-  const shown = await run(ctx, ['setup'], offline, { interactive: true, answers: [''] });
-  assert.match(shown.out, /^- Store and parent issue: Not checked yet\. GitHub could not be read just now, so Toolkit asks about them once it can, and an answer now makes nothing\. Type toolkit governance again in a moment\.$/m);
-  const answered = await run(ctx, ['setup'], offline, { interactive: true, answers: ['all recommended'] });
-  assert.notEqual(answered.code, 0);
-  assert.match(answered.out, /GitHub could not be read \(.+\), so the evidence store and parent issue could not be found or made\./, 'the answer says why');
+  for (const answers of [[''], ['all recommended']]) {
+    const shown = await run(ctx, ['setup'], offline, { interactive: true, answers });
+    assert.equal(shown.code, 1);
+    assert.match(shown.out, /^GitHub could not be read just now, so Toolkit cannot find or suggest the evidence store and parent issue yet, and the setup questions are not shown\. Nothing changed\. Type toolkit governance again in a moment\.$/m);
+    assert.doesNotMatch(shown.out, /Question: |gh-unavailable/, 'no questions, and no internal reason');
+  }
   assert.deepEqual(github.calls, [], 'no store or issue is made on a guess');
-  assert.equal(answered.published.length, 0);
 });
 
 test('a working tree with a programme file that turns governance on is a prepared adoption; a governed block is not needed', t => {
@@ -421,14 +408,14 @@ test('a working tree with a programme file that turns governance on is a prepare
 
 // The parallel CI shards offer is retired (INT-TK421-1391): a turn-on carries no shard list (not even
 // one an older Toolkit left in the checkout), records no ci_shards and copies no shard workflow, and a
-// reply that still says shards= is refused with one plain line, so nothing is published.
+// reply that still says shards= is not read as an answer, so nothing is published.
 test('a turn-on carries no shard list, no ci_shards and no shard workflow, and a shards= reply publishes nothing', async t => {
   const ctx = fixture(t);
   fs.mkdirSync(path.join(ctx.repo, 'test'), { recursive: true });
   for (let index = 1; index <= 4; index += 1) fs.writeFileSync(path.join(ctx.repo, 'test', `case${index}.test.js`), "require('node:test')('ok', () => {});\n");
   fs.writeFileSync(path.join(ctx.repo, '.github', 'toolkit-test-shards.json'), `${JSON.stringify({ schema: 'toolkit-test-shards/v2', systems: {} }, null, 2)}\n`);
   const shown = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: [''] });
-  assert.doesNotMatch(shown.out, /shard/i, 'the bank says nothing about shards');
+  assert.doesNotMatch(shown.out, /shard/i, 'the questions say nothing about shards');
   const result = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'] });
   assert.equal(result.code, 0, result.err + result.out);
   assert.equal(result.published.length, 1, 'one turn-on pull request');
@@ -438,12 +425,12 @@ test('a turn-on carries no shard list, no ci_shards and no shard workflow, and a
   assert.doesNotMatch(result.out, /shard/i);
   for (const answer of ['shards=yes', 'all recommended, shards=never']) {
     const refused = await run(fixture(t), ['setup'], fakeGitHub(), { interactive: true, answers: [answer, ''] });
-    assert.match(refused.out, /^Toolkit no longer sets up CI shards; the CI check-up flags when they would pay\. Leave shards= out of your reply\./m, answer);
+    assert.match(refused.out, /Nothing was written\./, answer);
     assert.equal(refused.published.length, 0, answer);
   }
 });
 
-test('the bank reads the open governance pull requests again: one closed outside Toolkit no longer holds the turn-on, and an open one is named', async t => {
+test('the setup reads the open governance pull requests again: one closed outside Toolkit no longer holds the turn-on, and an open one is named', async t => {
   const ctx = fixture(t);
   const first = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'] });
   assert.equal(first.code, 0, first.err + first.out);
@@ -456,5 +443,6 @@ test('the bank reads the open governance pull requests again: one closed outside
   const open = await run(ctx, ['setup'], fakeGitHub(), { interactive: true, answers: ['all recommended'], opened: [PROPOSAL] });
   assert.equal(open.code, 0, open.err + open.out);
   assert.equal(open.published.length, 0, 'never a second one');
-  assert.match(open.out, /^A governance pull request is already open, so no second one was prepared: https:\/\/github\.com\/toolkit-test-fixture\/fresh\/pull\/4 \(turns governance on\)\. Merge it, or close it and type toolkit governance to answer again\. Nothing was written, and the rest of this answer was not used\.$/m);
+  assert.match(open.out, /Merge it, or close it and type toolkit governance to answer again\. Nothing was written\.$/m);
+  assert.doesNotMatch(open.out, /Question: /, 'no questions while it is open');
 });

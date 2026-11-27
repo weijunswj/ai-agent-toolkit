@@ -146,11 +146,10 @@ function respondSteady(event, input, options) {
       } catch { approvalNote = 'Toolkit could not record merge approvals from this message. A later merge still needs an unused recorded approval.'; }
       // Cloud override (Projects base-overrides list): the governance question is not asked in
       // cloud sessions, which cannot keep the owner's answer; nothing is held either way.
-      const decision = cloud ? { action: 'pass' } : new gate.PromptHold({ ...options, picker: true }).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
+      const decision = cloud ? { action: 'pass' } : new gate.PromptHold(options).decide({ cwd: input.cwd, prompt: input.prompt, sessionId: gate.sessionIdOf(input) });
       if (decision.action === 'block') return { decision: 'block', reason: [decision.reason, approvalNote].filter(Boolean).join('\n') };
       const text = [decision.context, approvalNote].filter(Boolean).join('\n');
-      const context = text ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } } : {};
-      return decision.notice ? { systemMessage: decision.notice, ...context } : context;
+      return text ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } } : {};
     }
     if (event === 'PreToolUse') {
       const decision = cloud ? null : new gate.ToolGate(options).decide(input);
@@ -172,10 +171,13 @@ function respondSteady(event, input, options) {
     }
     if (event === 'PostToolUse') {
       if (input.tool_name !== 'AskUserQuestion') return {};
-      const picked = new gate.PromptHold(options).picked({ cwd: input.cwd, sessionId: gate.sessionIdOf(input), toolUseId: input.tool_use_id, toolResponse: input.tool_response });
-      if (picked) return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: picked.context } };
+      // Toolkit's own merge card first: its tap is a merge approval and never a governance reply.
       const card = (options.mergeHold || mergeHold()).cardAnswered(input, { environment: options.environment || process.env, registryOptions: options.registryOptions, now: options.now, host: 'claude' });
-      return card ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: card.context } } : {};
+      if (card) return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: card.context } };
+      // Any other card the app chose to show: the owner's taps answer Toolkit's governance questions
+      // where they wait in this run, the way a typed reply would.
+      const reply = cloud ? null : new gate.PromptHold(options).carded({ cwd: input.cwd, sessionId: gate.sessionIdOf(input), toolResponse: input.tool_response });
+      return reply ? { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: reply.context } } : {};
     }
     exportHostSession(input, options.environment || process.env, gate);
     let fresh = null;

@@ -212,7 +212,7 @@ test('H-06 (unit): the terminal no is the answer itself: no second Enter, and no
   assert.equal(JSON.parse(status.stdout).state, 'UNDECIDED');
 });
 
-test('one off route: the terminal no, the card No and the bank Turn off make the same one off pull request', async (t) => {
+test('one off route: the terminal no, a recorded no and the summary\'s turn off governance make the same one off pull request', async (t) => {
   const published = {};
   const proposalFor = answer => ({ repository: 'example-owner/example-repo', number: 9, head: 'b'.repeat(40), url: 'https://github.com/example-owner/example-repo/pull/9', state: 'open', answer });
   const fixture = () => {
@@ -240,9 +240,9 @@ test('one off route: the terminal no, the card No and the bank Turn off make the
   const { run: cardRun } = new GovernanceProposals({ registryOptions: { registryPath: card.ctx.registryPath, testOnly: true } }).request(card.repo, 'no', { sessionId: 'host-session', epoch: 'c'.repeat(32) });
   assert.equal(await card.cli.main(['publish', '--run', cardRun]), 0, card.stderr.text() + card.stdout.text());
   published.card = card.transport.calls;
-  // The bank's Turn off, answered in the owner's terminal.
+  // The summary's turn off governance, said in the owner's terminal.
   const bank = fixture();
-  bank.replies.push('1.1=B');
+  bank.replies.push('turn off governance');
   assert.equal(await bank.cli.main(['setup']), 0, bank.stderr.text() + bank.stdout.text());
   published.bank = bank.transport.calls;
   for (const [route, calls] of Object.entries(published)) {

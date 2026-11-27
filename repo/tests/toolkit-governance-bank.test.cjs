@@ -1,12 +1,12 @@
 'use strict';
 
-// The governance question bank's owner check: only the owner's own next message after a bank was
-// shown gets a one-use bank ticket, and the tool gate lets through only the exact answer command with
-// that session's live ticket.
+// The owner check on Toolkit's governance questions: only the owner's own next reply after they were
+// shown (a typed message, or a tap on a question card the app chose to show) gets a one-use ticket,
+// and the tool gate lets through only the exact answer command with that session's live ticket. No
+// question card is forced or refused (INT-TK421-1389).
 
 const { assert, path, test, scripts, gate, governance, scratch, gitRepo, hold, tools } = require('./toolkit-governance-gate-support.cjs');
 const bank = require(path.join(scripts, 'toolkit-governance-bank.cjs'));
-const questionBank = require(path.join(scripts, 'toolkit-question-bank.cjs'));
 
 const REFERENCE = 'ABCD-EFGH-JKMN-PQRS';
 // The script the ticket names: the managed checkout's when this computer records one, else this copy's.
@@ -32,12 +32,11 @@ test('the owner\'s next own message after a bank gets one ticket, bound to that 
   const { ctx, repo, sessionId, prompts } = shownFixture(t);
   const reply = prompts.decide({ cwd: repo, prompt: 'use all the recommended ones', sessionId });
   assert.equal(reply.action, 'pass');
-  assert.match(reply.context, /first since governance bank ABCD-EFGH-JKMN-PQRS was shown or Toolkit asked them to reply again/);
-  // Toolkit checks the reply, so the agent never asks again in its own words or shows the bank again.
-  // Only a reply whose rows and choices are plain is put in form: a bare yes is sent as typed, never
-  // turned into all recommended.
-  assert.match(reply.context, /only where its rows and choices are plain \(all recommended, changes such as 1\.2=B, no store or store=<owner\/name>, in any words\) put it in that form\. Send anything else exactly as typed \(a bare yes or ok, an unknown row, two choices for one row, explain 1\.4, anything unclear\)/);
-  assert.match(reply.context, /Never show the bank again yourself/);
+  assert.match(reply.context, /^Toolkit governance: the user's message above is their own reply\. It is their first since Toolkit's governance questions were shown or Toolkit asked them to reply again\./);
+  // Toolkit checks the reply, so the agent never asks again in its own words or shows the questions
+  // again. Only a reply whose meaning is plain is put in the letter form; anything else is sent as given.
+  assert.match(reply.context, /where their meaning is plain, put it in the letter form, such as 1A 2A 3B \(with the store as owner\/name after 2B, such as 2B you\/TRANSPORT-project\), or, after setup, as turn off governance, task auto-merge on, task auto-merge off or change store\. Send anything else exactly as given/);
+  assert.match(reply.context, /Never show the questions again yourself/);
   assert.doesNotMatch(reply.context, /run `setup` again|show the bank before|ask one short question/);
   assert.ok(reply.context.includes(`node "${SCRIPT}" setup --answers "${REFERENCE}: ANSWER" --ticket `));
   const ticket = ticketIn(reply.context);
@@ -80,189 +79,41 @@ test('while a bank waits for the owner, no prompt is scheduled and no other bank
   assert.equal(tools(ctx).decide(bash(sessionId, `node "${SCRIPT}" setup`)), null, 'showing the bank is free');
 });
 
-test('the governance bank uses setup toolkit\'s format, asks only what is left, and reads both reply forms', () => {
-  const after = `After the merge, Toolkit also turns on, without asking again: ${require('../scripts/toolkit-governance-finish.cjs').WHAT}.`;
-  // Not decided yet: the answer itself turns governance on, so its row has no number and task
-  // auto-merge with merge train is the one question; the parts Toolkit keeps itself are numbered after it.
-  const undecided = bank.governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' }, permissions: { checked: true, host: 'codex', missing: 0, stale: 0 } });
-  const shown = bank.renderGovernanceBank(undecided);
-  assert.match(shown, /^# Toolkit governance choices - not decided: your answer turns it on$/m);
-  assert.match(shown, /^\| 1\.1 \| Task auto-merge with merge train \| Off \(needs governance\) \| A\. Keep current \| B\. On \|$/m);
-  assert.match(shown, /^\| - \| GitHub governance \| Not decided \| Your answer turns it on: Toolkit prepares one pull request, and it applies only after you merge it \| - \|$/m);
-  assert.equal(shown.split('\n').filter(line => /^\| (?:\d|-)/.test(line)).length, 4, 'one table: governance, task auto-merge, permissions and the App');
-  // How to keep governance off is said once, in the reply line.
-  assert.equal(shown.split('no store').length, 2, shown);
-  // The App command is the owner's because its setup refuses to run under an agent; the bank says why.
-  assert.match(shown, /^\| 1\.3 \| Governance App \| Not checked \| After your answer, Toolkit gives you one line to paste into PowerShell \(it refuses to run under an agent, so the App's private key never passes through one\): press Enter when it asks, then click Create and Install on GitHub\. Governance works without it, but its jobs on GitHub need it to open pull requests \| - \|$/m);
-  assert.doesNotMatch(shown, /undefined/);
-  assert.match(shown, /^\| 1\.2 \| Toolkit permissions \(Codex\) \| Toolkit lines: up to date \| Keep \| - \|$/m);
-  // The answer also covers the settings Toolkit adds on its own after the merge, so the bank names them before it.
-  assert.ok(shown.includes(after), shown);
-  assert.equal(shown.split(after).length, 2, 'named once');
-  assert.match(shown, /default-branch protection[^|]*ruleset that blocks force pushes[^|]*security settings/);
-  assert.match(shown, /^Reply all recommended to turn governance on as shown, or only your changes such as 1\.1=B\. To keep governance off instead, reply no store: Toolkit then makes nothing and asks again next session\. A plain yes, no or later works too: yes is all recommended, later keeps governance off the same way, and no prepares one pull request that turns governance off\. Say "explain 1\.1" for the full text of a row\.$/m);
-  // A failed GitHub read of the store and parent issue is one plain line, with no internal note.
-  const blocked = bank.renderGovernanceBank(bank.governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' }, adoption: { blocked: "couldn't check governance; ordinary work continues" } }));
-  assert.match(blocked, /^- Store and parent issue: Not checked yet\. GitHub could not be read just now, so Toolkit asks about them once it can, and an answer now makes nothing\. Type toolkit governance again in a moment\.$/m);
-  assert.doesNotMatch(blocked, /ordinary work continues/);
-  // A state the bank has no words for is never shown (it once printed "GitHub governance: undefined").
+
+// INT-TK421-1389: how a question shows is the app's choice. Where the app shows the governance
+// questions as a card, the owner's taps come back through PostToolUse and count as their reply, with the
+// same one-use ticket a typed reply gets. Red on the parent: a tap on any card but Toolkit's own
+// fixed governance card was dropped, so an answer the app took as a card never reached Toolkit.
+test('the owner\'s tap on a card the app chose to show is their reply to the questions, with the same one ticket', (t) => {
+  const { ctx, repo, sessionId, tickets, epochs } = shownFixture(t);
+  const prompts = new gate.PromptHold({ registryOptions: ctx.options, environment: {} });
+  const questions = [{ question: 'Turn on GitHub governance for owner/target?', header: 'Governance', multiSelect: false, options: [{ label: 'A. Yes', description: '' }, { label: 'B. Later', description: '' }] }];
+  const tapped = prompts.carded({ cwd: repo, sessionId, toolResponse: { questions, answers: { [questions[0].question]: 'A. Yes', 'Keep records in owner/TRANSPORT-target?': 'A. Use it' } } });
+  assert.ok(tapped, 'the tap is taken as the reply');
+  assert.match(tapped.context, /^Toolkit governance: the user answered a question card: "Turn on GitHub governance for owner\/target\?": A\. Yes; "Keep records in owner\/TRANSPORT-target\?": A\. Use it\. It is their first since Toolkit's governance questions were shown/);
+  const ticket = ticketIn(tapped.context);
+  assert.ok(ticket);
+  // The exact command the context gives, with the answer in place of ANSWER, passes the tool gate.
+  const given = /^ {2}(node "[^"]+" setup --answers "[^"]+" --ticket [0-9a-f]{32})$/m.exec(tapped.context)[1];
+  assert.equal(tools(ctx).decide(bash(sessionId, given.replace('ANSWER', '1A 2A 3A'))), null);
+  assert.equal(tickets.pendingFor(sessionId, epochs.get(sessionId)), null, 'one ticket per showing');
+  // A second tap, with no questions waiting, answers nothing.
+  assert.equal(prompts.carded({ cwd: repo, sessionId, toolResponse: { questions, answers: { [questions[0].question]: 'B. Later' } } }), null);
+  // No answers (a dismissed card), or a launched session, gives nothing.
+  const again = shownFixture(t);
+  assert.equal(new gate.PromptHold({ registryOptions: again.ctx.options, environment: {} }).carded({ cwd: again.repo, sessionId: again.sessionId, toolResponse: { questions, answers: {} } }), null);
+  const launched = shownFixture(t, { TOOLKIT_GATE_ROLE: 'G1' });
+  const fromLauncher = new gate.PromptHold({ registryOptions: launched.ctx.options, environment: { TOOLKIT_GATE_ROLE: 'G1' } }).carded({ cwd: launched.repo, sessionId: launched.sessionId, toolResponse: { questions, answers: { [questions[0].question]: 'A. Yes' } } });
+  assert.equal(ticketIn(fromLauncher?.context), undefined);
+});
+
+test('Toolkit forces no question card and refuses none, its old governance card included', (t) => {
+  const { ctx, repo, sessionId } = shownFixture(t);
+  const card = { questions: [{ question: 'Turn on GitHub governance (issues, records, evidence store) for this repository?', header: 'Governance', multiSelect: false, options: [{ label: 'Yes', description: 'changed' }, { label: 'No', description: '' }] }] };
+  assert.equal(tools(ctx).decide({ tool_name: 'AskUserQuestion', session_id: sessionId, cwd: repo, tool_use_id: 'tu-1', tool_input: card }), null);
+  assert.equal(gate.PICKER_INPUT, undefined, 'no fixed governance card is exported');
+  // A state the rows have no words for is never shown (it once printed "GitHub governance: undefined").
   for (const unknown of ['UNAVAILABLE', 'ERROR', undefined]) {
     assert.throws(() => bank.governanceBankSpecs({ state: { state: unknown, repository: 'owner/app', root: '/x' } }), /governance bank cannot show the state/, String(unknown));
   }
-  for (const spec of undecided) assert.ok(spec.choices.length <= 3, spec.id);
-  const reference = bank.bankReference(undecided);
-  assert.deepEqual(bank.parseBankAnswer(`${reference}: all recommended`, undecided), { governance: 'on', taskAutoMerge: 'keep', store: null, governanceApp: 'setup', permissionBlocks: 'keep' });
-  assert.deepEqual(bank.parseBankAnswer(`${reference}: 1.1=B`, undecided), { governance: 'on', taskAutoMerge: 'on', store: null, governanceApp: 'setup', permissionBlocks: 'keep' }, 'on together with turning governance on');
-  assert.deepEqual(bank.parseBankAnswer(`${reference}: no store`, undecided), { noStore: true });
-  assert.throws(() => bank.parseBankAnswer(`${reference}: no store, 1.1=B`, undecided), /No store keeps governance off, so it goes on its own/);
-  const outdated = bank.governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' }, permissions: { checked: true, host: 'claude', missing: 2, stale: 4 } });
-  assert.match(bank.renderGovernanceBank(outdated), /^\| 1\.2 \| Toolkit permissions \(Claude Code\) \| Toolkit lines: 2 missing, 4 old \| After your answer, Toolkit lists every permission line and gives you one command to run yourself [^|]* \| Leave: do not run the command \|$/m);
-  assert.equal(bank.parseBankAnswer(`${bank.bankReference(outdated)}: 1.1=A`, outdated).permissionBlocks, 'update');
-  // Other lines (not Toolkit's) are counted on the same row and never change ready or push a command.
-  const row = permissions => bank.governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' }, permissions: { checked: true, host: 'claude', ...permissions } }).find(spec => spec.id === 'permission-blocks');
-  const both = row({ missing: 2, stale: 1, other: 45 });
-  assert.equal(both.current, 'Toolkit lines: 2 missing, 1 old. Other lines: 45 to review');
-  assert.match(both.recommended_text, /Other lines stay unless you pick them from the list$/);
-  assert.deepEqual([both.permissions_update, both.required.ready], [true, false]);
-  const others = row({ missing: 0, stale: 0, other: 45 });
-  assert.equal(others.current, 'Toolkit lines: up to date. Other lines: 45 to review');
-  assert.equal(others.recommended_text, 'Say review permissions to see them; nothing changes unless you pick lines');
-  assert.deepEqual([others.permissions_update, others.required.ready], [false, true], 'other lines never block ready or push a command');
-  const clean = row({ missing: 0, stale: 0, other: 0 });
-  assert.deepEqual([clean.current, clean.recommended_text, clean.required.ready], ['Toolkit lines: up to date', '', true]);
-  assert.throws(() => bank.parseBankAnswer('AAAA-AAAA-AAAA-AAAA: all recommended', undecided), /Governance question bank reference is stale/);
-  assert.throws(() => bank.parseBankAnswer(`${reference}: 1.9=B`, undecided), /^Error: This bank has no row 1\.9\.$/);
-  // A repository with no required checks yet: the status row says protection waits.
-  const fresh = adoption => bank.renderGovernanceBank(bank.governanceBankSpecs({ state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' },
-    adoption: { repository: 'owner/app', store: { repository: 'owner/TRANSPORT-app', create: true }, found_store: null, store_name: 'TRANSPORT-app', parent: { issue: null, create: true }, visibility: 'private', unknown: [], ...adoption } }));
-  // The migrate step is in the turn-on result (turnOnSummary), not the bank.
-  assert.match(fresh({ checks: [] }), /^- Required checks: None yet\. Default-branch protection waits for them\.$/m);
-  assert.match(fresh({ checks: ['validate'] }), /^- Required checks: validate\. Taken from what the default branch already enforces\.$/m);
-  // Off: governance is the question, with Keep current recommended; Turn on names the post-merge
-  // settings under the table. Already on: nothing is added.
-  const disabled = bank.renderGovernanceBank(bank.governanceBankSpecs({ state: { state: 'DISABLED', repository: 'owner/app', root: '/x' } }));
-  assert.match(disabled, /\| 1\.1 \| GitHub governance \| Off \| A\. Keep current \| B\. Turn on \|/);
-  assert.match(disabled, /\| 1\.2 \| Task auto-merge with merge train \| Off \(needs governance\) \| A\. Keep current \| B\. On \(needs governance on\) \|/);
-  assert.ok(disabled.includes(`1.1 B. Turn on: Toolkit prepares one pull request that turns governance on. It applies only after you merge it. ${after}`), disabled);
-  const enabled = bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' }, task: 'after-gates', merged: { store: { repository: 'owner/store' }, required_checks: [] } });
-  assert.ok(!bank.renderGovernanceBank(enabled).includes(after));
-  assert.notEqual(bank.bankReference(enabled), reference, 'a different state is a different bank');
-  assert.deepEqual(bank.parseBankAnswer(`${bank.bankReference(enabled)}: 1.1=B`, enabled), { governance: 'off', taskAutoMerge: 'keep', store: null, governanceApp: 'keep', permissionBlocks: 'keep' }, 'every row left out stays as it is; an App never read is unknown, so no setup line');
-  assert.throws(() => bank.parseBankAnswer(`${bank.bankReference(enabled)}: store=owner/other`, enabled), /store= applies only in an answer that turns governance on here/);
-});
-
-// The parallel CI shards offer is retired (INT-TK421-1391): the CI check-up flags slow CI and the
-// repository's controller arranges shards in its own CI. The bank shows no shards row in any state, a
-// binding an older Toolkit wrote with ci_shards included, and a reply from an older bank that still
-// says shards= is refused with one plain line, so nothing is written for it.
-test('the bank has no parallel CI shards row in any state, and a shards= reply gets one retired line and changes nothing', () => {
-  const store = { store: { repository: 'owner/store' }, required_checks: [] };
-  const on = { state: 'ENABLED', repository: 'owner/app', root: '/x' };
-  const states = {
-    governed: { state: on, merged: store },
-    'governed, an older Toolkit answered yes': { state: on, merged: { ...store, ci_shards: { answer: 'yes' } } },
-    'governed, an older Toolkit answered never': { state: on, merged: { ...store, ci_shards: { answer: 'never' } } },
-    'programme file not read': { state: on, merged: null, mergedRead: { fresh: false, refresh_error: 'read-timed-out' } },
-    'not decided (turning on)': { state: { state: 'UNDECIDED', repository: 'owner/app', root: '/x' } },
-    off: { state: { state: 'DISABLED', repository: 'owner/app', root: '/x' } },
-  };
-  const retired = /^Error: Toolkit no longer sets up CI shards; the CI check-up flags when they would pay\. Leave shards= out of your reply\.$/;
-  for (const [name, input] of Object.entries(states)) {
-    const specs = bank.governanceBankSpecs(input);
-    assert.deepEqual(specs.filter(spec => spec.id === 'ci-shards'), [], name);
-    assert.doesNotMatch(bank.renderGovernanceBank(specs), /shard/i, name);
-    for (const reply of ['all recommended, shards=yes', 'shards=never', '1.1=A, shards=not-now']) {
-      assert.throws(() => bank.parseBankAnswer(reply, specs, { requireBankReference: false }), retired, `${name}: ${reply}`);
-    }
-  }
-});
-
-// Explain is read-only: the owner's "explain 1.4" spends no ticket and keeps the bank open, and the
-// tool gate lets through exactly the ticketless explain command; any other reply without the live
-// ticket is still refused.
-test('an explain message gets the ticketless explain command, keeps the bank open, and only that command passes without a ticket', (t) => {
-  const { ctx, repo, sessionId, tickets, prompts, epochs } = shownFixture(t);
-  const explain = prompts.decide({ cwd: repo, prompt: 'explain 1.4', sessionId });
-  assert.equal(explain.action, 'pass');
-  const command = `node "${SCRIPT}" setup --answers "${REFERENCE}: explain 1.4"`;
-  assert.ok(explain.context.includes(command), explain.context);
-  assert.equal(ticketIn(explain.context), undefined, 'an explain gets no ticket');
-  assert.ok(tickets.pendingFor(sessionId, epochs.get(sessionId)), 'the bank still waits for the owner\'s answer');
-  assert.equal(tools(ctx).decide(bash(sessionId, command)), null, 'the ticketless explain command passes');
-  assert.equal(tools(ctx).decide(bash('another-session', `node "${SCRIPT}" setup --answers "explain 2.1"`)), null, 'an explain writes nothing, in any session');
-  for (const refused of [
-    `${command}; echo done`,
-    `node "${SCRIPT}" setup --answers "${REFERENCE}: 1.4=A"`,
-    `node "${SCRIPT}" setup --answers "${REFERENCE}: explain 1.4, 1.4=A"`,
-    `node "${SCRIPT}" setup --answers "$X explain 1.4"`,
-    `node "/elsewhere/toolkit-governance.cjs" setup --answers "${REFERENCE}: explain 1.4"`,
-  ]) assert.ok(tools(ctx).decide(bash(sessionId, refused))?.deny, refused);
-  const answer = prompts.decide({ cwd: repo, prompt: 'all recommended', sessionId });
-  assert.ok(ticketIn(answer.context), 'the next own message still answers the bank with a ticket');
-});
-
-// One table (INT-TK421-1359 and 1360): the two choices, then the parts Toolkit keeps itself, each with
-// its mark and one next step while governance is on, under a top line that says what is left. A part
-// GitHub could not be read for is unknown, never missing, and an answer sets up nothing for it.
-test('the governed bank is one table whose top line counts the steps left, and an unread part is unknown, never missing', () => {
-  const merged = { store: { repository: 'owner/TRANSPORT-app' }, parents: [{ issue: 7 }], required_checks: ['validate'] };
-  const specs = extra => bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' }, task: 'off', train: 'on', merged,
-    permissions: { checked: true, host: 'claude', missing: 0, stale: 0 }, app: { variable: 'found', secret: 'found' }, ...extra });
-  const rows = shown => shown.split('\n').filter(line => /^\| \d/.test(line)).map(line => line.split(' | ').slice(0, 2).join(' | '));
-  const ready = bank.renderGovernanceBank(specs({}));
-  assert.match(ready, /^# Toolkit governance choices - ON, ready$/m);
-  assert.deepEqual(rows(ready), ['| 1.1 | GitHub governance', '| 1.2 | Task auto-merge with merge train', '| 1.3 | Toolkit permissions (Claude Code)', '| 1.4 | Governance App', '| 1.5 | Evidence store']);
-  assert.doesNotMatch(ready, /Merge trains|Parent issue:|Required checks:/, 'trains, parent and checks are left out of the table');
-  const notReady = specs({ permissions: { checked: true, host: 'claude', missing: 3, stale: 0 }, app: { variable: 'missing', secret: 'missing' } });
-  assert.match(bank.renderGovernanceBank(notReady), /^# Toolkit governance choices - ON, not ready, 2 steps left$/m);
-  assert.match(bank.renderGovernanceBank(notReady), /^\| 1\.4 \| Governance App \| Not ready: Not set up \| Next step: paste the one line Toolkit gives after your answer \| - \|$/m);
-  // GitHub could not be read: unknown, not a step left, and no App setup line comes with the answer.
-  const unread = specs({ app: { variable: 'unverified', secret: 'unverified', reason: 'gh-unavailable' } });
-  assert.match(bank.renderGovernanceBank(unread), /^# Toolkit governance choices - ON, ready; 1 part could not be checked$/m);
-  assert.match(bank.renderGovernanceBank(unread), /^\| 1\.4 \| Governance App \| Unknown: GitHub could not be read \(gh-unavailable\) \| /m);
-  assert.equal(bank.parseBankAnswer('all recommended', unread, { requireBankReference: false }).governanceApp, 'keep');
-  // A part Toolkit keeps itself takes no answer, and says how it changes instead.
-  assert.throws(() => bank.parseBankAnswer('1.5=B', unread, { requireBankReference: false }), /^Error: Row 1\.5 Evidence store takes no answer: Change location: say change store, and the controller sets up the new store with you; nothing moves on this answer\.$/);
-  assert.match(bank.explainText(unread, '1.4'), /^1\.4 Governance App\nCurrent: GitHub could not be read \(gh-unavailable\)\./);
-});
-
-// G2 round 1 of PR 1545 (evidence/g2-1545-r1): a half-read App is unknown, never a step left (M1); an
-// unread programme file keeps the store row, unknown (L3).
-test('a part GitHub could not read, even in half, is unknown and never a step left', () => {
-  const merged = { store: { repository: 'owner/TRANSPORT-app' }, parents: [{ issue: 7 }], required_checks: ['validate'] };
-  const specs = extra => bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' }, task: 'off', train: 'on', merged,
-    permissions: { checked: true, host: 'claude', missing: 0, stale: 0 }, app: { variable: 'found', secret: 'found' }, ...extra });
-  for (const half of [{ variable: 'found', secret: 'unverified', reason: 'reader-failed' }, { variable: 'unverified', secret: 'found', reason: 'reader-failed' }]) {
-    const shown = bank.renderGovernanceBank(specs({ app: half }));
-    assert.match(shown, /^# Toolkit governance choices - ON, ready; 1 part could not be checked$/m, JSON.stringify(half));
-    assert.match(shown, /^\| 1\.4 \| Governance App \| Unknown: GitHub could not be read \(reader-failed\) \| /m);
-    assert.equal(bank.parseBankAnswer('all recommended', specs({ app: half }), { requireBankReference: false }).governanceApp, 'keep');
-  }
-  // Partly set up only when the other half reads missing.
-  assert.match(bank.renderGovernanceBank(specs({ app: { variable: 'found', secret: 'missing' } })), /^\| 1\.4 \| Governance App \| Not ready: Partly set up \| /m);
-  const unread = bank.renderGovernanceBank(specs({ merged: null, mergedRead: { fresh: false, refresh_error: 'read-timed-out' } }));
-  assert.match(unread, /^# Toolkit governance choices - ON, ready; 1 part could not be checked$/m, 'the store');
-  assert.match(unread, /^\| 1\.5 \| Evidence store \| Unknown: Not read \| /m);
-});
-
-// INT-TK421-1360 part 3: the store row reads the last background check of the store
-// (toolkit-governance-parts.cjs). One that cannot be used is a step left; unread, none saved or a
-// result for another store keeps the row as the programme file sets it.
-test('an evidence store the last check could not use is not ready, with its one step; unread or unchecked stays as set', () => {
-  const merged = { store: { repository: 'owner/TRANSPORT-app' }, parents: [{ issue: 7 }], required_checks: ['validate'] };
-  const specs = storeCheck => bank.governanceBankSpecs({ state: { state: 'ENABLED', repository: 'owner/app', root: '/x' }, task: 'off', train: 'on', merged,
-    permissions: { checked: true, host: 'claude', missing: 0, stale: 0 }, app: { variable: 'found', secret: 'found' }, storeCheck });
-  const missing = bank.renderGovernanceBank(specs({ state: 'missing', checked_at: '2026-11-26T09:00:00.000Z' }));
-  assert.match(missing, /^# Toolkit governance choices - ON, not ready, 1 step left$/m);
-  assert.match(missing, /^\| 1\.5 \| Evidence store \| Not ready: owner\/TRANSPORT-app \| Next step: sign in to GitHub on this computer with an account that can see it, or say change store and the controller sets up another with you \| Change location: say change store, and the controller sets up the new store with you; nothing moves on this answer \|$/m);
-  assert.match(bank.explainText(specs({ state: 'missing' }), '1.5'), /Set in the programme file, but at the last check it cannot be found with this computer's GitHub sign-in, so programme records and evidence cannot be saved/);
-  assert.match(bank.renderGovernanceBank(specs({ state: 'not-private' })), /^\| 1\.5 \| Evidence store \| Not ready: owner\/TRANSPORT-app \| Next step: make it private again on GitHub, or say change store and the controller sets up another with you \|/m);
-  assert.match(bank.renderGovernanceBank(specs({ state: 'read-only' })), /^# Toolkit governance choices - ON, not ready, 1 step left$/m);
-  for (const fine of [null, { state: 'usable' }, { state: 'unverified' }]) {
-    const shown = bank.renderGovernanceBank(specs(fine));
-    assert.match(shown, /^# Toolkit governance choices - ON, ready$/m, JSON.stringify(fine));
-    assert.match(shown, /^\| 1\.5 \| Evidence store \| Ready: owner\/TRANSPORT-app \| Set in the programme file \|/m, JSON.stringify(fine));
-  }
-  // The row takes no answer either way.
-  assert.throws(() => bank.parseBankAnswer('1.5=A', specs({ state: 'missing' }), { requireBankReference: false }), /takes no answer/);
 });

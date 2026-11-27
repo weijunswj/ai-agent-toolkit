@@ -143,7 +143,7 @@ test('P-9 a missing App or an unusable store is checked again after an hour, so 
   assert.equal(fs.statSync(file).mtimeMs, 0, 'a claim held by another session is not rewritten');
 });
 
-test('P-10 once the governance bank reads the App as set up and the store as usable, the next session start says nothing about them', async t => {
+test('P-10 once the governance summary reads the App as set up and the store as usable, the next session start says nothing about them', async t => {
   const support = require('./toolkit-governed-fixture-support.cjs');
   const { APP } = require('../scripts/toolkit-governance-app.cjs');
   const { ToolkitGovernanceCli } = require('../scripts/toolkit-governance.cjs');
@@ -168,8 +168,8 @@ test('P-10 once the governance bank reads the App as set up and the store as usa
     permissionsChecker: () => ({ checked: true, host: 'claude', missing: 0, stale: 0, update: 'x', remove: 'y' }),
     environment: { TOOLKIT_HOST_SESSION: 'parts-session' } });
   await cli.main(['setup']);
-  assert.match(out, /\| Governance App \| Ready: Set up \|/);
-  assert.match(out, /\| Evidence store \| Ready: toolkit-test-fixture\/store \|/, 'the bank shows its own store read, not the saved one');
+  assert.match(out, /\| Governance App \| Set up \|/);
+  assert.match(out, /\| Evidence store \| Ready: toolkit-test-fixture\/store \(private\) \|/, 'the summary shows its own store read, not the saved one');
   assert.deepEqual(lines(), [], 'the session start agrees with the bank the owner just read');
   // A bank read GitHub could not answer keeps the saved result: unknown is never "fixed".
   parts.record(registryOptions, state.repository_id, { app: APP_MISSING, store: { state: 'not-private' }, storeRepository: 'toolkit-test-fixture/store' });

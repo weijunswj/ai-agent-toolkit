@@ -1,29 +1,26 @@
 'use strict';
 
-// The governance question bank: `toolkit governance` (also `setup governance` and `refresh governance`)
-// shows the repository's governance choices in the same bank format as `setup toolkit`
-// (toolkit-question-bank.cjs), and the owner answers in chat with `all recommended` or only their
-// changes, such as `1.2=B`.
+// What `toolkit governance` (also `setup governance` and `refresh governance`) reads about one
+// repository, and how the owner's reply to it is taken. The guided questions
+// (toolkit-governance-guided.cjs) and the governance summary (toolkit-governance-summary.cjs) show it;
+// this module keeps the parts both reuse: the rows Toolkit reads (governanceBankSpecs, whose reference
+// binds a reply to what was shown) and the one-use reply tickets.
 //
-// Only the owner answers. The bank keeps the governance gate's rule the way the yes/no reply does
-// (owner decision of 28 Oct: the agent reads what the user means, Toolkit only checks it is the
-// user's own reply):
-//   1. Showing the bank notes, in Toolkit's private user state, that this run of this session was
-//      shown bank <reference> for this repository (BankTickets.shown).
-//   2. The UserPromptSubmit hook gives the owner's next own message in that run a one-use bank ticket
-//      bound to the session, the run, the repository and the bank reference (BankTickets.issue). A
-//      launched session, a relayed or scheduled prompt, a repeated Projects delivery or a reply after
-//      another session started in the repository gets none.
+// Only the owner answers (owner decision of 28 Oct: the agent reads what the user means, Toolkit only
+// checks it is the user's own reply):
+//   1. Showing the questions or the summary notes, in Toolkit's private user state, that this run of
+//      this session was shown <reference> for this repository (BankTickets.shown).
+//   2. The UserPromptSubmit hook gives the owner's next own message in that run a one-use ticket bound
+//      to the session, the run, the repository and the reference (BankTickets.issue); the PostToolUse
+//      hook does the same for their tap on a question card the app chose to show. A launched session,
+//      a relayed or scheduled prompt, a repeated Projects delivery or a reply after another session
+//      started in the repository gets none.
 //   3. The agent sends the reply it read with that ticket: `toolkit-governance.cjs setup --answers
-//      "<reference>: all recommended" --ticket <ticket>`. The command spends the ticket (BankTickets.take)
+//      "<reference>: 1A 2A 3A" --ticket <ticket>`. The command spends the ticket (BankTickets.take)
 //      and writes or prepares nothing without it. The tool gate lets only that exact command through.
-//   4. The bank is shown once. A reply that cannot be used (unread, an unknown row or a changed row)
-//      gets a short line, and an answer that was used gets what it did; either way the command notes
-//      the same bank again for the run (BankTickets.rearm), so the owner's next own message gets a new
-//      one-use ticket the same way.
-//   5. "explain 1.4" is read-only: it needs no ticket, spends none and writes nothing, before or after
-//      an answer (`setup --answers "<reference>: explain 1.4"`, bankExplainCommand). The hook leaves
-//      the shown bank open for the owner's next own message.
+//   4. The questions are shown once. A reply that cannot be used gets a short line, and an answer that
+//      was used gets what it did; either way the command notes the same questions again for the run
+//      (BankTickets.rearm), so the owner's next own reply gets a new one-use ticket the same way.
 // A pull request it prepares still decides nothing until the owner merges it.
 
 const crypto = require('node:crypto');
@@ -36,10 +33,8 @@ const { managedScript } = require('./toolkit-user-state.cjs');
 
 const BANK_HOST = 'governance';
 // What a yes to Turn on also covers: the settings Toolkit adds on its own after the merge
-// (toolkit-governance-finish.cjs), and what the personal data check its pull request adds lets through,
-// named here so the owner sees them before answering.
+// (toolkit-governance-finish.cjs), and what the personal data check its pull request adds lets through.
 const AFTER_MERGE = `After the merge, Toolkit also turns on, without asking again: ${require('./toolkit-governance-finish.cjs').WHAT}. Where the pull request adds the personal data check, that check lets images and fonts through without reading them and names each one; any other file it cannot read fails until its path is listed.`;
-const BANK_TITLE = 'Toolkit governance choices';
 const TICKETS_BASENAME = 'governance-bank-tickets.v1.json';
 const TICKETS_SCHEMA = 'toolkit.governance-bank-tickets.v1';
 const MAX_AGE_MS = 30 * 60 * 1000;
@@ -49,37 +44,19 @@ const EPOCH = /^[0-9a-f]{32}$/;
 const OWN_SCRIPT = path.join(__dirname, 'toolkit-governance.cjs');
 // The script the agent is told to run: the managed checkout's when there is one, else this copy's.
 const script = () => managedScript('toolkit-governance.cjs');
-// Questions are numbered in the order they are built, without gaps; the table numbers the parts Toolkit
-// keeps itself after them (tableRows), and those take no answer. A number can move between runs, so a
-// reply to an older bank where any number moved is never applied: the row digests are keyed by number
-// too (rowDigests), and the owner gets the new bank instead.
-// The rows left out of the table that the merged programme file binds (`bound`, the few words each adds)
-// are shown as one line under it, in this order, with how to change them said once.
 const BOUND = 'Bound in the merged programme file';
-const BOUND_ORDER = Object.freeze(['parent-issue', 'required-checks']);
-// What a table row the programme file sets says in its Recommended column.
 const SET_IN = 'Set in the programme file';
-const BOUND_CHANGE = 'To change them, edit that file in a pull request and merge it.';
 // The evidence store's other choice: the controller sets up a new store with the owner. No command moves
-// a store yet, so nothing is promised to move, and this bank's answer moves nothing.
+// a store yet, so nothing is promised to move, and no answer moves anything.
 const STORE_MOVE = 'Change location: say change store, and the controller sets up the new store with you; nothing moves on this answer';
-// The one table's rows, in order; every other row is a line under it.
-const TABLE_ORDER = Object.freeze(['governance', 'task-auto-merge', 'permission-blocks', 'governance-app', 'evidence-store']);
-// Where governance is decided the bank has one section and builds the GitHub governance question
-// first, so it is always row 1.1 (a test pins it).
 const GOVERNANCE_REF = '1.1';
 const APP_NAMES_ON_GITHUB = (({ variable, secret }) => `the ${variable} variable and the ${secret} secret`)(require('./toolkit-governance-app.cjs').APP);
-// The line after a reply that could not be used, asking for the reply again.
-const REPLY_AGAIN = 'Reply again with all recommended or only your changes, such as 1.1=B.';
-// After an answer the bank already used, a reply it cannot read (a bare ok or thanks) loses nothing: it
-// says so, and how to change one more row.
-const ANSWER_USED = 'Your earlier answer to this bank was already used, and this reply changes nothing. Nothing more was written.';
-const CHANGE_ANOTHER = 'To change a row, reply with only that change, such as 1.1=B.';
 
 // The app each permission row belongs to; every app keeps its own permission lines.
 const APP_NAMES = Object.freeze({ claude: 'Claude Code', codex: 'Codex' });
 
 const STATE_LABEL = Object.freeze({ ENABLED: 'On', DISABLED: 'Off', UNDECIDED: 'Not decided' });
+
 // ---- the rows -----------------------------------------------------------------------------------
 
 // `change` says how the owner changes or stops something already set; it follows the text. A status
@@ -99,22 +76,20 @@ function statusRow({ id, section, title, current, text = '', change = '', bound 
   };
 }
 
-// The bank for one repository. `state` is the governance state, `task` the merged switch ('after-gates',
+// The rows for one repository. `state` is the governance state, `task` the merged switch ('after-gates',
 // 'off' or 'unset'), `merged` the merged binding (or null), `permissions` { missing, checked }, and
 // `adoption` what turning governance on would make in a repository that is not prepared yet
 // (toolkit-governance-adopt.cjs adoptionPlan; null when it is prepared or already on), `train` the
 // merged merge trains switch ('on' or 'off'), `mergedRead` the one read `merged` and `train` come
 // from (toolkit-governance-state.cjs mergedBindingRead: { fresh, refresh_error }, or null; a stale
-// one is said on the bound line), and `app` the governance App's variable and secret on GitHub
+// one is said on the bound line), `app` the governance App's variable and secret on GitHub
 // (toolkit-governance-app.cjs presence; null when not read), and `copies` the instruction copies the
 // cleanup route would remove ({ files, held?, step?, refused? }: `held` is why the pinned sweep copies
 // hold the cleanup and `step` what clears it, `refused` why the programme file stops it; null when not
 // read).
 //
-// The bank asks at most two questions: whether governance stays on or off where it is decided (in a
-// repository not decided yet the turn-on card already asked, so an answer turns it on), and task
-// auto-merge. Everything else is a status row: what is set, or the Toolkit default the answer applies
-// (the evidence store, the App and permission commands, the copies cleanup). Merge trains keep their stored value and are not asked.
+// These rows are what Toolkit read, as data: the reference that binds a reply to what was shown is
+// built from them. Neither shows them as a table.
 function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = null, mergedRead = null, permissions = { checked: false, missing: 0 }, adoption = null, app = null, copies = null, storeCheck = null }) {
   // Only a state read from the merged binding has words here; any other (GitHub could not be read)
   // gets the CLI's line to type it again, never a bank.
@@ -255,242 +230,24 @@ function governanceBankSpecs({ state, task = 'unset', train = 'off', merged = nu
 function bankReference(specs) { return specs[0]?.presentation.bank_reference || ''; }
 
 // What the agent is told after every output that follows an answer: the owner sees Toolkit's own lines
-// as printed and nothing else, so the bank is never shown again in reply to an answer.
+// as printed and nothing else, so the questions are never shown again in reply to an answer.
 // A command above is the owner's to run (permissions, the governance App), in Toolkit's own code block
 // so the app shows it as typed; it is shown, never run.
-const agentsAfterAnswer = () => `Agents: this line is for you alone. Show the owner the lines above exactly as printed, code blocks from Toolkit included, leaving out this line, then stop. Add nothing, ask nothing, post no card, and never show the bank again unless the owner types toolkit governance. Add no code block of your own, and never run a command above yourself. If their next own message comes back with a Toolkit ticket, send it as that ticket says. If they only ask to explain a row, such as explain 1.1, run node "${script()}" setup --answers "explain 1.1" with that row: it needs no ticket and writes nothing.`;
+const agentsAfterAnswer = () => 'Agents: this line is for you alone. Show the owner the lines above exactly as printed, code blocks from Toolkit included, leaving out this line, then stop. Add nothing, add no code block of your own, and never run a command above yourself. If their next own message comes back with a Toolkit ticket, send it as that ticket says.';
 
-// The one reply line under the bank, with an example taken from its first question with a choice to
-// change.
-function replyLine(specs) {
-  const first = specs.find(spec => !spec.report_only && spec.choices.length > 1) || specs.find(spec => !spec.report_only);
-  const example = first ? `${first.presentation.question_ref}=${first.choices[1]?.presentation_ref || 'A'}` : '1.1=B';
-  const explain = first ? first.presentation.question_ref : '1.1';
-  const extra = specs.some(spec => spec.id === 'evidence-store' && !spec.bound) ? ' Add store= only to change that default.' : '';
-  if (specs.some(spec => spec.turns_on)) return `Reply all recommended to turn governance on as shown, or only your changes such as ${example}.${extra} To keep governance off instead, reply no store: Toolkit then makes nothing and asks again next session. A plain yes, no or later works too: yes is all recommended, later keeps governance off the same way, and no prepares one pull request that turns governance off. Say "explain ${explain}" for the full text of a row.`;
-  return `Reply all recommended, or only your changes such as ${example}. Rows you leave out stay as they are; each change is a pull request you merge.${extra} Say "explain ${explain}" for the full text of a row.`;
-}
+// After the answer that prepared the setup pull request: the agent carries the setup through in the
+// same turn. The merge goes through Toolkit's merge hold, so the owner's own approval (its merge card,
+// or their typed merge line) is what lands it; the finish then sets up what needs the merged files, and
+// the summary gives the owner's two commands and the table.
+const agentsAfterTurnOn = number => `Agents: this line is for you alone. Show the owner the lines above exactly as printed, leaving out this line. Then, in this same turn: wait for the checks of pull request #${number} (gh pr checks ${number} --watch --interval 30). When they pass, merge it with gh pr merge ${number} --merge and do what Toolkit's merge hold says: the owner approves the merge there, never you. After it has merged, run node "${script()}" finish, then node "${script()}" setup, and show each output as printed. If a check fails or the owner does not approve, tell them in one line and stop. Never merge any other way, and never run a command shown to the owner.`;
 
-// The table's rows with the number each shows: a question keeps its own number (the one an answer
-// names), and the rows Toolkit keeps itself are numbered after the questions, in TABLE_ORDER. Where the
-// answer itself turns governance on, its row has no number: there is nothing to choose there.
-function tableRows(specs) {
-  const rows = TABLE_ORDER.map(id => specs.find(spec => spec.id === id)).filter(Boolean);
-  const section = specs[0]?.presentation.section_index || 1;
-  let next = Math.max(0, ...rows.filter(spec => !spec.report_only).map(spec => spec.presentation.question_index));
-  return rows.map(spec => ({ spec, ref: !spec.report_only ? spec.presentation.question_ref : spec.turns_on ? '-' : `${section}.${next += 1}` }));
-}
+// Under the guided questions (toolkit-governance-guided.cjs).
+const agentsGuided = () => 'Agents: this line is for you alone. Put the text above in your closing message as printed, leaving out this line, and end your turn; how the questions show (text, a card or the end-of-turn box) is the app\'s choice. The owner\'s reply, typed or tapped, comes back to you with a one-use ticket: send it as that ticket says. Never answer for them, and never show these questions again after they reply.';
 
-// Whether governance is on here (its row reads On), so the required parts carry their marks.
-const isOn = specs => specs.some(spec => spec.id === 'governance' && spec.current === 'On');
+// Under the governance summary (toolkit-governance-summary.cjs).
+const agentsSummary = () => `Agents: this line is for you alone. Show the owner the lines above exactly as printed, code blocks from Toolkit included, leaving out this line, then stop. Never run a command above yourself. When the owner says they have run them, run node "${script()}" setup again and show its output. A change they ask for in words comes back with a one-use ticket: send it as that ticket says.`;
 
-// The bank's top line: OFF, not decided, or ON with whether every required part is ready; a part that
-// could not be read is unknown, never counted as a step left.
-function topLine(specs) {
-  const governanceRow = specs.find(spec => spec.id === 'governance');
-  if (!governanceRow || governanceRow.turns_on) return 'not decided: your answer turns it on';
-  if (!isOn(specs)) return 'OFF';
-  const parts = specs.filter(spec => spec.required);
-  const steps = parts.filter(spec => spec.required.ready === false).length;
-  const unknown = parts.filter(spec => spec.required.ready === null).length;
-  const left = steps ? `ON, not ready, ${steps} step${steps === 1 ? '' : 's'} left` : 'ON, ready';
-  return unknown ? `${left}; ${unknown} part${unknown === 1 ? '' : 's'} could not be checked` : left;
-}
-
-const cell = text => String(text || '').replace(/\r?\n/g, ' ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
-const currentText = spec => spec.current_short || spec.current;
-const MARKS = Object.freeze({ true: 'Ready', false: 'Not ready', null: 'Unknown' });
-
-function tableLine({ spec, ref }, on) {
-  if (!spec.report_only) {
-    const label = bank.choiceLabel(spec, spec.recommended);
-    const effect = spec.recommended === 'keep' || spec.recommended_outcome === label ? '' : `: ${spec.recommended_outcome}`;
-    const others = spec.choices.filter(choice => choice.value !== spec.recommended).map(choice => cell(`${choice.presentation_ref}. ${choice.label}`)).join('<br>') || '-';
-    return `| ${ref} | ${cell(spec.title)} | ${cell(currentText(spec))} | ${cell(`${spec.presentation.recommended_choice_ref}. ${label}${effect}`)} | ${others} |`;
-  }
-  const mark = on && spec.required ? `${MARKS[spec.required.ready]}: ` : '';
-  const recommended = on && spec.required?.ready === false ? `Next step: ${spec.required.step}` : spec.recommended_text || 'Keep';
-  return `| ${ref} | ${cell(spec.title)} | ${cell(`${mark}${currentText(spec)}`)} | ${cell(recommended)} | ${cell(spec.other || '-')} |`;
-}
-
-// The bank as the owner reads it: the top line, one table with the two choices and the parts Toolkit
-// keeps itself (each with its mark and one next step while governance is on), the other rows as short
-// lines under it, and the one reply line. The longer texts are in explain (explainText).
-function renderGovernanceBank(specs) {
-  const reference = bankReference(specs);
-  const rows = tableRows(specs);
-  const inTable = new Set(rows.map(row => row.spec.id));
-  const rest = specs.filter(spec => spec.report_only && !inTable.has(spec.id));
-  const bound = rest.filter(spec => spec.bound).sort((a, b) => BOUND_ORDER.indexOf(a.id) - BOUND_ORDER.indexOf(b.id));
-  const stale = specs.find(spec => spec.stale)?.stale;
-  const on = isOn(specs);
-  return [
-    `# ${BANK_TITLE} - ${topLine(specs)}`,
-    '',
-    `Bank reference: ${reference}`,
-    '',
-    '| # | Setting | Current | Recommended | Other choices |',
-    '|---|---|---|---|---|',
-    ...rows.map(row => tableLine(row, on)),
-    ...(rest.length || stale ? ['', 'Also:',
-      ...(bound.length ? [`- Set in ${governance.BINDING_FILE}: ${bound.map(spec => spec.bound).join(', ')}. ${BOUND_CHANGE}`] : []),
-      ...(stale ? [`- GitHub could not be read just now (${stale}), so the values set in ${governance.BINDING_FILE} are the ones this computer last read.`] : []),
-      ...rest.filter(spec => !spec.bound).map(spec => `- ${spec.title}: ${currentText(spec)}.${spec.recommended_text ? ` ${spec.recommended_text}.` : ''}`)] : []),
-    // An answer that turns governance on covers the post-merge settings too, so they are named before it.
-    ...(specs.some(spec => spec.turns_on) ? ['', AFTER_MERGE] : []),
-    ...specs.filter(spec => spec.id === 'governance' && !spec.report_only).flatMap(spec => spec.choices.filter(choice => choice.value === 'on' && choice.presentation_ref !== spec.presentation.recommended_choice_ref)
-      .map(choice => `${spec.presentation.question_ref} ${choice.presentation_ref}. ${choice.label}: ${choice.consequence}`)).flatMap(line => ['', line]),
-    '',
-    replyLine(specs),
-    '',
-    `Agents: this line is for you alone. Show the owner the bank above exactly, as plain text and never in a code block, leaving out this line, then stop. Their next own message comes back with a one-use ticket; send it with their answer as ${reference}: <their answer>. Never answer for them, and never show this bank again after they reply.`,
-  ].join('\n');
-}
-
-// The full text of one row, for "explain 1.1", or null when the bank has no such row. A row Toolkit
-// keeps itself is explained by its table number too.
-function explainText(specs, ref) {
-  const spec = specs.find(entry => entry.presentation.question_ref === ref);
-  if (spec) return [bank.renderQuestionRows(specs, ref, { brief: true }).replace(/\n+---$/, ''), ...(spec.explain_more || [])].join('\n\n');
-  const row = tableRows(specs).find(entry => entry.ref === ref && entry.spec.report_only);
-  if (!row) return null;
-  const kept = row.spec;
-  return [`${ref} ${kept.title}`, `Current: ${currentText(kept)}.`, ...(kept.recommended_text ? [`${kept.recommended_text}.`] : []),
-    ...(kept.required?.ready === false ? [`Next step: ${kept.required.step}.`] : []), ...(kept.other ? [`Other choice: ${kept.other}.`] : []),
-    'Toolkit keeps this part itself: no answer changes it.'].join('\n');
-}
-
-// The row number a reply asks to explain ("explain 1.4", with or without the bank reference), or null.
-const EXPLAIN = /^\s*(?:([0-9A-Za-z-]{16,19})\s*:\s*)?explain\s+(\d+\.\d+)\s*\.?\s*$/i;
-function explainRequest(text) {
-  const match = EXPLAIN.exec(String(text || ''));
-  return match ? match[2] : null;
-}
-
-// The same, with the bank reference it names (normalised, or as typed when malformed, so it matches
-// no bank), or null: { reference, row }.
-function explainParts(text) {
-  const match = EXPLAIN.exec(String(text || ''));
-  if (!match) return null;
-  return { reference: match[1] ? (bank.normalizeBankReference(match[1]) || match[1]) : null, row: match[2] };
-}
-
-// A short digest of each row as shown, keyed by its id and number (id@1.4, or id@ for a status row),
-// so a reply to a bank that changed since can name only the rows that changed (changedRows).
-const rowKey = spec => `${spec.id}@${spec.presentation.question_ref}`;
-function rowDigests(specs) {
-  const payload = bank.questionBankApprovalPayload(specs);
-  const digest = new Map(payload.questions.map(question => [question.id, crypto.createHash('sha256').update(JSON.stringify(question)).digest('hex').slice(0, 16)]));
-  return Object.fromEntries(specs.map(spec => [rowKey(spec), digest.get(spec.id)]));
-}
-
-// The lines that name what changed between the bank the owner was shown (its row digests) and this
-// one, or null when rows were added or taken away or any number moved (then only a new bank can be
-// answered, since a reply such as 1.4=A could mean another row now).
-function changedRows(before, specs) {
-  const now = rowDigests(specs);
-  const keys = Object.keys(now);
-  if (!before || typeof before !== 'object' || Object.keys(before).length !== keys.length || keys.some(key => !Object.hasOwn(before, key))) return null;
-  return specs.filter(spec => before[rowKey(spec)] !== now[rowKey(spec)]).map(spec => (spec.report_only
-    ? `${spec.title} changed: now ${spec.current_short || spec.current}, with nothing to answer.`
-    : `${spec.presentation.question_ref} ${spec.title} changed: now ${spec.current_short || spec.current}, recommended ${spec.presentation.recommended_choice_ref}. ${bank.choiceLabel(spec, spec.recommended)}.`));
-}
-
-// The key override and the no-store reply, read before the bank's own grammar: `store=<owner/name>`
-// and `no store`. Returns the reference prefix, the rest of the answer and what the override says; a
-// malformed or repeated one is refused. A `shards=` answer from an older bank is refused with one line:
-// Toolkit no longer sets up CI shards (SHARDS_RETIRED).
-const STORE_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/;
-const SHARDS_RETIRED = 'Toolkit no longer sets up CI shards; the CI check-up flags when they would pay. Leave shards= out of your reply.';
-function bankExtras(text) {
-  const [, prefix, payload] = /^(\s*(?:[0-9A-Za-z-]{16,19}\s*:\s*)?)([\s\S]*)$/.exec(String(text || ''));
-  const extras = { store: null, noStore: false };
-  const once = (name, value, said) => {
-    if (extras[name]) throw new Error(`The answer says ${said} twice.`);
-    extras[name] = value;
-    return ',';
-  };
-  const clean = value => value.replace(/\.$/, '');
-  let rest = payload.replace(/(^|[\s,;])no[\s_-]+store(?=$|[\s,;.])/gi, (_, lead) => lead + once('noStore', true, 'no store'));
-  rest = rest.replace(/(^|[\s,;])store\s*=\s*([^\s,;]*)/gi, (_, lead, value) => {
-    if (!STORE_NAME.test(clean(value))) throw new Error('store= needs a repository as owner/name, such as store=you/TRANSPORT-project.');
-    return lead + once('store', clean(value), 'store=');
-  });
-  if (/(^|[\s,;])shards\s*=/i.test(rest)) throw new Error(SHARDS_RETIRED);
-  return { prefix, rest: rest.split(/[,;]/).map(part => part.trim()).filter(Boolean).join(', '), ...extras };
-}
-
-// What the owner's answer applies: { governance, taskAutoMerge, governanceApp,
-// permissionBlocks, instructionCopies?, store }, or { noStore: true }. Questions left out
-// stay as they are; each status row's Toolkit default applies unless an override changes it. With
-// `plainWords` false (a bank an answer was already used for) a bare yes, no or later is not read.
-function parseBankAnswer(text, specs, { requireBankReference = true, plainWords = true } = {}) {
-  const turnsOn = specs.some(spec => spec.id === 'governance' && spec.turns_on);
-  // Where the bank is the turn-on question itself (no card came first), it takes the card's plain
-  // answers too: yes is all recommended, later is no store, and no is the owner's off decision.
-  const plain = turnsOn && plainWords ? plainAnswer(text, specs, requireBankReference) : null;
-  if (plain === 'later') return { noStore: true, later: true };
-  if (plain === 'no') return { governance: 'off', taskAutoMerge: 'keep', store: null, governanceApp: 'keep', permissionBlocks: 'keep' };
-  const extras = bankExtras(plain === 'yes' ? text.replace(/(yes)\s*\.?\s*$/i, 'all recommended') : text);
-  const questions = specs.filter(spec => !spec.report_only);
-  // Overrides alone change no question: every question keeps its current value, which is also what
-  // the bank recommends for each of them.
-  if (!extras.rest && (extras.noStore || extras.store) && !questions.every(spec => spec.recommended === 'keep')) {
-    throw new Error('Name the rows to change as well, such as 1.1=A.');
-  }
-  let parsed;
-  try {
-    parsed = bank.parseConciseQuestionBankAnswer(`${extras.prefix}${extras.rest || (extras.noStore || extras.store ? 'all recommended' : '')}`, specs, { requireBankReference, label: 'Governance', leftOut: spec => spec.choices.find(choice => choice.value === 'keep')?.value });
-  } catch (error) {
-    if (error.code === 'QUESTION_BANK_UNKNOWN_ROW') {
-      const row = tableRows(specs).find(entry => entry.ref === error.question_ref && entry.spec.report_only);
-      throw new Error(row ? `Row ${row.ref} ${row.spec.title} takes no answer: ${row.spec.other ? `${row.spec.other}.` : 'Toolkit keeps it itself.'}` : `This bank has no row ${error.question_ref}.`);
-    }
-    throw error;
-  }
-  if (!parsed) throw Object.assign(new Error(`Governance question bank answer was not read.${turnsOn ? ' Reply no store to keep governance off.' : ''}`), { code: 'BANK_ANSWER_UNREAD' });
-  bank.assertQuestionBankAnswerBinding(parsed, specs, 'Governance');
-  if (extras.noStore) {
-    if (!turnsOn) throw new Error('No store applies only where your answer would turn governance on.');
-    if (extras.rest || extras.store) throw new Error('No store keeps governance off, so it goes on its own: reply no store, or leave it out.');
-    return { noStore: true };
-  }
-  const byId = new Map(parsed.selections.map(entry => [entry.question_id, entry.canonical_value]));
-  const value = id => {
-    const spec = specs.find(entry => entry.id === id);
-    const chosen = byId.get(id) || 'keep';
-    // A hidden twin (the choice that changes nothing) applies as Keep current.
-    return spec && spec.folded_value === chosen ? spec.folded_into : chosen;
-  };
-  const governed = specs.find(entry => entry.id === 'governance')?.folded_value === 'on';
-  const governance = turnsOn ? 'on' : value('governance');
-  const onAfter = governance === 'on' || (governed && governance !== 'off');
-  // Task auto-merge is On only while governance is on, or in the answer that turns it on.
-  const taskAutoMerge = value('task-auto-merge');
-  if (taskAutoMerge === 'on' && !onAfter) throw new Error('Task auto-merge can be on only while governance is on: turn governance on in the same answer, or leave task auto-merge as it is.');
-  if (extras.store && !(governance === 'on' && !governed && specs.some(spec => spec.id === 'evidence-store' && !spec.bound))) {
-    throw new Error('store= applies only in an answer that turns governance on here; the store of a governed repository is bound in its programme file.');
-  }
-  const copies = specs.find(spec => spec.id === 'instruction-copies' && spec.copies_clean);
-  return {
-    governance, taskAutoMerge, store: extras.store,
-    governanceApp: specs.some(spec => spec.app_setup) ? 'setup' : 'keep',
-    permissionBlocks: specs.some(spec => spec.permissions_update) ? 'update' : 'keep',
-    ...(copies ? { instructionCopies: onAfter && governed ? 'clean' : 'keep' } : {}),
-  };
-}
-
-// A plain yes, no or later on its own (after the bank reference where one is required), or null.
-const PLAIN = /^\s*(?:([0-9A-Za-z-]{16,19})\s*:\s*)?(yes|no|later)\s*\.?\s*$/i;
-function plainAnswer(text, specs, requireBankReference) {
-  const match = PLAIN.exec(String(text || ''));
-  if (!match) return null;
-  if (requireBankReference && !match[1]) return null;
-  if (match[1] && bank.normalizeBankReference(match[1]) !== specs[0]?.presentation.bank_reference) return null;
-  return match[2].toLowerCase();
-}
-
-// ---- bank tickets -------------------------------------------------------------------------------
+// ---- reply tickets ------------------------------------------------------------------------------
 
 function hash(ticket) { return crypto.createHash('sha256').update(String(ticket)).digest('hex'); }
 
@@ -502,20 +259,21 @@ class BankTickets {
     this.#now = now;
   }
 
-  // Unreadable or damaged state holds: nothing is shown as answerable and no ticket is given.
+  // Unreadable or damaged state holds: nothing is shown as answerable and no ticket is given. A file
+  // an older Toolkit wrote has no `agreed` record; it reads as none.
   #read() {
     let text;
     try { text = fs.readFileSync(this.#file, 'utf8'); } catch (error) {
-      if (error && error.code === 'ENOENT') return { schema: TICKETS_SCHEMA, shown: {}, tickets: {} };
+      if (error && error.code === 'ENOENT') return { schema: TICKETS_SCHEMA, shown: {}, tickets: {}, agreed: {} };
       throw Object.assign(new Error('BANK_TICKETS_UNREADABLE'), { code: 'BANK_TICKETS_UNREADABLE' });
     }
     let parsed = null;
     try { parsed = JSON.parse(text); } catch { parsed = null; }
     const map = value => value && typeof value === 'object' && !Array.isArray(value);
-    if (!parsed || parsed.schema !== TICKETS_SCHEMA || !map(parsed.shown) || !map(parsed.tickets)) {
+    if (!parsed || parsed.schema !== TICKETS_SCHEMA || !map(parsed.shown) || !map(parsed.tickets) || (parsed.agreed !== undefined && !map(parsed.agreed))) {
       throw Object.assign(new Error('BANK_TICKETS_MALFORMED'), { code: 'BANK_TICKETS_MALFORMED' });
     }
-    return parsed;
+    return { ...parsed, agreed: parsed.agreed || {} };
   }
 
   #fresh(entry) {
@@ -525,7 +283,7 @@ class BankTickets {
   #save(data) {
     const keep = record => Object.fromEntries(Object.entries(record).filter(([, entry]) => this.#fresh(entry))
       .sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).slice(0, MAX_SESSIONS));
-    const text = `${JSON.stringify({ schema: TICKETS_SCHEMA, shown: keep(data.shown), tickets: keep(data.tickets) })}\n`;
+    const text = `${JSON.stringify({ schema: TICKETS_SCHEMA, shown: keep(data.shown), tickets: keep(data.tickets), agreed: keep(data.agreed || {}) })}\n`;
     fs.mkdirSync(path.dirname(this.#file), { recursive: true });
     const temp = `${this.#file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
     try {
@@ -537,55 +295,72 @@ class BankTickets {
     }
   }
 
-  // Notes that this run of the session was shown this bank. A newer bank replaces an older one and
-  // drops any live ticket of the session, so a ticket always answers the bank shown last.
-  // `rows` are the shown rows' digests (rowDigests); `used` notes that an answer to it was already used.
-  shown(sessionId, { epoch, repositoryMark = null, repositoryId, root, bankReference: reference, rows = {}, used = false }) {
+  // Notes that this run of the session was shown these questions (or the summary). A newer note
+  // replaces an older one and drops any live ticket of the session, so a ticket always answers what
+  // was shown last. `used` notes that an answer to it was already used.
+  shown(sessionId, { epoch, repositoryMark = null, repositoryId, root, bankReference: reference, used = false }) {
     if (typeof sessionId !== 'string' || sessionId === '' || !EPOCH.test(String(epoch))) return false;
     const data = this.#read();
     data.shown[sessionId] = {
-      epoch, repository_mark: repositoryMark, repository_id: repositoryId, root, bank_reference: reference, rows, ...(used ? { used: true } : {}), at: this.#now().toISOString(),
+      epoch, repository_mark: repositoryMark, repository_id: repositoryId, root, bank_reference: reference, ...(used ? { used: true } : {}), at: this.#now().toISOString(),
     };
     delete data.tickets[sessionId];
     this.#save(data);
     return true;
   }
 
-  // The bank this run was shown and not yet replied to, or null. Read only.
+  // Notes the owner's own yes to the session-start governance question (PromptHold, from their reply
+  // with its ticket), so the guided setup that follows in this run leaves that question out. It
+  // answers nothing itself: the owner's reply to the remaining questions still comes with a ticket.
+  agree(sessionId, { epoch, repositoryMark = null, repositoryId }) {
+    if (typeof sessionId !== 'string' || sessionId === '' || !EPOCH.test(String(epoch)) || typeof repositoryId !== 'string' || !repositoryId) return false;
+    const data = this.#read();
+    data.agreed[sessionId] = { epoch, repository_mark: repositoryMark, repository_id: repositoryId, at: this.#now().toISOString() };
+    this.#save(data);
+    return true;
+  }
+
+  // Whether the owner said yes in this run, for this repository, with no other session started in it since.
+  agreedFor(sessionId, { epoch, repositoryMark = null, repositoryId }) {
+    const data = this.#read();
+    const entry = typeof sessionId === 'string' && Object.hasOwn(data.agreed, sessionId) ? data.agreed[sessionId] : null;
+    return this.#fresh(entry) && entry.epoch === epoch && entry.repository_id === repositoryId && (entry.repository_mark ?? null) === (repositoryMark ?? null);
+  }
+
+  // What this run was shown and not yet replied to, or null. Read only.
   pendingFor(sessionId, epoch) {
     const data = this.#read();
     const entry = typeof sessionId === 'string' && Object.hasOwn(data.shown, sessionId) ? data.shown[sessionId] : null;
     return this.#fresh(entry) && entry.epoch === epoch ? entry : null;
   }
 
-  // Whether this run has a bank waiting for the owner's reply or a live bank ticket.
+  // Whether this run has questions waiting for the owner's reply or a live ticket.
   live(sessionId, epoch) {
     const data = this.#read();
     const ticket = typeof sessionId === 'string' && Object.hasOwn(data.tickets, sessionId) ? data.tickets[sessionId] : null;
     return this.pendingFor(sessionId, epoch) !== null || (this.#fresh(ticket) && ticket.epoch === epoch);
   }
 
-  // Turns the shown bank into a ticket for the reply that just arrived: the note is spent, so only
-  // the first own message after the bank gets one. Returns the ticket, or null.
+  // Turns the shown note into a ticket for the reply that just arrived: the note is spent, so only
+  // the first own reply after it gets one. Returns the ticket, or null.
   issue(sessionId, epoch) {
     const data = this.#read();
     const entry = Object.hasOwn(data.shown, sessionId) ? data.shown[sessionId] : null;
     if (!this.#fresh(entry) || entry.epoch !== epoch) return null;
     const ticket = crypto.randomBytes(16).toString('hex');
     delete data.shown[sessionId];
-    data.tickets[sessionId] = { hash: hash(ticket), epoch, repository_mark: entry.repository_mark ?? null, repository_id: entry.repository_id, root: entry.root, bank_reference: entry.bank_reference, rows: entry.rows || {}, ...(entry.used === true ? { used: true } : {}), at: this.#now().toISOString() };
+    data.tickets[sessionId] = { hash: hash(ticket), epoch, repository_mark: entry.repository_mark ?? null, repository_id: entry.repository_id, root: entry.root, bank_reference: entry.bank_reference, ...(entry.used === true ? { used: true } : {}), at: this.#now().toISOString() };
     this.#save(data);
     return ticket;
   }
 
-  // After the owner's reply was sent with its ticket (`entry`, from take) and could not be used, notes
-  // the bank again for the same run, repository mark and repository, so the owner's next own message
-  // answers it the same way, with a new one-use ticket, and the bank is not shown again. `bankReference`
-  // and `rows` name the bank that reply now answers (a changed bank's, once its changed rows were named).
-  // `used` is true once an answer to it was used, and stays true for the replies after it.
-  rearm(sessionId, entry, { bankReference: reference, rows, used = false }) {
+  // After the owner's reply was sent with its ticket (`entry`, from take), notes the same questions
+  // again for the same run, repository mark and repository, so the owner's next own reply answers them
+  // the same way, with a new one-use ticket, and they are not shown again. `bankReference` names what
+  // that reply now answers. `used` is true once an answer was used, and stays true for the replies after it.
+  rearm(sessionId, entry, { bankReference: reference, used = false }) {
     if (!entry || typeof entry !== 'object') return false;
-    return this.shown(sessionId, { epoch: entry.epoch, repositoryMark: entry.repository_mark ?? null, repositoryId: entry.repository_id, root: entry.root, bankReference: reference, rows, used: used || entry.used === true });
+    return this.shown(sessionId, { epoch: entry.epoch, repositoryMark: entry.repository_mark ?? null, repositoryId: entry.repository_id, root: entry.root, bankReference: reference, used: used || entry.used === true });
   }
 
   // Ends the shown note without a ticket (the reply could not count).
@@ -617,22 +392,25 @@ class BankTickets {
   }
 }
 
-// What the agent is told with the owner's reply to a bank. Toolkit, not the agent, checks the reply:
-// anything that may answer the bank is sent as it is, and the command prints what was wrong.
-function bankTicketContext(entry, ticket) {
+// What the agent is told with the owner's reply to the governance questions or summary. Toolkit, not
+// the agent, checks the reply: anything that may answer is sent as it is, and the command prints what
+// was wrong. `card` is the owner's tap on a question card the app chose to show (question and the
+// labels they picked), or null for their typed message above.
+function bankTicketContext(entry, ticket, card = null) {
+  const what = card ? `the user answered a question card: ${card}.` : 'the user\'s message above is their own reply.';
   return [
     entry.used === true
-      ? `Toolkit governance: the user's message above is their first since their answer to governance bank ${entry.bank_reference} was used; that answer is done, not open. This message may change another row, or be ordinary work. Read what they mean first.`
-      : `Toolkit governance: the user's message above is their first since governance bank ${entry.bank_reference} was shown or Toolkit asked them to reply again. It may answer it, or be ordinary work. Read what they mean first.`,
-    `- If it may answer the bank in any way: only where its rows and choices are plain (all recommended, changes such as 1.2=B, no store or store=<owner/name>, in any words) put it in that form. Send anything else exactly as typed (a bare yes or ok, an unknown row, two choices for one row, explain 1.4, anything unclear), leaving out only quotes, $, % and backticks. Tell them "Sending: <answer> (bank ${entry.bank_reference})" and run exactly this once, with it in place of ANSWER:`,
+      ? `Toolkit governance: ${what} It is their first since their earlier governance answer was used; that answer is done, not open. It may ask for a change, or be ordinary work. Read what they mean first.`
+      : `Toolkit governance: ${what} It is their first since Toolkit's governance questions were shown or Toolkit asked them to reply again. It may answer them, or be ordinary work. Read what they mean first.`,
+    '- If it may answer them in any way: where their meaning is plain, put it in the letter form, such as 1A 2A 3B (with the store as owner/name after 2B, such as 2B you/TRANSPORT-project), or, after setup, as turn off governance, task auto-merge on, task auto-merge off or change store. Send anything else exactly as given, leaving out only quotes, $, % and backticks. Tell them "Sending: <answer>" and run exactly this once, with it in place of ANSWER:',
     `  node "${script()}" setup --answers "${entry.bank_reference}: ANSWER" --ticket ${ticket}`,
-    '- Toolkit checks it and prints what was wrong or what it did; do what its Agents line says. Never show the bank again yourself and never ask them to reply in another form.',
-    '- If it is clearly about something else, record nothing and carry on.',
-    'The ticket works once, only in this session, and only for this bank. Never act as the user: never answer the bank yourself or change their answer.',
+    '- Toolkit checks it and prints what was wrong or what it did; do what its Agents line says. Never show the questions again yourself and never ask them to reply in another form.',
+    `- If they say they have run the commands (done), record nothing: run node "${script()}" setup and show its output. If it is clearly about something else, record nothing and carry on.`,
+    'The ticket works once, only in this session, and only for these questions. Never act as the user: never answer for them or change their answer.',
   ].join('\n');
 }
 
-// Whether a shell command is exactly the bank answer command with a live ticket of this session.
+// Whether a shell command is exactly the answer command with a live ticket of this session.
 // The script must be Toolkit's own path as written, and the line holds nothing a shell expands and
 // no curly quote, which PowerShell reads as a quote and so could end the answer early.
 const BANK_COMMAND = /^[ \t]*(?:&[ \t]*)?node(?:\.exe)?[ \t]+(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s"']+))[ \t]+setup[ \t]+--answers[ \t]+"([^"\r\n]{1,400})"[ \t]+--ticket[ \t]+([0-9a-f]{32})[ \t]*$/;
@@ -645,35 +423,14 @@ function sameScript(written) {
 }
 function bankTicketCommand(text, sessionId, tickets) {
   const command = String(text || '');
-  if (/[$`%\u2018-\u201f]/.test(command)) return false;
+  if (/[$`%‘-‟]/.test(command)) return false;
   const match = BANK_COMMAND.exec(command);
   if (!match || typeof sessionId !== 'string' || sessionId === '') return false;
   if (!sameScript(match[1] ?? match[2] ?? match[3])) return false;
   try { return tickets.peek(match[5], sessionId) !== null; } catch { return false; }
 }
 
-// What the agent is told when the owner's own message after a bank only asks to explain a row: the
-// read-only explain command, which spends no ticket, so the bank stays open for their answer.
-function bankExplainContext(entry, row) {
-  return [
-    `Toolkit governance: the user's message above asks for the full text of row ${row} of governance bank ${entry.bank_reference}. Run exactly this once; it needs no ticket and writes nothing:`,
-    `  node "${script()}" setup --answers "${entry.bank_reference}: explain ${row}"`,
-    'Then do what its Agents line says. The bank stays open: their next own message comes back with a one-use ticket for their answer. Never show the bank again yourself, and never answer it for them.',
-  ].join('\n');
-}
-
-// Whether a shell command is exactly the read-only explain command: Toolkit's own script, `setup
-// --answers` with only "explain <row>" (the bank reference optional) and no ticket. It writes nothing,
-// so it needs no session or ticket; anything else after `--answers` still needs the live ticket.
-const EXPLAIN_COMMAND = /^[ \t]*(?:&[ \t]*)?node(?:\.exe)?[ \t]+(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s"']+))[ \t]+setup[ \t]+--answers[ \t]+"([^"\r\n]{1,60})"[ \t]*$/;
-function bankExplainCommand(text) {
-  const command = String(text || '');
-  if (/[$`%\u2018-\u201f]/.test(command)) return false;
-  const match = EXPLAIN_COMMAND.exec(command);
-  return Boolean(match) && sameScript(match[1] ?? match[2] ?? match[3]) && explainRequest(match[4]) !== null;
-}
-
 module.exports = Object.freeze({
-  APP_NAMES, BANK_HOST, TICKETS_BASENAME, REPLY_AGAIN, ANSWER_USED, CHANGE_ANOTHER, BankTickets, governanceBankSpecs, renderGovernanceBank, parseBankAnswer, bankReference,
-  agentsAfterAnswer, explainText, explainRequest, explainParts, rowDigests, changedRows, bankTicketContext, bankTicketCommand, bankExplainContext, bankExplainCommand,
+  APP_NAMES, BANK_HOST, TICKETS_BASENAME, BankTickets, governanceBankSpecs, bankReference,
+  agentsAfterAnswer, agentsAfterTurnOn, agentsGuided, agentsSummary, bankTicketContext, bankTicketCommand,
 });

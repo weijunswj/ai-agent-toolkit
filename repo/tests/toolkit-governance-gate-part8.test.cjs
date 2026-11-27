@@ -4,7 +4,7 @@ const { assert, childProcess, crypto, fs, os, path, test, recordMerged, repoRoot
 const asksIn = result => result.action === 'pass' && String(result.context).includes(QUESTION_LINE);
 
 // Split to keep the per-file time budget.
-test('what the agent is told: the user answers in chat or on the card, and is never asked to run a command', (t) => {
+test('what the agent is told: the user answers in chat (typed, or on a card the app chose), and is never asked to run a command', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }), null, 'work is not refused');
@@ -13,7 +13,7 @@ test('what the agent is told: the user answers in chat or on the card, and is ne
   const question = hold(ctx).decide({ cwd: repo, prompt: 'hello', sessionId: 's1' }).context;
   for (const text of [line, refused, question]) {
     // The question the user reads offers yes, no or later; agent texts name the commands to recognise.
-    assert.match(text, text === question ? /^Reply yes, no or later\. /m : /`toolkit governance enable` or `toolkit governance disable` as (?:a|their own) message/, text);
+    assert.match(text, text === question ? /^   - \*\*A\. Yes \(my pick\):\*\* .*\n   - \*\*B\. Later:\*\* .*\n   - \*\*C\. No:\*\* /m : /`toolkit governance enable` or `toolkit governance disable` as (?:a|their own) message/, text);
     assert.doesNotMatch(text, /run the command|in (?:your|their) own terminal|toolkit-governance\.cjs/, text);
     assert.ok(text.endsWith(gate.NEVER_OWNER), text);
   }
@@ -30,12 +30,12 @@ test('the owner is offered only yes, no or later: agent texts that name the comm
   const repo = gitRepo(ctx, 'repo');
   const question = hold(ctx).decide({ cwd: repo, prompt: 'fix the login bug', sessionId: 's1' }).context;
   assert.doesNotMatch(noticeOf(question), /toolkit governance (?:enable|disable)/, 'the question the owner reads names no command');
-  assert.match(noticeOf(question), /^Reply yes, no or later\. /m);
+  assert.deepEqual(noticeOf(question).split('\n').filter(entry => /^   - \*\*[A-C]\. /.test(entry)).map(entry => /\*\*([A-C]\. [^:(]+)/.exec(entry)[1].trim()), ['A. Yes', 'B. Later', 'C. No']);
   const reply = hold(ctx).decide({ cwd: repo, prompt: 'what does that mean?', sessionId: 's1' }).context;
   assert.match(reply, /- If it is about something else, a question, or unclear, record nothing and carry on with what they asked\. Do not ask the governance question again or quote their message back; if you mention it, say in plain words only that no governance answer was recorded\./);
   const line = gate.sessionLine(repo, { registryOptions: ctx.options });
   const refused = tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'node repo/scripts/toolkit-governance.cjs enable' } }).deny;
-  for (const text of [reply, line, refused, gate.LATER_CONTEXT, gate.PICKER_UNCOUNTED]) {
+  for (const text of [reply, line, refused, gate.LATER_CONTEXT]) {
     assert.match(text, /`toolkit governance enable` or `toolkit governance disable`/, text);
     assert.match(text, /[Nn]ever show the user these commands or ask them to type one/, text);
   }
@@ -202,7 +202,7 @@ test('a plain folder is DISABLED automatically, never held, and nothing is writt
   assert.equal(registryBytes(ctx), null);
 });
 
-test('tools: an undecided repository runs every tool; only Toolkit\'s own card is checked', (t) => {
+test('tools: an undecided repository runs every tool, question cards included; Toolkit forces and refuses no card', (t) => {
   const ctx = scratch(t);
   const repo = gitRepo(ctx, 'repo');
   for (const session_id of [undefined, 'marked']) {
@@ -214,14 +214,13 @@ test('tools: an undecided repository runs every tool; only Toolkit\'s own card i
     }
     for (const tool_name of ['Read', 'Grep', 'Glob', 'WebSearch', 'WebFetch', 'TodoWrite', 'Skill', 'ToolSearch']) assert.equal(tools(ctx).decide({ tool_name, cwd: repo, session_id, tool_input: {} }), null, tool_name);
   }
-  // Toolkit's card runs only exactly as given, from a session Toolkit has noted.
-  assert.equal(tools(ctx).decide({ tool_name: 'AskUserQuestion', cwd: repo, session_id: 'marked', tool_use_id: 'a', tool_input: gate.PICKER_INPUT }), null);
-  assert.match(tools(ctx).decide({ tool_name: 'AskUserQuestion', cwd: repo, tool_use_id: 'b', tool_input: gate.PICKER_INPUT })?.deny || '', /shown only as Toolkit's own card/);
-  assert.match(tools(ctx).decide({ tool_name: 'AskUserQuestion', cwd: repo, session_id: 'marked', tool_use_id: 'c', tool_input: { ...gate.PICKER_INPUT, answers: { [gate.PICKER_QUESTION]: 'Yes' } } })?.deny || '', /with no answer filled in/);
+  // A card carrying the governance question is the app's own way of asking it: never refused, whoever shows it.
+  const governanceCard = { questions: [{ question: gate.QUESTION_TEXT, header: 'Governance', multiSelect: false, options: [{ label: 'A. Yes', description: '' }, { label: 'B. Later', description: '' }, { label: 'C. No', description: '' }] }] };
+  for (const session_id of ['marked', undefined]) assert.equal(tools(ctx).decide({ tool_name: 'AskUserQuestion', cwd: repo, session_id, tool_use_id: 'a', tool_input: governanceCard }), null);
   const plain = path.join(ctx.root, 'plain');
   fs.mkdirSync(plain);
   for (const tool_name of ['Read', 'Grep']) assert.equal(tools(ctx).decide({ tool_name, cwd: plain, tool_input: {} }), null, `${tool_name} outside a repository`);
-  assert.equal(tools(ctx).decide({ tool_name: 'AskUserQuestion', cwd: plain, tool_input: { ...gate.PICKER_INPUT, answers: { [gate.PICKER_QUESTION]: 'Yes' } } }), null, 'where nothing is open the card means nothing');
+  assert.equal(tools(ctx).decide({ tool_name: 'AskUserQuestion', cwd: plain, tool_input: governanceCard }), null, 'where nothing is open a card means nothing');
   require('./support/governance-observations.cjs').seedMerged(repo, 'enable', { registryOptions: ctx.options });
   assert.equal(tools(ctx).decide({ tool_name: 'Bash', cwd: repo, tool_input: { command: 'ls' } }), null);
 });
