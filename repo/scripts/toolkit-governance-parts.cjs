@@ -180,15 +180,16 @@ function savedStore(registryOptions, repositoryId, store) {
   } catch { return null; }
 }
 
-// The last saved App and store results for the readiness check (toolkit-governance-ready.cjs), each
-// kept only in its known shape: { app, store, checked_at }, or null when none is saved. Local read only.
+// The last saved App, store and settings results for the readiness check (toolkit-governance-ready.cjs)
+// and the governance summary, each kept only in its known shape: { app, store, settings, checked_at },
+// or null when none is saved. Local read only.
 function saved(registryOptions, repositoryId) {
   try {
     if (typeof repositoryId !== 'string' || !repositoryId) return null;
     const repositories = read(registryOptions).repositories;
     const entry = Object.hasOwn(repositories, repositoryId) ? repositories[repositoryId] : null;
     if (!entry || typeof entry !== 'object') return null;
-    return { app: cleanApp(entry.app), store: cleanStore(entry.store?.repository, entry.store), checked_at: typeof entry.checked_at === 'string' ? entry.checked_at : null };
+    return { app: cleanApp(entry.app), store: cleanStore(entry.store?.repository, entry.store), settings: cleanSettings(entry.settings), checked_at: typeof entry.checked_at === 'string' ? entry.checked_at : null };
   } catch { return null; }
 }
 

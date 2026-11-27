@@ -90,8 +90,11 @@ function resultLine(outcome) {
 // sweep's result owed to a later session (sessionLines, recordSweep).
 function record(registryOptions, repositoryId, outcome, { now = new Date() } = {}) {
   const owed = outcome.result === 'done' && outcome.sweep_owed ? { run: Number.isSafeInteger(outcome.sweep_owed.run) ? outcome.sweep_owed.run : null } : null;
+  // The part names alone (no steps or reasons), for the governance summary's rows (toolkit-governance-summary.cjs).
+  const names = list => (Array.isArray(list) ? list : []).map(item => (typeof item === 'string' ? item : item && item.name)).filter(name => typeof name === 'string' && name).map(name => name.slice(0, 120));
   return update(registryOptions, repositoryId, entry => entry && ({
     ...entry, status: outcome.result === 'done' ? 'done' : 'pending', finished_at: now.toISOString(), line: resultLine(outcome),
+    parts: { on: names(outcome.on), unavailable: names(outcome.unavailable), held: names(outcome.held) },
     notes: (outcome.reports || []).filter(note => typeof note === 'string' && note).map(note => note.slice(0, 600)), sweep_owed: owed, sweep_line: null,
   }));
 }
