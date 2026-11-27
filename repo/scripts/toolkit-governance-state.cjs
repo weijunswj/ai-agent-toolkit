@@ -339,13 +339,30 @@ function mergeTrain(root, options = {}) {
 const TASK_SWITCH_UPGRADE_LINE = 'Task auto-merge is off here until you set it; say refresh governance.';
 
 // Older Toolkit copies reject a binding key they do not know, so a binding carrying task_prs reads as
-// invalid (governance ERROR) on them. Every switch proposal says so, with this copy's version.
+// invalid (governance ERROR) on them. Every switch proposal says so, with this copy's version. It states
+// the effect only: the owner cannot easily check every computer and cloud copy (owner UAT, 28 November
+// 2026), so it never hands them that check; toolkitCopiesLine says which copies Toolkit could read.
 const TOOLKIT_VERSION_FILE = Object.freeze(['repo', 'contracts', 'toolkit-local-bridge', 'version.json']);
-function taskSwitchVersionLine(toolkitRoot = path.resolve(__dirname, '..', '..')) {
+function toolkitRelease(toolkitRoot = path.resolve(__dirname, '..', '..')) {
   let version = null;
   try { version = JSON.parse(fs.readFileSync(path.join(toolkitRoot, ...TOOLKIT_VERSION_FILE), 'utf8')).version; } catch { version = null; }
-  const release = typeof version === 'string' && /^\d+\.\d+\.\d+$/.test(version) ? `Toolkit ${version}` : 'this Toolkit release';
-  return `Merge only after every computer and cloud copy working on this repository runs ${release} or later; older copies show governance ERROR until they update.`;
+  return typeof version === 'string' && /^\d+\.\d+\.\d+$/.test(version) ? version : null;
+}
+function taskSwitchVersionLine(toolkitRoot = path.resolve(__dirname, '..', '..')) {
+  const version = toolkitRelease(toolkitRoot);
+  return `Toolkit copies older than ${version ? `Toolkit ${version}` : 'this Toolkit release'} read this switch as invalid and show governance ERROR for this repository until they update.`;
+}
+
+// The Toolkit copies this computer holds, as the release identity check read them against `version`
+// (toolkit-release-identity.cjs: { copies: [{ label, state, detail }] }), or null when they could not be
+// read. Copies on other computers and in cloud sessions are out of reach from here, and the line says so.
+function toolkitCopiesLine(result, version) {
+  const beyond = 'Toolkit cannot read the copies on other computers or in cloud sessions.';
+  if (!version || !result || !Array.isArray(result.copies)) return `Toolkit could not read its copies on this computer. ${beyond}`;
+  const words = result.copies.filter(copy => copy.state !== 'absent').map(copy => copy.state === 'delivered' ? `${copy.label} ${copy.detail}`
+    : copy.state === 'not-delivered' ? `${copy.label} ${String(copy.detail).split(',')[0]} (older than ${version})`
+      : `${copy.label} (could not be read: ${copy.detail})`);
+  return `${words.length ? `Toolkit copies on this computer: ${words.join('; ')}.` : 'Toolkit found no copy of itself to read on this computer.'} ${beyond}`;
 }
 
 // The app-local answers older Toolkit versions saved. They grant nothing; this removes them, but
@@ -736,6 +753,8 @@ module.exports = Object.freeze({
   LEGACY_TASK_ANSWERS,
   TASK_SWITCH_UPGRADE_LINE,
   taskSwitchVersionLine,
+  toolkitRelease,
+  toolkitCopiesLine,
   HOSTS,
   normaliseHost,
   committedBindingPolicy,

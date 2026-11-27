@@ -124,6 +124,7 @@ test('the desktop app\'s session start says how to ask the owner, governance on,
     '1. Put the full context, options and your pick in your closing message and end the turn.',
     '2. Leave how the question shows (a card, the end-of-turn box or plain text) to the app.',
     '3. A merge is the exception: post its summary and run the merge in the same turn; Toolkit\'s merge card, in its exact text, is the only ask, never a merge question of your own first.',
+    'If its checks are still running, wait for them in one background wait, then run the merge; ask only if a check fails or the merge is refused for a reason other than the card.',
   ].join(' ');
   for (const [name, cwd] of Object.entries({ ...folders, plain })) {
     const text = start(cwd, desktop);

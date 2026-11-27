@@ -129,7 +129,7 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #proposals; #proposalsLive; #pullOutcome; #stdout; #stderr; #ask; #confirm; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #firstSweep;
+  #proposals; #proposalsLive; #pullOutcome; #stdout; #stderr; #ask; #confirm; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #firstSweep; #copiesReader;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
@@ -139,8 +139,9 @@ class ToolkitGovernanceCli {
   // `queueReader` (the offline queue count for a repository root) and `appReader` (the governance App
   // presence reads) and `cloudWorkflows` (the cloud sweep copy render a yes proposal carries).
   // `permissionsChecker` (root => { checked, missing }) and `environment` (the host session id the bank
-  // ticket is bound to) are for tests too, as is `firstSweep` (the finish's first-install sweep).
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, confirm = null, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, firstSweep = null } = {}) {
+  // ticket is bound to) are for tests too, as are `firstSweep` (the finish's first-install sweep) and
+  // `copiesReader` (version => the release identity check's read of this computer's Toolkit copies).
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, confirm = null, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, firstSweep = null, copiesReader = null } = {}) {
     const pulls = proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport());
     this.#proposals = new GovernanceProposals({ registryOptions, ...(cloudWorkflows ? { cloudWorkflows } : {}), transport: pulls });
     // The turn-on pull request's outcome, read before a post-merge finish (offline and in tests: unread).
@@ -174,6 +175,17 @@ class ToolkitGovernanceCli {
     this.#adoptionWriter = adoptionWriter || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new adopt.GitHubAdoptionWriter());
     this.#plainTextInstaller = plainTextInstaller;
     this.#queueReader = queueReader || (root => require('../../skills/github-program-reconciler/scripts/programme-checkpoint.cjs').queueSummary(root));
+    // The Toolkit copies on this computer against a release (toolkit-release-identity.cjs); read only.
+    this.#copiesReader = copiesReader || (version => new (require('./toolkit-release-identity.cjs').ReleaseIdentityCheck)({ environment: this.#environment }).check({ minVersion: version }));
+  }
+
+  // Which Toolkit copies on this computer run this release, and that other computers and cloud sessions
+  // cannot be read: said beside every switch proposal, so the owner is never handed that check.
+  #copiesLine() {
+    const version = governance.toolkitRelease();
+    let result = null;
+    try { result = version ? this.#copiesReader(version) : null; } catch { result = null; }
+    return governance.toolkitCopiesLine(result, version);
   }
 
   async main(argv) {
@@ -433,7 +445,7 @@ class ToolkitGovernanceCli {
       this.#turnOnUrl = result.proposal.url;
       this.#turnOnNumber = Number.isSafeInteger(result.proposal.number) ? result.proposal.number : null;
     }
-    this.#print(json, result, [...(turnOn ? turnOnSummary(result, binding, this.#storeNote) : [result.text]), ...(result.warning ? [result.warning] : []), ...(switches ? [governance.taskSwitchVersionLine()] : []), ...this.#appLines(result.proposal, binding, app)]);
+    this.#print(json, result, [...(turnOn ? turnOnSummary(result, binding, this.#storeNote) : [result.text]), ...(result.warning ? [result.warning] : []), ...(switches ? [governance.taskSwitchVersionLine(), this.#copiesLine()] : []), ...this.#appLines(result.proposal, binding, app)]);
     return 0;
   }
 
@@ -845,7 +857,7 @@ class ToolkitGovernanceCli {
       // On comes with merge trains, as the guided setup asks it; off leaves the train switch as it is.
       const changes = want === 'after-gates' ? { auto_merge: 'after-gates', merge_train: 'on' } : { auto_merge: 'off' };
       const prepared = this.#prepareSwitch(state.root, changes);
-      this.#print(false, {}, [`Prepared ${prepared.url}: it sets task auto-merge ${chosen.taskAutoMerge}${want === 'after-gates' ? ' with merge trains' : ''} and changes nothing else. It applies only after you merge it.`, governance.taskSwitchVersionLine()]);
+      this.#print(false, {}, [`Prepared ${prepared.url}: it sets task auto-merge ${chosen.taskAutoMerge}${want === 'after-gates' ? ' with merge trains' : ''} and changes nothing else. It applies only after you merge it.`, governance.taskSwitchVersionLine(), this.#copiesLine()]);
       return 0;
     }
     this.#print(false, {}, ['Nothing changed.']);

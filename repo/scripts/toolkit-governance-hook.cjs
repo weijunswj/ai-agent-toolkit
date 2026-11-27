@@ -55,8 +55,10 @@ const CLOUD_LINE = "Toolkit governance (cloud session): the merge hold runs as o
 // are left out until they are checked live (an accepted gap). A merge is the exception to item 1: an agent
 // that asked its own "merge now?" and waited for the next turn made the owner approve twice, once in
 // words and again on Toolkit's merge card (27 November 2026), so the merge runs in the same turn and the
-// card is the only ask.
-const ASKING_LINE = 'Asking the owner (the Claude desktop app; this stands over your own notes and memories): 1. Put the full context, options and your pick in your closing message and end the turn. 2. Leave how the question shows (a card, the end-of-turn box or plain text) to the app. 3. A merge is the exception: post its summary and run the merge in the same turn; Toolkit\'s merge card, in its exact text, is the only ask, never a merge question of your own first.';
+// card is the only ask. Checks still running are no reason to ask either: an agent that found the turn-on
+// pull request's checks running asked its own merge question instead (28 November 2026), so it waits for
+// them in one background wait and then runs the merge.
+const ASKING_LINE = 'Asking the owner (the Claude desktop app; this stands over your own notes and memories): 1. Put the full context, options and your pick in your closing message and end the turn. 2. Leave how the question shows (a card, the end-of-turn box or plain text) to the app. 3. A merge is the exception: post its summary and run the merge in the same turn; Toolkit\'s merge card, in its exact text, is the only ask, never a merge question of your own first. If its checks are still running, wait for them in one background wait, then run the merge; ask only if a check fails or the merge is refused for a reason other than the card.';
 const DESKTOP_APP = /^claude-desktop(?:-3p)?$/;
 const asksHere = environment => DESKTOP_APP.test(String(environment.CLAUDE_CODE_ENTRYPOINT || ''));
 // The host's limit on one hook's session-start text (gate.SESSION_TEXT_LIMIT), spelled out because the
