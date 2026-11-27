@@ -11,6 +11,10 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
+// A computer session: a CI runner's own markers would make it a cloud session, which has no computer
+// permissions part. Cleared for this test process only.
+delete process.env.GITHUB_ACTIONS;
+delete process.env.CLAUDE_CODE_REMOTE;
 const gate = require('../scripts/toolkit-governance-gate.cjs');
 const finishing = require('../scripts/toolkit-governance-finish.cjs');
 const firstSweep = require('../scripts/toolkit-governance-first-sweep.cjs');

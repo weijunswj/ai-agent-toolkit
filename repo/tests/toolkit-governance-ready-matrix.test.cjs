@@ -17,6 +17,10 @@ const hostile = require('./support/hostile-inputs.cjs');
 const { APP, HOLD_FROM, PERMISSIONS, STORE, SLUG, readyRepo } = require('./support/governance-ready-fixture.cjs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
+// These rows are about a computer session: a CI runner's own markers would make every run a cloud
+// session, which has no computer permissions part. Cleared for this test process only.
+delete process.env.GITHUB_ACTIONS;
+delete process.env.CLAUDE_CODE_REMOTE;
 const ready = require('../scripts/toolkit-governance-ready.cjs');
 const parts = require('../scripts/toolkit-governance-parts.cjs');
 

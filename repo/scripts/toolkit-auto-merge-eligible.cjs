@@ -421,6 +421,7 @@ function setupHeld(cwd) {
   } catch { return null; }
 }
 
-if (require.main === module) process.exitCode = main(process.argv.slice(2));
-
+// Exports first: the readiness read can reach this file again through a require cycle.
 module.exports = Object.freeze({ GENERAL, SECTIONS, TOOLKIT, UAT_STATES, commitOf, eligibility, eligibilityOf, main, sectionOf, uatVerdict, withoutStamps });
+
+if (require.main === module) process.exitCode = main(process.argv.slice(2));

@@ -152,6 +152,7 @@ function main(argv = process.argv.slice(2)) {
   return 0;
 }
 
-if (require.main === module) process.exitCode = main();
-
+// Exports first, so a require cycle through the finish module always sees them.
 module.exports = Object.freeze({ BY_HAND, FirstInstallSweep, WAIT_MS, WORKFLOW, readOwed });
+
+if (require.main === module) process.exitCode = main();

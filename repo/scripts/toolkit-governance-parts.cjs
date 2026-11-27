@@ -252,6 +252,7 @@ function main(argv = process.argv.slice(2)) {
   return 0;
 }
 
-if (require.main === module) process.exitCode = main();
-
+// Exports first: the readiness module and this file require each other through the state module.
 module.exports = Object.freeze({ SCHEMA, BASENAME, STORE_STEP, STORE_WHY, check, record, recordRead, saved, savedStore, sessionLines, startCheck, storeState });
+
+if (require.main === module) process.exitCode = main();
