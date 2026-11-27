@@ -1529,41 +1529,83 @@ class ToolGate {
 
 // `refresh` is this session start's own refresh result (startSession's onRefresh), so a "couldn't check
 // governance" line names why that read failed.
-function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessionId = null, programmeDeps = {}, refresh = null, host = null, limit = SESSION_TEXT_LIMIT } = {}) {
+// `localCopy` is this start's catch-up line (toolkit-repo-catchup.cjs), if any: it leads the text, or
+// joins the held block when governance is held and the checkout could not move.
+function sessionLine(cwd, { registryOptions = {}, stateReader = null, now, sessionId = null, programmeDeps = {}, refresh = null, host = null, limit = SESSION_TEXT_LIMIT, localCopy = null } = {}) {
   const verdict = new GovernanceGate({ registryOptions, stateReader, now }).evaluate(cwd, { sessionId });
   // Toolkit runs no scheduled tasks on a computer any more (the cloud sweep does that work), so the
   // session line reads no task registry and names no computer task.
-  return verdictLine(verdict, registryOptions, programmeDeps, refresh, host, limit);
+  return verdictLine(verdict, registryOptions, programmeDeps, refresh, host, limit, localCopy);
 }
 
 // `host` is the app the calling entry point runs in, for the permissions line (permissionsLine);
 // `limit` is the room the calling hook leaves for this text.
-function verdictLine(verdict, registryOptions, programmeDeps, refresh = null, host = null, limit = SESSION_TEXT_LIMIT) {
+function verdictLine(verdict, registryOptions, programmeDeps, refresh = null, host = null, limit = SESSION_TEXT_LIMIT, localCopy = null) {
   const state = verdict.state;
-  if (verdict.pending) return verdict.pending.text;
-  if (verdict.reason === 'unavailable') return unavailableText(causeOf(state, refresh));
+  const copy = typeof localCopy === 'string' && localCopy ? localCopy : null;
+  const lead = text => (copy ? `${copy}\n${text}` : text);
+  const room = copy ? limit - sizeOf(`${copy}\n`) : limit;
+  if (verdict.pending) return lead(verdict.pending.text);
+  if (verdict.reason === 'unavailable') return lead(unavailableText(causeOf(state, refresh)));
   if (verdict.open) {
-    return `Toolkit governance: not decided yet, so this repository counts as off. Follow the global rules (coding gates included) without GitHub governance. Toolkit asks the user once per session and work carries on; they can also send \`toolkit governance enable\` or \`toolkit governance disable\` as a message. Never show the user these commands or ask them to type one. ${NEVER_OWNER}`;
+    return lead(`Toolkit governance: not decided yet, so this repository counts as off. Follow the global rules (coding gates included) without GitHub governance. Toolkit asks the user once per session and work carries on; they can also send \`toolkit governance enable\` or \`toolkit governance disable\` as a message. Never show the user these commands or ask them to type one. ${NEVER_OWNER}`);
   }
-  const { lines, checkpoints } = state.programme_records_bind === true ? programmeLines(state, registryOptions, programmeDeps) : { lines: [], checkpoints: [] };
+  const bound = state.programme_records_bind === true;
+  const { lines, checkpoints } = bound ? programmeLines(state, registryOptions, programmeDeps) : { lines: [], checkpoints: [] };
+  // Whether the setup is complete here (toolkit-governance-ready.cjs): while a part is gone and the hold
+  // applies, one block leads the text, every session, naming each part with its one step.
+  const ready = bound ? readinessFor(state, registryOptions, programmeDeps, host) : null;
+  const held = Boolean(ready && ready.applies && !ready.ready);
   // A bank turn-on that just merged gets its post-merge setup once (toolkit-governance-finish.cjs).
-  const finish = state.programme_records_bind === true ? require('./toolkit-governance-finish.cjs').sessionLines(state, registryOptions, programmeDeps) : [];
-  // A missing Governance App or an evidence store that cannot be used, from the last check.
-  const parts = state.programme_records_bind === true ? require('./toolkit-governance-parts.cjs').sessionLines(state, registryOptions, programmeDeps) : [];
+  const finish = bound ? require('./toolkit-governance-finish.cjs').sessionLines(state, registryOptions, programmeDeps) : [];
+  // A missing Governance App or an evidence store that cannot be used, from the last check; while held
+  // they are in the block instead.
+  const parts = bound ? require('./toolkit-governance-parts.cjs').sessionLines(state, registryOptions, { ...programmeDeps, ...(held ? { partsInBlock: true } : {}) }) : [];
+  const permissions = held && ready.missing.some(item => item.part === 'permissions') ? [] : permissionsLine(state, programmeDeps, host);
+  const stuck = held && copy && STUCK_COPY.test(copy);
+  const block = held ? `${heldBlock(ready, finish, stuck ? copy : null)}\n\n` : '';
+  const unchecked = ready && ready.applies && ready.ready && ready.firstCheck ? [UNCHECKED_LINE] : [];
   // The last known decision is ENABLED (even when it could not be re-read): the installed Toolkit
   // delivers the governed rules, so a repository needs no copy of them.
   const rules = state.state === 'ENABLED' ? `\n\n${governedRules()}` : '';
-  // One Checkpoint line per failed session has no bound, so the ones that do not fit are counted.
-  return fitLines(checkpoints, (kept, leftOut) => {
+  const text = fitLines(checkpoints, (kept, leftOut) => {
     const more = leftOut ? [`Checkpoint: ${leftOut} more session${leftOut === 1 ? '' : 's'} here also failed their last turn's record (left out to keep this text within the host's session-start limit); each session's own ${programmeCommand('show --session <its id>', { userHome: programmeDeps.home })} shows it. ${FINDING_ACTIONS.checkpoint}`] : [];
-    return `${[decidedLine(state, refresh), ...finish, ...parts, ...permissionsLine(state, programmeDeps, host), ...lines, ...kept, ...more].join(' ')}${rules}`;
-  }, limit);
+    return `${block}${[decidedLine(state, refresh), ...(held ? [] : finish), ...unchecked, ...parts, ...permissions, ...lines, ...kept, ...more].join(' ')}${rules}`;
+  }, stuck ? limit : room);
+  return stuck ? text : lead(text);
+}
+
+// A catch-up line for a default branch that is behind and could not move (toolkit-repo-catchup.cjs).
+const STUCK_COPY = /^Toolkit: local \S+ is \d+ commits? behind origin\/\S+ and was not moved: /;
+const UNCHECKED_LINE = 'Toolkit governance: this computer has not checked the Governance App and the evidence store here yet; a background check runs now and the next session start names anything missing.';
+
+// The readiness of this repository (toolkit-governance-ready.cjs) with this session's app, plus
+// `firstCheck` (no saved check of the App and store yet). Any failure reads as null (nothing held).
+function readinessFor(state, registryOptions, deps = {}, host = null) {
+  try {
+    const ready = require('./toolkit-governance-ready.cjs');
+    const result = ready.readiness(state, registryOptions, { ...(deps.permissions ? { permissions: deps.permissions } : {}), ...(deps.store !== undefined ? { store: deps.store } : {}), ...(deps.environment ? { environment: deps.environment } : {}), ...(host ? { host } : {}) });
+    const saved = require('./toolkit-governance-parts.cjs').saved(registryOptions, state.repository_id);
+    return { ...result, firstCheck: !saved };
+  } catch { return null; }
+}
+
+// The block the agent passes on in full while the setup is not complete: what is held, each missing
+// part with its one step, the checkout that could not move, and the finish's result (said once).
+function heldBlock(ready, finish, stuck) {
+  const readyModule = require('./toolkit-governance-ready.cjs');
+  const items = [`Held: ${readyModule.HELD}`, ...readyModule.partLines(ready)];
+  if (stuck) items.push(`Local copy: ${stuck.replace(/^Toolkit: local /, '')}`);
+  for (const line of finish) items.push(/^First personal data sweep: /.test(line) ? line : `Setup: ${line.replace(/^Toolkit: /, '')}`);
+  return `Toolkit governance: held until setup is complete. In your first reply, pass this block on to the user in full, one short line each, every session until it is done, and never present any of it as optional:\n${items.map(item => `- ${item}`).join('\n')}`;
 }
 
 // One line at session start, in a governed repository, while this computer's Toolkit permission lines
 // for this app are out of date: the agent tells the owner once, in one line. Only the owner can add
-// them, so nothing waits on it and nothing stops. It reads local files only, and any failure drops the
-// line. Cloud sessions (Projects included) never get it: their text is cloudSessionText.
+// them. Lines never set up at all, where the readiness hold applies, are in the held block instead
+// (toolkit-governance-ready.cjs); out-of-date lines hold nothing. It reads local files only, and any
+// failure drops the line. Cloud sessions (Projects included) never get it: their text is
+// cloudSessionText.
 function permissionsLine(state, deps = {}, host = null) {
   if (state.state !== 'ENABLED' || !state.root) return [];
   try {

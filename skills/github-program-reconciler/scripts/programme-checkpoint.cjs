@@ -195,10 +195,19 @@ function governanceStateOf(repoRoot, deps = {}) {
   } catch { return null; }
 }
 
+// 'queue' while the repository's setup is not complete (toolkit-governance-ready.cjs), else null. A
+// copy without the module, or a read that fails, holds nothing. `deps.readiness(state)` is for tests.
+function readinessHolds(current, deps = {}) {
+  try {
+    const ready = require('../../../repo/scripts/toolkit-governance-ready.cjs');
+    return ready.holdFor('checkpoint', deps.readiness ? deps.readiness(current) : ready.readiness(current));
+  } catch { return null; }
+}
+
 // ---- offline queue ----------------------------------------------------------------------------------
 //
 // When governance is on but records cannot be written yet (the merged binding was last read over 24
-// hours ago or not at all, or GitHub cannot be reached), the turn's facts and return block are kept in
+// hours ago or not at all, GitHub cannot be reached, or a part of the setup is gone), the turn's facts and return block are kept in
 // a queue next to the session binding, in Toolkit's own user-state, never the repository. The next
 // turn end where records bind and the store answers applies them in order before its own (the
 // journal's return IDs make a replay idempotent) and deletes the queue. Governance confirmed off
@@ -320,6 +329,9 @@ function runCheckpoint({ sessionId, message = null }, deps = {}) {
     if (current && current.state === 'ENABLED' && current.governed_rules_bind === true) return queueTurn();
     return { outcome: 'GOVERNANCE_OFF' };
   }
+  // While a part of the setup is gone (toolkit-governance-ready.cjs), the turn is kept and replayed
+  // once setup is complete. Unknown parts never hold.
+  if (readinessHolds(current, deps) === 'queue') return queueTurn();
   // Only the binding merged on the default branch names the store; a working-tree copy never does.
   const binding = mergedBindingOf(local.repo_root, deps);
   if (!binding) return { outcome: 'GOVERNANCE_OFF' };

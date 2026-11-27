@@ -157,7 +157,11 @@ function fixtureErrors(fixture) {
   if (fixture === undefined) return [];
   if (!fixture || typeof fixture !== 'object' || Array.isArray(fixture)) return ['fixture must be an object'];
   const errors = [];
-  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'attention_net', 'desktop_sessions', 'gate_records', 'entrypoint', 'toolkit_helpers'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  for (const key of Object.keys(fixture)) if (!['repo', 'transcript', 'files', 'owner_session', 'gate_role', 'evidence_merge', 'slow_proposal', 'issue_closure', 'closure_cloud', 'closure_delay_ms', 'closure_transport', 'windows_tasks', 'bank_open', 'attention_net', 'desktop_sessions', 'gate_records', 'entrypoint', 'toolkit_helpers', 'governance_parts'].includes(key)) errors.push(`fixture has unknown key ${key}`);
+  if (fixture.governance_parts !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !fixture.governance_parts || typeof fixture.governance_parts !== 'object' || Array.isArray(fixture.governance_parts)
+    || Object.keys(fixture.governance_parts).some(key => !['app', 'store'].includes(key))
+    || (fixture.governance_parts.app !== undefined && !['missing', 'found'].includes(fixture.governance_parts.app))
+    || (fixture.governance_parts.store !== undefined && !['usable', 'missing'].includes(fixture.governance_parts.store)))) errors.push('fixture.governance_parts needs an enabled repository and { app?: missing|found, store?: usable|missing }');
   if (fixture.attention_net !== undefined && (!fixture.repo || fixture.repo.governance !== 'enabled' || !Array.isArray(fixture.attention_net)
     || fixture.attention_net.some(entry => !entry || typeof entry !== 'object' || !/^[A-Z][A-Z_]{0,39}$/.test(String(entry.code)) || !['new', 'acknowledged'].includes(entry.state)
       || typeof entry.age_hours !== 'number' || entry.age_hours < 0 || Object.keys(entry).some(key => !['code', 'state', 'age_hours', 'issue', 'kind'].includes(key))))) errors.push('fixture.attention_net needs an enabled repository and entries { code, state, age_hours, issue?, kind? }');
@@ -466,6 +470,19 @@ class Fixture {
       const repository = `toolkit-test-fixture/hook-pack-${spec.repo.name || 'fixture'}`;
       const cache = require(path.join(ROOT, 'skills', 'github-program-reconciler', 'scripts', 'programme-attention-cache.cjs'));
       for (const entry of spec.gate_records) cache.writeGateSession(repository, entry, { home: this.home });
+    }
+    // The last background check of the Governance App and the evidence store, as
+    // toolkit-governance-parts.cjs saves it, for the enabled fixture's merged binding.
+    if (spec.governance_parts) {
+      const scripts = path.join(ROOT, 'repo', 'scripts');
+      const registryOptions = { registryPath: path.join(this.home, '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json'), testOnly: true };
+      const state = require(path.join(scripts, 'toolkit-governance-state.cjs')).governanceState(this.work, registryOptions);
+      const store = 'toolkit-test-fixture/store';
+      const { app, store: storeState } = spec.governance_parts;
+      const saved = require(path.join(scripts, 'toolkit-governance-parts.cjs')).record(registryOptions, state.repository_id, {
+        app: app ? { variable: app, secret: app } : null, store: storeState ? { state: storeState } : null, storeRepository: store,
+      }, { now: this.#now() });
+      if (!saved) throw new Error('the fixture governance parts could not be saved');
     }
     // The Claude Code entry point the session runs in, as the host names it.
     if (spec.entrypoint) this.env.CLAUDE_CODE_ENTRYPOINT = spec.entrypoint;

@@ -67,6 +67,12 @@ const CLOUD_CONFIG_PAIRS = Object.freeze([
   ['credential.interactive', 'false'],
 ]);
 
+// Whether this process runs in a cloud session (a cloud container or a GitHub Actions runner), which
+// has no computer of its own: this computer's parts (its Toolkit permissions) are not its parts.
+function cloudSession(environment = process.env) {
+  return Boolean(environment) && (environment.CLAUDE_CODE_REMOTE === 'true' || environment.GITHUB_ACTIONS === 'true');
+}
+
 // Whether GIT_CONFIG_COUNT carries only the cloud container's own rewrite pairs, in a cloud session.
 function cloudContainerConfig(environment) {
   if (!environment || environment.CLAUDE_CODE_REMOTE !== 'true') return false;
@@ -357,6 +363,7 @@ function isFresh(entry, now = new Date()) {
 }
 
 module.exports = Object.freeze({
+  cloudSession,
   CACHE_SCHEMA,
   CACHE_DIR,
   FRESH_MS,

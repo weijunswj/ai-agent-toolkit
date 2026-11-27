@@ -25,6 +25,9 @@ const BASENAME = 'governance-finish.v1.json';
 const FINISH_GAP_MS = 15 * 60 * 1000;
 const MAX_ENTRIES = 32;
 const SCRIPT = path.join(__dirname, 'toolkit-governance.cjs');
+const SWEEP_SCRIPT = path.join(__dirname, 'toolkit-governance-first-sweep.cjs');
+const SWEEP_OWED_MS = 3 * 24 * 60 * 60 * 1000;
+const SWEEP_LAPSED = 'First personal data sweep: its result could not be read here within three days; on GitHub, open Actions and choose Personal data sweep to see its list.';
 // What the finish turns on, as the bank's end lines and the session line say it.
 const WHAT = 'default-branch protection (pull requests only, the required checks, merge commits only, nobody can bypass it), a ruleset that blocks force pushes, a ruleset that keeps the programme state branch where programme state lives there, the free dependency and security settings, and, where it adds the personal data guard, one report-only sweep of what is already there (files, commit messages, pull request text and comments), which changes and posts nothing (on a public repository anyone can read its list)';
 
@@ -72,22 +75,38 @@ function listed(items) { return items.length > 1 ? `${items.slice(0, -1).join(',
 // stays pending. `files` are security files the finish wrote into this working tree, which still
 // need a pull request.
 function resultLine(outcome) {
-  const on = outcome.on || [], unavailable = outcome.unavailable || [], held = outcome.held || [], reports = outcome.reports || [], files = outcome.files || [];
+  const on = outcome.on || [], unavailable = outcome.unavailable || [], held = outcome.held || [], files = outcome.files || [];
   const parts = [outcome.result === 'done'
     ? `Toolkit: governance setup finished here${held.length ? ', apart from what waits for you below' : ''}.`
     : `Toolkit: governance setup could not finish here yet (${outcome.reason || 'GitHub could not be written'}); it is tried again in a later session.`];
   if (on.length) parts.push(`On and read back: ${listed(on)}.`);
   if (unavailable.length) parts.push(`Not set: GitHub cannot enforce ${listed(unavailable)} on a private repository on GitHub Free, so nothing was written for ${unavailable.length > 1 ? 'them' : 'it'}; the local guards stay the fallback.`);
-  parts.push(...reports);
   for (const entry of held) parts.push(`Waiting for you, ${entry.name}: ${entry.step}`);
   if (files.length) parts.push(`It also wrote ${files.join(', ')} in this working tree; commit ${files.length > 1 ? 'them' : 'it'} through a pull request.`);
   return parts.join(' ');
 }
 
+// `outcome.sweep_owed` ({ run }: the first sweep was still going when the finish ended) keeps the
+// sweep's result owed to a later session (sessionLines, recordSweep).
 function record(registryOptions, repositoryId, outcome, { now = new Date() } = {}) {
+  const owed = outcome.result === 'done' && outcome.sweep_owed ? { run: Number.isSafeInteger(outcome.sweep_owed.run) ? outcome.sweep_owed.run : null } : null;
   return update(registryOptions, repositoryId, entry => entry && ({
     ...entry, status: outcome.result === 'done' ? 'done' : 'pending', finished_at: now.toISOString(), line: resultLine(outcome),
+    notes: (outcome.reports || []).filter(note => typeof note === 'string' && note).map(note => note.slice(0, 600)), sweep_owed: owed, sweep_line: null,
   }));
+}
+
+// The owed first sweep's result line, read by a background run (toolkit-governance-first-sweep.cjs
+// owed); the next session start shows it once.
+function recordSweep(registryOptions, repositoryId, line) {
+  if (typeof line !== 'string' || !line) return null;
+  return update(registryOptions, repositoryId, entry => (entry && entry.sweep_owed ? { ...entry, sweep_line: line.slice(0, 600) } : entry));
+}
+
+function startSweepRead(root) {
+  const child = spawn(process.execPath, [SWEEP_SCRIPT, 'owed'], { cwd: root, detached: true, stdio: 'ignore', windowsHide: true });
+  child.on('error', () => {});
+  child.unref();
 }
 
 // A run that ended without a result to record (not merged yet, or another run held the lock) still
@@ -129,11 +148,30 @@ function sessionLines(state, registryOptions = {}, deps = {}) {
     if (state?.state !== 'ENABLED' || state.programme_records_bind !== true || !state.repository_id) return [];
     const entry = entryFor(registryOptions, state.repository_id);
     if (!entry) return [];
-    const now = deps.now ? deps.now() : new Date();
+    // A test clock may give a Date or its ISO text.
+    const now = deps.now ? new Date(deps.now()) : new Date();
+    const offline = (deps.environment || process.env).TOOLKIT_GOVERNANCE_OFFLINE === '1' || registryOptions.testOnly === true;
+    // The first sweep was still going when the finish ended: its result, once read in the background,
+    // is shown once; until then a read starts at most once per FINISH_GAP_MS.
+    if (entry.status === 'sweep-owed') {
+      if (typeof entry.sweep_line === 'string' && entry.sweep_line) { update(registryOptions, state.repository_id, () => null); return [entry.sweep_line]; }
+      // A result still unread after SWEEP_OWED_MS is said once and dropped, never owed for ever.
+      if (now.getTime() - Date.parse(entry.at || '') > SWEEP_OWED_MS) { update(registryOptions, state.repository_id, () => null); return [SWEEP_LAPSED]; }
+      const last = Date.parse(entry.started_at || '');
+      if ((deps.startSweepRead || !offline) && !(Number.isFinite(last) && now.getTime() - last < FINISH_GAP_MS)) {
+        update(registryOptions, state.repository_id, current => (current ? { ...current, started_at: new Date(now).toISOString() } : current));
+        (deps.startSweepRead || startSweepRead)(state.root);
+      }
+      return [];
+    }
     const lines = [];
     if (entry.line) lines.push(entry.line);
-    if (entry.status === 'done') { update(registryOptions, state.repository_id, () => null); return lines; }
-    const offline = (deps.environment || process.env).TOOLKIT_GOVERNANCE_OFFLINE === '1' || registryOptions.testOnly === true;
+    // The first sweep's report, its own line (the held block lists it apart).
+    if (Array.isArray(entry.notes)) lines.push(...entry.notes.filter(note => typeof note === 'string' && note));
+    if (entry.status === 'done') {
+      update(registryOptions, state.repository_id, () => (entry.sweep_owed ? { ...entry, status: 'sweep-owed', line: null, notes: null, started_at: null, at: new Date(now).toISOString() } : null));
+      return lines;
+    }
     const last = Date.parse(entry.started_at || '');
     if ((deps.startFinish || !offline) && !(Number.isFinite(last) && now.getTime() - last < FINISH_GAP_MS)) {
       // A start with no result since then died before it could record one.
@@ -156,4 +194,4 @@ function sessionLines(state, registryOptions = {}, deps = {}) {
   } catch { return []; }
 }
 
-module.exports = Object.freeze({ BASENAME, FINISH_GAP_MS, SCHEMA, WHAT, claim, clear, entryFor, markPending, record, sessionLines, startFinish, touch });
+module.exports = Object.freeze({ BASENAME, FINISH_GAP_MS, SCHEMA, WHAT, claim, clear, entryFor, markPending, record, recordSweep, sessionLines, startFinish, touch });
