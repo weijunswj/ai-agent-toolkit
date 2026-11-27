@@ -52,7 +52,8 @@ function recordEnabled(repo, { home = governedHome() } = {}) {
 
 // Writes this computer's cache of the binding merged on the default branch, as a refresh would, from
 // the repository's working-tree binding (or `text`), read now.
-function recordMerged(repo, { home = null, registryPath = null, text = null, now = new Date() } = {}) {
+// `commit` is origin's default branch head the read fetched (a fixture's own, for the stale-copy check).
+function recordMerged(repo, { home = null, registryPath = null, text = null, now = new Date(), commit = '0'.repeat(40) } = {}) {
   if (!registryPath) registryPath = path.join(home || governedHome(), '.ai-agent-toolkit', 'user-state', 'repository-governance.v1.json');
   const governance = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-state.cjs'));
   const cache = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-governance-binding.cjs'));
@@ -60,7 +61,7 @@ function recordMerged(repo, { home = null, registryPath = null, text = null, now
   const body = text !== null ? text : fs.readFileSync(path.join(identity.root, '.github', 'toolkit-programme.json'), 'utf8');
   cache.writeCache(path.dirname(registryPath), {
     schema: cache.CACHE_SCHEMA, repository_id: identity.repository_id, remote: identity.remote.canonical, default_branch: 'main',
-    commit: '0'.repeat(40), fetched_at: now.toISOString(), status: 'present',
+    commit, fetched_at: now.toISOString(), status: 'present',
     bytes_sha256: require('node:crypto').createHash('sha256').update(body, 'utf8').digest('hex'), text: body, problem: null,
   });
   return repo;

@@ -18,8 +18,10 @@
 // an older commit is also re-rendered at that commit, when this checkout has it and the render file is
 // unchanged since, so an edit whose hash was recomputed still shows.
 //
-// --refresh-pr brings a governed repository's stale copies up to date through one pull request for
-// the owner to merge (toolkit-cloud-workflows-refresh.cjs); nothing is written to the checkout.
+// --refresh-pr brings a governed repository's stale copies up to date through one pull request
+// (toolkit-cloud-workflows-refresh.cjs); nothing is written to the checkout. --land-refresh says whether
+// that pull request may land now under the repository's task auto-merge switch, and with which exact
+// merge command (toolkit-cloud-workflows-land.cjs); it merges nothing itself.
 //
 // DEFAULT_CLOUD_WORKFLOWS is the one list of what a governed repository carries: turning governance on,
 // the refresh pull request (a rerun and a takeover go through it) and the governance check all read it,
@@ -33,9 +35,10 @@
 // shards copy carries the list's shard ids in its matrix, so a change to the list's shards makes the
 // copy outdated (a rules refresh rewrites it), never edited.
 //
-// Usage: node repo/scripts/toolkit-cloud-workflows.cjs --repo <dir> [--ci-workflow <file>] [--check | --refresh-pr] [--json]
-// Exit codes: 0 done (or no drift, or nothing for --refresh-pr to do), 1 drift found by --check,
-// 2 not installed or no pull request made (the reason is printed).
+// Usage: node repo/scripts/toolkit-cloud-workflows.cjs --repo <dir> [--ci-workflow <file>] [--check | --refresh-pr | --land-refresh] [--json]
+// Exit codes: 0 done (or no drift, or nothing for --refresh-pr to do, or --land-refresh: land now),
+// 1 drift found by --check (or --land-refresh: not now, the line says why), 2 not installed or no pull
+// request made (the reason is printed).
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -67,7 +70,7 @@ const GATE = RENDERED.find(row => row.id === 'programme-sweep-gate');
 const DEFAULT_FILES = Object.freeze(DEFAULT_CLOUD_WORKFLOWS.flatMap(row => (row.kind === 'copied' ? COPIED_FILES[row.id] : [row.file])));
 const RESERVED = new Set(DEFAULT_CLOUD_WORKFLOWS.map(row => row.file.slice('.github/workflows/'.length)).filter(name => name !== governedShards.DEFAULT_WORKFLOW));
 const CI_FILE = /^[A-Za-z0-9_.-]+\.ya?ml$/;
-const USAGE = 'Usage: node repo/scripts/toolkit-cloud-workflows.cjs --repo <dir> [--ci-workflow <file>] [--check | --refresh-pr] [--json]';
+const USAGE = 'Usage: node repo/scripts/toolkit-cloud-workflows.cjs --repo <dir> [--ci-workflow <file>] [--check | --refresh-pr | --land-refresh] [--json]';
 
 const TOOLKIT_REMOTE = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)weijunswj\/ai-agent-toolkit(?:\.git)?\/?$/i;
 // A Toolkit source checkout runs its own workflow files. This file has been there far longer than
@@ -254,7 +257,7 @@ function readOrNull(file) {
 }
 
 function parseArgs(argv) {
-  const options = { repo: null, ci: null, check: false, refreshPr: false, json: false };
+  const options = { repo: null, ci: null, check: false, refreshPr: false, landRefresh: false, json: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--repo' || arg === '--ci-workflow') {
@@ -263,12 +266,13 @@ function parseArgs(argv) {
       if (arg === '--repo') options.repo = value; else options.ci = value;
     } else if (arg === '--check') options.check = true;
     else if (arg === '--refresh-pr') options.refreshPr = true;
+    else if (arg === '--land-refresh') options.landRefresh = true;
     else if (arg === '--json') options.json = true;
     else if (arg === '--help' || arg === '-h') options.help = true;
     else throw new InstallError(`unknown argument ${arg}.`);
   }
   if (!options.help && !options.repo) throw new InstallError('--repo is required.');
-  if (options.check && options.refreshPr) throw new InstallError('choose --check or --refresh-pr, not both.');
+  if ([options.check, options.refreshPr, options.landRefresh].filter(Boolean).length > 1) throw new InstallError('choose one of --check, --refresh-pr and --land-refresh.');
   if (options.ci && !CI_FILE.test(options.ci)) throw new InstallError('--ci-workflow takes a workflow file name such as ci.yml.');
   return options;
 }
@@ -443,11 +447,16 @@ function report(result, check) {
 // `refresh` reads the merged binding again before its ci_shards answer is used, so a copy step run
 // after the answer merged does not act on this computer's older read.
 // `github` and `governance` are for tests of --refresh-pr (toolkit-cloud-workflows-refresh.cjs).
-function main(argv = process.argv.slice(2), { out = process.stdout, err = process.stderr, root = sourceRoot(), commit, ciShards, refresh = target => require('./toolkit-governance-state.cjs').refreshMergedBinding(target), github, governance } = {}) {
+function main(argv = process.argv.slice(2), { out = process.stdout, err = process.stderr, root = sourceRoot(), commit, ciShards, refresh = target => require('./toolkit-governance-state.cjs').refreshMergedBinding(target), github, governance, landing = {} } = {}) {
   let options;
   try { options = parseArgs(argv); } catch (error) { err.write(`Not installed: ${error.message}\n${USAGE}\n`); return 2; }
   if (options.help) { out.write(`${USAGE}\n`); return 0; }
-  if (ciShards === undefined || options.refreshPr) { try { refresh(path.resolve(options.repo)); } catch { /* the last read stays */ } }
+  if (ciShards === undefined || options.refreshPr || options.landRefresh) { try { refresh(path.resolve(options.repo)); } catch { /* the last read stays */ } }
+  if (options.landRefresh) {
+    const result = require('./toolkit-cloud-workflows-land.cjs').landRefresh({ repo: options.repo, ...landing });
+    out.write(options.json ? `${JSON.stringify(result.result)}\n` : `${result.line}\n`);
+    return result.code;
+  }
   if (options.refreshPr) {
     const result = require('./toolkit-cloud-workflows-refresh.cjs').refreshPr({ repo: options.repo, ci: options.ci, root, commit, ciShards, workflows: module.exports, ...(github ? { github } : {}), ...(governance ? { governance } : {}) });
     (result.code ? err : out).write(`${result.line}\n`);

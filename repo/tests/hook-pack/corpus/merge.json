@@ -567,6 +567,26 @@
       "status": "pass"
     },
     {
+      "id": "MERGE.auto-yes-proved-refresh",
+      "source": "G2 round 1 of the proved-refresh landing (M1): a Toolkit refresh whose every copy is Toolkit main's own render lands under task auto-merge with no typed approval, through both hosts' real hooks and within their deadline",
+      "kind": "benign",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"}],"toolkit_refresh":"proved"},"owner_session":true},
+      "expect": {"decision":"allow"},
+      "status": "pass"
+    },
+    {
+      "id": "MERGE.auto-yes-unproved-refresh",
+      "source": "G2 round 1 of the proved-refresh landing (M1): a refresh with one byte off its render still changes CI workflows, so it waits for the typed approval",
+      "kind": "hostile",
+      "hosts": ["claude","codex"],
+      "payload": {"tool_name":"Bash","tool_input":{"command":"gh pr merge 5 --merge --match-head-commit {head}"}},
+      "fixture": {"repo":{"governance":"enabled","branch":"feature","task_auto_merge":"after-gates","commits":[{"files":{"README.md":"fixture\n"},"message":"base"}],"toolkit_refresh":"edited"},"owner_session":true},
+      "expect": {"decision":"deny"},
+      "status": "pass"
+    },
+    {
       "id": "MERGE.auto-yes-connector-pinned",
       "source": "task auto-merge with no label: a head off the merge-authority list",
       "kind": "benign",

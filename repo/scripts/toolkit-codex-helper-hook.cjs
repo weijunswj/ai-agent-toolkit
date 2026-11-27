@@ -51,7 +51,8 @@ function promptEvent(input) {
 const CODEX_DEADLINE_MS = 50000;
 async function decide(input, environment = process.env, { notes, transport } = {}) {
   const deadline = require('node:perf_hooks').performance.now() + CODEX_DEADLINE_MS;
-  const shared = { deadline, transport, evidenceResponses: new Map(), host: 'codex' };
+  // scopeProofs: one merge scope (a refresh's copy proof included) per call, shared by both passes.
+  const shared = { deadline, transport, evidenceResponses: new Map(), scopeProofs: new Map(), host: 'codex' };
   let governanceDenial;
   try { governanceDenial = new (gate().ToolGate)().decide(input || {}); } catch {
     governanceDenial = insideRepository(input?.cwd) ? { deny: `Toolkit: the governance check failed, so nothing runs in this repository until it works again. ${NEVER_OWNER}` } : null;

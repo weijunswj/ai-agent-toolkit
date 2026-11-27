@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { fetchedState } = require('./support/fetched-default-branch.cjs');
 const { spawnSync } = require('node:child_process');
 
 const ROOT = process.env.A2A_SOURCE_ROOT || path.resolve(__dirname, '../..');
@@ -111,7 +112,7 @@ test('cloud workflows: a renamed or removed CI workflow leaves a faithful gate c
     assert.equal(state(), 'outdated', `${at}: CI workflow renamed`);
     fs.rmSync(ciFile);
     assert.equal(state(), 'outdated', `${at}: CI workflow removed`);
-    assert.deepEqual(conformance.cloudWorkflowFindings({ root: repo }, toolkit.dir, { cloudWorkflowsCommit: toolkit.two }).filter(entry => entry.severity === 'drift').map(entry => entry.message).filter(message => message.includes('gate')), [], `${at}: no drift`);
+    assert.deepEqual(conformance.cloudWorkflowFindings(fetchedState(repo), toolkit.dir, { cloudWorkflowsCommit: toolkit.two }).filter(entry => entry.severity === 'drift').map(entry => entry.message).filter(message => message.includes('gate')), [], `${at}: no drift`);
     // Broken CI lines are a hand edit, even with the hash recomputed.
     const text = fs.readFileSync(gateFile, 'utf8');
     const lines = text.split('\n');
@@ -169,9 +170,9 @@ test('cloud workflows: an older copy is re-rendered at its own commit, so an edi
   assert.equal(workflows.plan({ repo, root: toolkit.dir, commit: toolkit.two }).rows.find(row => row.id === 'programme-sweep').state, 'outdated', 'the render file changed at that commit, so it is not re-rendered');
   fs.writeFileSync(sweepFile, forge(workflows.render('programme-sweep', source(SWEEP.file), OTHER)));
   assert.equal(state(), 'outdated', 'a commit this checkout does not have is not re-rendered');
-  assert.deepEqual(conformance.cloudWorkflowFindings({ root: repo }, toolkit.dir, { cloudWorkflowsCommit: toolkit.two }).map(entry => entry.id).includes('CLOUD_WORKFLOW_OUTDATED'), true);
+  assert.deepEqual(conformance.cloudWorkflowFindings(fetchedState(repo), toolkit.dir, { cloudWorkflowsCommit: toolkit.two }).map(entry => entry.id).includes('CLOUD_WORKFLOW_OUTDATED'), true);
   fs.writeFileSync(sweepFile, forge(older));
-  assert.ok(conformance.cloudWorkflowFindings({ root: repo }, toolkit.dir, { cloudWorkflowsCommit: toolkit.two }).some(entry => entry.id === 'CLOUD_WORKFLOW_DRIFT' && entry.severity === 'drift'), 'conformance reports it as drift');
+  assert.ok(conformance.cloudWorkflowFindings(fetchedState(repo), toolkit.dir, { cloudWorkflowsCommit: toolkit.two }).some(entry => entry.id === 'CLOUD_WORKFLOW_DRIFT' && entry.severity === 'drift'), 'conformance reports it as drift');
 });
 
 test('cloud workflows: a source that changed shape stops the render', () => {
@@ -247,7 +248,7 @@ test('cloud workflows: a Toolkit checkout and an unpublished commit are refused,
   fs.mkdirSync(path.join(older, 'repo', 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(older, 'repo', 'scripts', 'toolkit-governance-conformance.cjs'), '');
   assert.equal(workflows.isToolkitCheckout(older), true);
-  assert.deepEqual(conformance.cloudWorkflowFindings({ root: older }, ROOT, { cloudWorkflowsCommit: COMMIT }), []);
+  assert.deepEqual(conformance.cloudWorkflowFindings(fetchedState(older), ROOT, { cloudWorkflowsCommit: COMMIT }), []);
   const repo = tempRepo(t);
   git(repo, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk']);
   const trunk = workflows.plan({ repo, root: ROOT, commit: COMMIT });
@@ -255,7 +256,7 @@ test('cloud workflows: a Toolkit checkout and an unpublished commit are refused,
   assert.deepEqual(trunk.not_copied.map(row => row.id), ['programme-sweep', 'programme-sweep-gate', 'test-shards', 'shard-timings']);
   for (const row of trunk.not_copied) assert.match(row.reason, /default branch is trunk; the cloud sweep runs only on a main branch/);
   workflows.apply(trunk);
-  const notes = conformance.cloudWorkflowFindings({ root: repo }, ROOT, { cloudWorkflowsCommit: COMMIT });
+  const notes = conformance.cloudWorkflowFindings(fetchedState(repo, {}, 'trunk'), ROOT, { cloudWorkflowsCommit: COMMIT });
   assert.deepEqual(notes.map(entry => `${entry.id}:${entry.severity}`), ['CLOUD_WORKFLOWS_UNCHECKED:info', 'CLOUD_WORKFLOWS_UNCHECKED:info'], 'noted, never drift');
   // The pinned commit must be on origin/main of the Toolkit checkout.
   const toolkit = tempRepo(t);
@@ -270,7 +271,7 @@ test('cloud workflows: a Toolkit checkout and an unpublished commit are refused,
 
 test('cloud workflows: governance check reports a missing or edited copy as drift and a pinned copy as a note', t => {
   const repo = tempRepo(t);
-  const ids = () => conformance.cloudWorkflowFindings({ root: repo }, ROOT, { cloudWorkflowsCommit: COMMIT }).map(entry => `${entry.id}:${entry.severity}`);
+  const ids = () => conformance.cloudWorkflowFindings(fetchedState(repo), ROOT, { cloudWorkflowsCommit: COMMIT }).map(entry => `${entry.id}:${entry.severity}`);
   assert.deepEqual(ids(), Array(SWEEPS.length + COPIED_FILES.length).fill('CLOUD_WORKFLOW_DRIFT:drift'));
   workflows.apply(workflows.plan({ repo, root: ROOT, commit: COMMIT }));
   assert.deepEqual(ids(), []);
@@ -278,7 +279,7 @@ test('cloud workflows: governance check reports a missing or edited copy as drif
   assert.deepEqual(ids(), [], 'another commit, same layout: current');
   fs.writeFileSync(path.join(repo, SWEEP.file), pinnedCopy(workflows.render('programme-sweep', source(SWEEP.file), OTHER), OTHER));
   assert.deepEqual(ids(), ['CLOUD_WORKFLOW_OUTDATED:info']);
-  assert.match(conformance.cloudWorkflowFindings({ root: repo }, ROOT, { cloudWorkflowsCommit: COMMIT })[0].message, /pinned to one older Toolkit commit[^]*--refresh-pr/);
+  assert.match(conformance.cloudWorkflowFindings(fetchedState(repo), ROOT, { cloudWorkflowsCommit: COMMIT })[0].message, /pinned to one older Toolkit commit[^]*--refresh-pr/);
   assert.deepEqual(conformance.cloudWorkflowFindings({ root: ROOT }, ROOT), [], 'the Toolkit runs its own files');
 });
 
