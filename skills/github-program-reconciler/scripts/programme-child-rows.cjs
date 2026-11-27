@@ -48,6 +48,8 @@ function uncheckedRows(body) {
 //     STATE line) whose status cell starts MERGED and whose Merged SHA cell links a full commit.
 // Only a row in that subset counts as ticked, and only such a STATE row as merged: a tab or deeper
 // indent, a quote, another marker or check character, or any other shape is never read as either.
+// `done_when` counts the rows under DONE WHEN alone (ticked, and all of them), for the graph's
+// Progress count.
 const ROWS_HEADING = /^ {0,3}(#{1,6})[ \t]+(.*?)[ \t#]*$/;
 const CHECKBOX = /^ {0,3}[-*+] \[([ xX])\] /;
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
@@ -56,7 +58,7 @@ const STATE_END = /^<!-- AI-AGENT-TOOLKIT:programme-state:END STATE -->$/;
 const MERGED_ROW = /^\|.*\|#(\d+)\|MERGED(?: · [^|]*)?\|\[[0-9a-f]{7,40}\]\(https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/commit\/[0-9a-f]{40}\)\|$/;
 function rowTicks(body) {
   const lines = String(body || '').replace(/\r\n/g, '\n').split('\n');
-  let fence = null, comment = false, section = 0, ticked = 0, unticked = 0;
+  let fence = null, comment = false, section = 0, doneWhen = false, ticked = 0, unticked = 0, doneTicked = 0, doneTotal = 0;
   const begins = [], ends = [];
   lines.forEach((line, index) => {
     if (fence) {
@@ -78,17 +80,19 @@ function rowTicks(body) {
     const heading = ROWS_HEADING.exec(line);
     if (heading) {
       if (section && heading[1].length <= section) section = 0;
-      if (/^(DONE WHEN|ROWS)\b/i.test(heading[2])) section = heading[1].length;
+      const named = /^(DONE WHEN|ROWS)\b/i.exec(heading[2]);
+      if (named) { section = heading[1].length; doneWhen = /^DONE WHEN$/i.test(named[1]); }
       return;
     }
     const row = section ? CHECKBOX.exec(line) : null;
     if (row && row[1] === ' ') unticked += 1;
     else if (row) ticked += 1;
+    if (row && doneWhen) { doneTotal += 1; if (row[1] !== ' ') doneTicked += 1; }
   });
   const merged = begins.length === 1 && ends.length === 1 && begins[0] < ends[0]
     ? lines.slice(begins[0] + 1, ends[0]).map(line => MERGED_ROW.exec(line)).filter(Boolean).map(match => Number(match[1]))
     : [];
-  return { ticked, unticked, merged: [...new Set(merged)].sort((a, b) => a - b) };
+  return { ticked, unticked, merged: [...new Set(merged)].sort((a, b) => a - b), done_when: { ticked: doneTicked, total: doneTotal } };
 }
 
 module.exports = Object.freeze({ POLISH_CAP, DONE_WHEN, sectionOf, polishRows, uncheckedRows, rowTicks });
