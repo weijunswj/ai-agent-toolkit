@@ -9,7 +9,7 @@
 // "toolkit set env" and got the one-key prompt instead of the editor). Every other request stays
 // plain language, read by the skills. Every typed command is on the printed list, or opens the same
 // action as one that is. The governance gate also reads the governance phrases (typedCommand), so
-// asking for the bank again is never taken as an answer to the one shown.
+// asking for the governance setup again is never taken as an answer to the questions shown.
 //
 // Advisory only: this module never blocks a prompt, starts no process and writes nothing. It reads where
 // the managed Toolkit checkout is, to name the governance command from there, and for `controller
@@ -35,7 +35,7 @@ const COMMANDS = Object.freeze([
   Object.freeze({ group: 'Setup', type: ['remove toolkit'], does: "Choose this app or every app, list what Toolkit put there, then remove it after your OK." }),
   Object.freeze({ group: 'Setup', type: ['toolkit memory tidy'], does: "Compare this repository's Claude memory notes with Toolkit. You see exactly what would change before anything does, keep everything is always an answer, and a backup comes first." }),
   Object.freeze({ group: 'Keys', type: ['toolkit env', 'toolkit show env'], does: 'Open your keys in your editor. Values stay on this computer and never pass through chat.' }),
-  Object.freeze({ group: 'Governance', type: ['toolkit governance', 'governance setup'], does: "Show this repository's governance choices, answered like setup toolkit: governance on or off, task auto-merge and permission blocks. Each change is one pull request for you to merge." }),
+  Object.freeze({ group: 'Governance', type: ['toolkit governance', 'governance setup'], does: "Set up governance for this repository with three short questions, or, where it is on, show one table of every part and the steps left. Each change is one pull request for you to merge." }),
   Object.freeze({ group: 'Controller', type: ['controller takeover'], does: "Make this new chat the controller of the repository it is open in, where Toolkit's GitHub governance is on. It ends in one short status." }),
   Object.freeze({ group: 'Merge', type: ['merge N'], does: 'Approve the merge of pull request N.' }),
 ]);
@@ -50,8 +50,8 @@ const ACTIONS = {
   'controller takeover': 'takeover',
   'toolkit memory tidy': 'memory',
 };
-// The governance question bank: the one governance entry. `setup governance` and `refresh governance`,
-// which Toolkit's own messages tell the user to say, open the same bank. `toolkit governance enable` and `disable`
+// The guided governance setup (and, where governance is on, its summary): the one governance entry.
+// `setup governance` and `refresh governance`, which Toolkit's own messages tell the user to say, open the same. `toolkit governance enable` and `disable`
 // are answers the governance gate reads, so they are not here; the governance tools (status, check
 // and the rest) are run by agents, setup and CI, not typed.
 for (const phrase of ['toolkit governance', 'governance setup', 'setup governance', 'toolkit setup governance', 'refresh governance', 'toolkit refresh governance']) ACTIONS[phrase] = 'guide';
@@ -137,10 +137,10 @@ const CONTEXT = Object.freeze({
   env: () => 'Open the env editor: follow the toolkit-env skill and run its `edit` route. Never run the one-key `set` prompt for this phrase, and never print a key value in chat.',
   guide: () => {
     const command = subcommand => `node "${managedScript('toolkit-governance.cjs')}" ${subcommand}`;
-    return `Show the user Toolkit's governance question bank for this repository. Run exactly \`${command('setup')}\` in this repository, then do what its paragraph that starts with \`Agents\` says. That paragraph is for you alone: never show the user any of it. Show them the rest of the output once, as printed, as plain text and never in a code block, and never summarise, shorten or repeat it. Then stop. Run no other governance subcommand first. `
-      + 'The bank works like setup toolkit\'s: the user replies `all recommended` or only their changes, such as `1.2=B`. Their next own message comes back to you with a one-use ticket and the exact command to send their answer with; every change to governance or task auto-merge is one pull request for the user to merge. '
-      + 'The bank is shown once: after their reply, show only what Toolkit prints, and never show the bank again unless they type toolkit governance. '
-      + 'Never answer the bank for the user.';
+    return `Show the user Toolkit's governance setup for this repository: its guided questions where governance is not on, its summary table where it is. Run exactly \`${command('setup')}\` in this repository, then do what its paragraph that starts with \`Agents\` says. That paragraph is for you alone: never show the user any of it. Show them the rest of the output once, as printed, never in a code block of your own, and never summarise, shorten or repeat it. Then stop. Run no other governance subcommand first. `
+      + 'The user answers in their own words or with the letters, such as `1A 2A 3A`; how the questions show (text, a card or the end-of-turn box) is the app\'s choice. Their reply, typed or tapped, comes back to you with a one-use ticket and the exact command to send it with; every change to governance or task auto-merge is one pull request for the user to merge. '
+      + 'The questions are shown once: after their reply, show only what Toolkit prints, and never show them again unless they type toolkit governance. '
+      + 'Never answer for the user.';
   },
   takeover: takeoverContext,
   memory: () => "Follow the Memory tidy section of the toolkit-setup skill for the repository of the folder this chat is open in. Only that repository's controller runs it: in a gate, helper or launched session, say so in one line and stop.",

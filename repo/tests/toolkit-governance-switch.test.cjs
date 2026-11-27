@@ -77,21 +77,23 @@ function startOwnerSession(ctx) {
   new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).start(SESSION, 'startup', governance.governanceState(ctx.repo, ctx.registryOptions).repository_id);
 }
 
-// Shows the bank, has the owner's next own message turn it into a ticket (as the prompt hook does),
-// then sends the answer with that ticket.
+// Shows the summary or questions, has the owner's next own reply turn it into a ticket (as the prompt
+// hook does), then sends the answer with that ticket.
 async function answerBank(ctx, answer, options = {}) {
   startOwnerSession(ctx);
   const shown = await run(ctx, ['setup'], options);
   assert.equal(shown.code, 0, shown.err);
-  const reference = /Bank reference: (\S+)/.exec(shown.out)[1];
   const epoch = new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).get(SESSION);
-  const ticket = new BankTickets({ registryOptions: ctx.registryOptions }).issue(SESSION, epoch);
-  assert.ok(ticket, 'the shown bank gives the next reply a ticket');
+  const tickets = new BankTickets({ registryOptions: ctx.registryOptions });
+  const reference = tickets.pendingFor(SESSION, epoch).bank_reference;
+  const ticket = tickets.issue(SESSION, epoch);
+  assert.ok(ticket, 'the shown summary gives the next reply a ticket');
   const result = await run(ctx, ['setup', '--answers', `${reference}: ${answer}`, '--ticket', ticket], options);
   return { ...result, shown, reference, ticket };
 }
+const row = (out, part) => out.split('\n').find(line => line.startsWith(`| ${part} |`));
 
-test('toolkit governance shows the bank in setup toolkit\'s format, and keeps the old per-app answers while no switch is set', async t => {
+test('toolkit governance shows the summary where governance is on, and keeps the old per-app answers while no switch is set', async t => {
   const ctx = fixture(t);
   const present = legacyAnswers(ctx);
   startOwnerSession(ctx);
@@ -99,27 +101,22 @@ test('toolkit governance shows the bank in setup toolkit\'s format, and keeps th
   for (const command of ['setup', 'refresh']) {
     const result = await run(ctx, [command], { missing: 6 });
     assert.equal(result.code, 0, result.err);
-    assert.match(result.out, /^# Toolkit governance choices - ON, /m);
-    assert.match(result.out, /\| # \| Setting \| Current \| Recommended \| Other choices \|/);
-    assert.match(result.out, /\| 1\.1 \| GitHub governance \| On \| A\. Keep current \| B\. Turn off \|/);
-    assert.match(result.out, /\| 1\.2 \| Task auto-merge with merge train \| Off \| A\. Keep current \| B\. On \|/);
-    assert.doesNotMatch(result.out, /\| (1\.[6-9]|2\.\d) \|/, 'one table of at most five rows: the two questions and the three parts Toolkit keeps');
+    assert.match(result.out, /^\*\*Governance: on, not ready: 1 step left\.\*\*$/m);
+    assert.match(result.out, /^\| Part \| State \| What it does \|$/m);
+    assert.equal(row(result.out, 'GitHub governance'), '| GitHub governance | On | Records, decisions and evidence for this repository, the same on every computer |');
+    assert.match(row(result.out, 'Task auto-merge with merge train'), /^\| Task auto-merge with merge train \| Off \|/);
+    assert.match(row(result.out, 'Toolkit permissions (Claude Code, this computer)'), /\| Waiting: 6 to add \|/);
+    assert.match(row(result.out, 'Toolkit instruction copies'), /\| 1 file left; say clean up copies \|/);
     assert.doesNotMatch(result.out, /shard/i, 'no parallel CI shards row');
-    // The fixture's AGENTS.md is the governed template, a leftover copy, so the cleanup is a Toolkit default.
-    assert.match(result.out, /^- Toolkit instruction copies: 1 file left \(Toolkit default: clean up\)\. /m);
-    assert.match(result.out, /^\| \d\.\d \| Toolkit permissions \(Claude Code\) \| Not ready: Toolkit lines: 6 missing \| Next step: run the one command Toolkit gives after your answer \| /m);
-    assert.match(result.out, /^- Set in \.github\/toolkit-programme\.json: parent #1, required check validate\. To change them, edit that file in a pull request and merge it\.$/m);
-    assert.doesNotMatch(result.out, /```/, 'the bank is never wrapped in a code block');
-    assert.match(result.out, /^Reply all recommended, or only your changes such as 1\.1=B\./m);
-    assert.doesNotMatch(result.out, /could not note this bank/);
+    assert.ok(result.out.includes('\n```powershell\nnode fixture-apply.cjs --apply\n```\n'), 'the owner\'s permissions command, in a PowerShell block');
+    assert.doesNotMatch(result.out, /Bank reference|1\.1=|could not note this/);
   }
   assert.equal(present().length, 2, 'no switch read back yet, so the old answers stay');
-  assert.equal(fs.readFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), 'utf8'), before, 'showing the bank never writes the binding');
+  assert.equal(fs.readFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), 'utf8'), before, 'showing the summary never writes the binding');
   const json = JSON.parse((await run(ctx, ['setup', '--json'])).out);
   assert.match(json.bank_reference, /^[0-9A-Z]{4}(-[0-9A-Z]{4}){3}$/);
-  assert.deepEqual(json.questions.filter(spec => !spec.report_only).map(spec => spec.id), ['governance', 'task-auto-merge']);
   const unmarked = await run(ctx, ['setup'], { environment: {} });
-  assert.match(unmarked.out, /could not note this bank for this session/, 'a session without a mark is told a chat reply cannot count');
+  assert.match(unmarked.out, /could not note this for this session/, 'a session without a mark is told a chat reply cannot count');
 });
 
 test('once the merged switch is read back, refresh and status remove the old per-app answers, never before', async t => {
@@ -128,13 +125,13 @@ test('once the merged switch is read back, refresh and status remove the old per
   ctx.merge(bindingText({ task_prs: { auto_merge: 'after-gates' } }), 25 * 60 * 60 * 1000);
   const stale = await run(ctx, ['refresh']);
   assert.equal(stale.code, 1);
-  assert.match(stale.out, /^The governance question bank could not be shown because GitHub could not be read just now.*Type toolkit governance again in a moment\.$/m);
+  assert.match(stale.out, /^Toolkit governance could not be shown because GitHub could not be read just now.*Type toolkit governance again in a moment\.$/m);
   assert.equal(present().length, 2, 'a stale read is not a read-back');
   ctx.merge(bindingText({ task_prs: { auto_merge: 'after-gates' } }));
   const result = await run(ctx, ['refresh']);
   assert.equal(result.code, 0, result.err);
-  assert.match(result.out, /\| 1\.2 \| Task auto-merge with merge train \| On \| A\. Keep current \| B\. Off \|/);
-  assert.equal(present().length, 0, 'the bank read the merged switch back, so the old answers went');
+  assert.match(row(result.out, 'Task auto-merge with merge train'), /^\| Task auto-merge with merge train \| On \|/);
+  assert.equal(present().length, 0, 'the summary read the merged switch back, so the old answers went');
   present = legacyAnswers(ctx);
   ctx.merge(bindingText({ task_prs: { auto_merge: 'off' } }));
   const status = await run(ctx, ['status']);
@@ -143,132 +140,116 @@ test('once the merged switch is read back, refresh and status remove the old per
   assert.equal(present().length, 0, 'status is a governance read too');
 });
 
-test('a bank answer with the owner\'s ticket prepares one binding pull request that changes only the switch', async t => {
+test('a change in words with the owner\'s ticket prepares one binding pull request that changes only the switch', async t => {
   const ctx = fixture(t);
   const calls = [];
   const switchTransport = { publishSwitch: (...args) => { calls.push(args); return { number: 12, url: `https://github.com/${SLUG}/pull/12`, head: 'a'.repeat(40) }; } };
-  const result = await answerBank(ctx, '1.2=B', { switchTransport });
+  const result = await answerBank(ctx, 'task auto-merge on', { switchTransport });
   assert.equal(result.code, 0, result.err);
   assert.equal(calls.length, 1);
   const [repository, mergedText, text, value] = calls[0];
   assert.equal(repository, SLUG);
   assert.equal(mergedText, ctx.mergedText);
-  assert.deepEqual(value, { auto_merge: 'after-gates' });
+  assert.deepEqual(value, { auto_merge: 'after-gates', merge_train: 'on' }, 'task auto-merge with merge train');
   const proposal = JSON.parse(text);
-  assert.deepEqual(proposal.task_prs, { auto_merge: 'after-gates' });
+  assert.deepEqual(proposal.task_prs, { auto_merge: 'after-gates', merge_train: 'on' });
   delete proposal.task_prs;
   assert.deepEqual(proposal, JSON.parse(ctx.mergedText), 'nothing else changes, and no reader-only field leaks in');
-  assert.equal(text, ctx.mergedText.replace(/\n\}\n$/, ',\n  "task_prs": { "auto_merge": "after-gates" }\n}\n'), 'the diff is the one added member');
   assert.ok(result.out.includes(VERSION_LINE), 'the older-copies warning is shown with this release');
-  assert.match(result.out, /Prepared https:\/\/github\.com\/toolkit-test-fixture\/switch\/pull\/12: it sets task auto-merge on and changes nothing else\. It applies only after you merge it/);
+  assert.match(result.out, /Prepared https:\/\/github\.com\/toolkit-test-fixture\/switch\/pull\/12: it sets task auto-merge on with merge trains and changes nothing else\. It applies only after you merge it/);
   assert.equal(governance.taskAutoMerge(ctx.repo, ctx.registryOptions).auto_merge, 'off', 'preparing grants nothing');
 
-  const spent = await run(ctx, ['setup', '--answers', `${result.reference}: 1.2=B`, '--ticket', result.ticket], { switchTransport });
+  const spent = await run(ctx, ['setup', '--answers', `${result.reference}: task auto-merge on`, '--ticket', result.ticket], { switchTransport });
   assert.equal(spent.code, 2, 'a ticket works once');
   assert.match(spent.err, /No live reply ticket from the owner.*nothing was written/);
-  const forged = await run(ctx, ['setup', '--answers', `${result.reference}: 1.2=B`, '--ticket', 'f'.repeat(32)], { switchTransport });
+  const forged = await run(ctx, ['setup', '--answers', `${result.reference}: task auto-merge on`, '--ticket', 'f'.repeat(32)], { switchTransport });
   assert.equal(forged.code, 2, 'an agent cannot make up a ticket');
   assert.equal(calls.length, 1);
 
-  // Keeping both questions prepares no pull request; the governance App's setup command is the Toolkit
-  // default while governance is on and the App is not set up: the owner's command, no pull request.
-  // GitHub lists no App variable or secret here (an App that could not be read is unknown, and gets no command).
-  const noApp = args => ({ ok: true, value: { total_count: 0, [/\/actions\/(variables|secrets)\?/.exec(args[0])[1]]: [] } });
-  const kept = await answerBank(ctx, '1.1=A', { switchTransport, appReader: noApp });
-  assert.equal(kept.code, 0, kept.err);
-  assert.doesNotMatch(kept.out, /Prepared /);
-  assert.match(kept.out, new RegExp(`^node "[^"]+toolkit-governance-app-setup\\.cjs" --repo ${SLUG} --store \\S+$`, 'm'));
-  assert.equal(calls.length, 1);
-
-  const offline = await answerBank(ctx, '1.2=B');
+  const offline = await answerBank(ctx, 'task auto-merge on');
   assert.equal(offline.code, 2);
   assert.match(offline.err, /no pull request was prepared\. Nothing was written\./);
-  const moved = await answerBank(ctx, '1.2=B', { switchTransport: { publishSwitch: () => { throw Object.assign(new Error('x'), { code: 'SWITCH_BASE_CHANGED' }); } } });
+  const moved = await answerBank(ctx, 'task auto-merge on', { switchTransport: { publishSwitch: () => { throw Object.assign(new Error('x'), { code: 'SWITCH_BASE_CHANGED' }); } } });
   assert.equal(moved.code, 2);
   assert.match(moved.err, /changed since this computer read it/);
   const unread = await answerBank(ctx, 'maybe', { switchTransport });
   assert.equal(unread.code, 0, 'an answer that cannot be read is not a failure');
-  assert.match(unread.out, /answer was not read.*Nothing was written\.\nReply again with all recommended or only your changes, such as 1\.1=B\./);
-  assert.doesNotMatch(unread.out, /^\| 1\.1 \||Bank reference/m, 'the bank is not shown again');
-  for (const bad of [['refresh', '--set', 'on'], ['setup', '--answers', 'x'], ['setup', '--answers', 'x', '--ticket', 'nothex'], ['status', '--answers', 'x', '--ticket', 'f'.repeat(32)]]) assert.equal((await run(ctx, bad)).code, 2, bad.join(' '));
+  assert.match(unread.out, /This was not read as a change: "maybe"\..* Nothing was written\.\nTo change something, say turn off governance, task auto-merge on, task auto-merge off or change store\./);
+  assert.doesNotMatch(unread.out, /^\| /m, 'the summary is not shown again');
+  for (const bad of [['refresh', '--set', 'on'], ['setup', '--answers', 'x'], ['setup', '--answers', 'explain 1.1'], ['setup', '--answers', 'x', '--ticket', 'nothex'], ['status', '--answers', 'x', '--ticket', 'f'.repeat(32)]]) assert.equal((await run(ctx, bad)).code, 2, bad.join(' '));
 });
 
-test('a ticket answers only the bank it was given for: a changed state names the changed row and writes nothing', async t => {
+test('a ticket answers only what it was given for: a changed state shows the summary as it stands and writes nothing', async t => {
   const ctx = fixture(t);
   const calls = [];
   const switchTransport = { publishSwitch: (...args) => { calls.push(args); return { number: 12, url: `https://github.com/${SLUG}/pull/12`, head: 'a'.repeat(40) }; } };
   startOwnerSession(ctx);
-  const shown = await run(ctx, ['setup']);
-  const reference = /Bank reference: (\S+)/.exec(shown.out)[1];
+  await run(ctx, ['setup']);
   const epoch = new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).get(SESSION);
-  const ticket = new BankTickets({ registryOptions: ctx.registryOptions }).issue(SESSION, epoch);
+  const tickets = new BankTickets({ registryOptions: ctx.registryOptions });
+  const reference = tickets.pendingFor(SESSION, epoch).bank_reference;
+  const ticket = tickets.issue(SESSION, epoch);
   ctx.merge(bindingText({ task_prs: { auto_merge: 'after-gates' } }));
-  const result = await run(ctx, ['setup', '--answers', `${reference}: 1.2=B`, '--ticket', ticket], { switchTransport });
+  const result = await run(ctx, ['setup', '--answers', `${reference}: task auto-merge off`, '--ticket', ticket], { switchTransport });
   assert.equal(result.code, 0);
-  assert.match(result.out, /governance state changed since that bank was shown.*nothing was written/);
-  assert.match(result.out, /^1\.2 Task auto-merge with merge train changed: now On, recommended A\. Keep current\.$/m, 'only the changed row is named');
-  assert.doesNotMatch(result.out, /^1\.(1|3|4|5|6|8) /m);
-  assert.doesNotMatch(result.out, /^\| 1\.1 \||Bank reference/m, 'the bank is not shown again');
+  assert.match(result.out, /^What Toolkit showed has changed since, so the answer was not used and nothing was written\./m);
+  assert.match(row(result.out, 'Task auto-merge with merge train'), /\| On \|/);
   assert.equal(calls.length, 0);
-  const other = await run(ctx, ['setup', '--answers', `${reference}: 1.2=B`, '--ticket', ticket], { switchTransport, environment: { TOOLKIT_HOST_SESSION: 'another-session' } });
+  const other = await run(ctx, ['setup', '--answers', `${reference}: task auto-merge off`, '--ticket', ticket], { switchTransport, environment: { TOOLKIT_HOST_SESSION: 'another-session' } });
   assert.equal(other.code, 2, 'another session cannot spend it either');
 });
 
-test('a cloud session shows the bank but says a chat answer cannot be recorded there, and refuses an answer', async t => {
+test('a cloud session shows the summary but says a chat answer cannot be recorded there, and refuses an answer', async t => {
   const ctx = fixture(t);
   startOwnerSession(ctx);
   const cloud = { TOOLKIT_HOST_SESSION: SESSION, CLAUDE_CODE_REMOTE: 'true' };
   const shown = await run(ctx, ['setup'], { environment: cloud });
   assert.equal(shown.code, 0, shown.err);
-  assert.match(shown.out, /\| 1\.2 \| Task auto-merge with merge train \|/);
-  assert.match(shown.out, /This is a cloud session, .* an answer in this chat cannot be recorded\. Answer this bank from a Remote Control session on your computer, or run .* in your own terminal\./);
+  assert.ok(row(shown.out, 'Task auto-merge with merge train'));
+  assert.match(shown.out, /This is a cloud session, .* an answer in this chat cannot be recorded\. Answer from a Remote Control session on your computer, or run .* in your own terminal\./);
   const epoch = new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).get(SESSION);
-  assert.equal(new BankTickets({ registryOptions: ctx.registryOptions }).pendingFor(SESSION, epoch), null, 'the bank is not noted for a reply');
-  const reference = /Bank reference: (\S+)/.exec(shown.out)[1];
-  const answered = await run(ctx, ['setup', '--answers', `${reference}: 1.2=B`, '--ticket', 'a'.repeat(32)], { environment: cloud });
+  assert.equal(new BankTickets({ registryOptions: ctx.registryOptions }).pendingFor(SESSION, epoch), null, 'nothing is noted for a reply');
+  const answered = await run(ctx, ['setup', '--answers', 'ABCD-EFGH-JKMN-PQRS: task auto-merge on', '--ticket', 'a'.repeat(32)], { environment: cloud });
   assert.notEqual(answered.code, 0);
   assert.match(answered.err, /This is a cloud session.*Nothing was written\./);
 });
 
-test('the permissions row: an answer gives the owner one command to run themselves when lines are outdated, never the blocks', async t => {
+test('the permissions step gives the owner one command to run themselves when lines are outdated, never the blocks', async t => {
   const ctx = fixture(t);
-  const update = await answerBank(ctx, 'all recommended', { missing: 3 });
+  startOwnerSession(ctx);
+  const update = await run(ctx, ['setup'], { missing: 3 });
   assert.equal(update.code, 0, update.err);
-  assert.match(update.out, /Toolkit permissions \(Claude Code\): run this once in your own PowerShell or terminal, outside any agent\..*press Enter\./);
+  assert.match(update.out, /^\*\*Toolkit permissions \(Claude Code, this computer\):\*\* Lets agents run Toolkit's own commands without asking each time\. Adds 3 Toolkit lines\. Run it in PowerShell; it shows the changes and waits for Enter\.$/m);
   assert.ok(update.out.includes('\n```powershell\nnode fixture-apply.cjs --apply\n```\n'), 'the command sits in Toolkit\'s own PowerShell block, so the app keeps its quotes straight and gives it a Run button');
-  assert.match(update.out, /Add no code block of your own, and never run a command above yourself\./);
+  assert.match(update.out, /Never run a command above yourself\./);
   assert.equal(update.out.match(/^Agents: /gm).length, 1, 'one Agents line, the last');
-  assert.doesNotMatch(update.out, /Paste into|Next step/);
-  const none = await answerBank(ctx, 'all recommended', { missing: 0 });
+  const none = await run(ctx, ['setup'], { missing: 0 });
   assert.doesNotMatch(none.out, /fixture-apply/);
 });
 
-test('task auto-merge can be turned on only while governance is on, or in the answer that turns it on', async t => {
+test('where governance is off, task auto-merge is asked only with turning it back on', async t => {
   const ctx = fixture(t);
   recordMerged(ctx.repo, { registryPath: ctx.registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' }) });
   startOwnerSession(ctx);
   const shown = await run(ctx, ['setup']);
-  assert.match(shown.out, /\| 1\.2 \| Task auto-merge with merge train \| Off \(needs governance\) \| A\. Keep current \| B\. On \(needs governance on\) \|/);
-  const alone = await answerBank(ctx, '1.2=B');
-  assert.match(alone.out, /Task auto-merge can be on only while governance is on.*Nothing was written/);
+  assert.match(shown.out, /^\*\*1\. Question: Turn GitHub governance back on for toolkit-test-fixture\/switch\?\*\*$/m);
+  assert.match(shown.out, /^\*\*2\. Question: Turn on task auto-merge with merge train\?\*\*$/m);
+  const alone = await answerBank(ctx, '2A');
+  assert.match(alone.out, /Governance stays off unless the answer turns it back on.*Nothing was written/);
 });
 
-test('merge trains are not asked: a governed bank shows the stored switch as bound, and no answer changes it', async t => {
+test('merge trains come with task auto-merge on; turning it off keeps the stored train value', async t => {
   const ctx = fixture(t);
   const calls = [];
   const switchTransport = { publishSwitch: (...args) => { calls.push(args); return { number: 13, url: `https://github.com/${SLUG}/pull/13`, head: 'a'.repeat(40) }; } };
   startOwnerSession(ctx);
-  assert.match((await run(ctx, ['setup'])).out, /^\| 1\.2 \| Task auto-merge with merge train \| Off \|/m, 'no key reads as on');
-  ctx.merge(bindingText({ task_prs: { auto_merge: 'off', merge_train: 'off' } }));
+  ctx.merge(bindingText({ task_prs: { auto_merge: 'after-gates', merge_train: 'off' } }));
   startOwnerSession(ctx);
-  assert.match((await run(ctx, ['setup'])).out, /^\| 1\.2 \| Task auto-merge with merge train \| Off, merge trains off \|/m);
-  const answered = await answerBank(ctx, '1.2=B', { switchTransport });
+  assert.match(row((await run(ctx, ['setup'])).out, 'Task auto-merge with merge train'), /\| On, merge trains off \|/);
+  const answered = await answerBank(ctx, 'task auto-merge off', { switchTransport });
   assert.equal(answered.code, 0, answered.err);
-  assert.deepEqual(calls.at(-1)[3], { auto_merge: 'after-gates' }, 'only task auto-merge changes');
-  assert.deepEqual(JSON.parse(calls.at(-1)[2]).task_prs, { auto_merge: 'after-gates', merge_train: 'off' }, 'the stored merge-train value stays');
-  const named = await answerBank(ctx, '1.3=B', { switchTransport });
-  assert.match(named.out, /^Row 1\.3 [^\n]* takes no answer: [^\n]*Nothing was written\.$/m);
-  assert.equal(calls.length, 1);
+  assert.deepEqual(calls.at(-1)[3], { auto_merge: 'off' }, 'only task auto-merge changes');
+  assert.deepEqual(JSON.parse(calls.at(-1)[2]).task_prs, { auto_merge: 'off', merge_train: 'off' }, 'the stored merge-train value stays');
 });
 
 test('the switch pull request keeps the merged formatting: a compact binding gains one member, a set value is replaced in place', async t => {
@@ -277,28 +258,24 @@ test('the switch pull request keeps the merged formatting: a compact binding gai
   const switchTransport = { publishSwitch: (repository, mergedText, text) => { texts.push(text); return { number: 3, url: `https://github.com/${SLUG}/pull/3`, head: 'a'.repeat(40) }; } };
   const compact = JSON.stringify(JSON.parse(bindingText()));
   ctx.merge(compact);
-  assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0);
-  assert.equal(texts.at(-1), `${compact.slice(0, -1)},"task_prs":{"auto_merge":"after-gates"}}`);
+  assert.equal((await answerBank(ctx, 'task auto-merge on', { switchTransport })).code, 0);
+  assert.equal(texts.at(-1), `${compact.slice(0, -1)},"task_prs":{"auto_merge":"after-gates","merge_train":"on"}}`);
   const set = bindingText({ task_prs: { auto_merge: 'after-gates' } });
   ctx.merge(set);
-  assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0);
+  assert.equal((await answerBank(ctx, 'task auto-merge off', { switchTransport })).code, 0);
   assert.equal(texts.at(-1), set.replace('"auto_merge": "after-gates"', '"auto_merge": "off"'));
   const crlf = bindingText().replace(/\n/g, '\r\n');
   ctx.merge(crlf);
-  assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0);
-  assert.equal(texts.at(-1), crlf.replace(/\r\n\}\r\n$/, ',\r\n  "task_prs": { "auto_merge": "after-gates" }\r\n}\r\n'));
+  assert.equal((await answerBank(ctx, 'task auto-merge on', { switchTransport })).code, 0);
+  assert.equal(texts.at(-1), crlf.replace(/\r\n\}\r\n$/, ',\r\n  "task_prs": { "auto_merge": "after-gates", "merge_train": "on" }\r\n}\r\n'));
   // A switch task_prs does not hold yet joins it in place, in its layout.
   const inline = bindingText({ task_prs: { merge_train: 'on' } }).replace(/"task_prs": \{[^}]*\}/, '"task_prs": { "merge_train": "on" }');
   ctx.merge(inline);
-  assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0);
+  assert.equal((await answerBank(ctx, 'task auto-merge on', { switchTransport })).code, 0);
   assert.equal(texts.at(-1), inline.replace('"merge_train": "on" }', '"merge_train": "on", "auto_merge": "after-gates" }'));
-  const lines = bindingText({ task_prs: { merge_train: 'on' } });
-  ctx.merge(lines);
-  assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0);
-  assert.equal(texts.at(-1), lines.replace(/("merge_train": "on")(\n)(\s*)\}/, '$1,$2$3  "auto_merge": "after-gates"$2$3}'));
 });
 
-test('turning governance on in the bank carries the switch in the same enable proposal, for a version 1 or 2 working binding', async t => {
+test('turning governance on carries the switch in the same enable proposal, for a version 1 or 2 working binding', async t => {
   for (const version of [1, 2]) {
     const ctx = fixture(t);
     const binding = JSON.parse(bindingText());
@@ -309,12 +286,13 @@ test('turning governance on in the bank carries the switch in the same enable pr
     let open = [];
     const proposal = { repository: SLUG, number: 4, head: 'e'.repeat(40), url: `https://github.com/${SLUG}/pull/4`, state: 'open', answer: 'yes' };
     const proposalTransport = { list: () => open, publish: (repository, prepared, files) => { published.push({ prepared, files }); open = [proposal]; return proposal; }, read: () => proposal };
-    const result = await run(ctx, ['setup'], { interactive: true, answers: ['1.1=B'], proposalTransport });
+    const result = await run(ctx, ['setup'], { interactive: true, answers: ['all recommended'], proposalTransport });
     assert.equal(result.code, 0, result.out + result.err);
-    assert.equal(result.asked.length, 1, 'the owner\'s own terminal reads one reply to the bank');
+    assert.equal(result.asked.length, 1, 'the owner\'s own terminal reads one reply');
+    assert.doesNotMatch(result.out, /Question: Keep records/, 'the prepared programme file names the store, so it is not asked');
     assert.equal(published.length, 1, `version ${version}`);
     const text = published[0].files['.github/toolkit-programme.json'];
-    assert.deepEqual(JSON.parse(text).task_prs, { auto_merge: 'after-gates', merge_train: 'off' }, `version ${version}: merge trains are not asked, so turning on writes them off`);
+    assert.deepEqual(JSON.parse(text).task_prs, { auto_merge: 'after-gates', merge_train: 'on' }, `version ${version}`);
     assert.equal(JSON.parse(text).schema, 'toolkit.programme-binding.v2');
     assert.ok(result.out.includes(VERSION_LINE), 'the older-copies warning is shown with the proposal');
     assert.equal(governance.taskAutoMerge(ctx.repo, ctx.registryOptions).answered, false, 'a pending proposal grants nothing');
@@ -325,16 +303,16 @@ test('turning governance on in the bank carries the switch in the same enable pr
   assert.ok(note.includes(VERSION_LINE), 'the enable pull request warns about older copies');
 });
 
-test('the bank turns governance off without the terminal, and a chat answer needs the owner\'s ticket', async t => {
+test('the summary turns governance off without the terminal, and a chat answer needs the owner\'s ticket', async t => {
   const ctx = fixture(t);
   const published = [];
   let open = [];
   const proposal = { repository: SLUG, number: 5, head: 'e'.repeat(40), url: `https://github.com/${SLUG}/pull/5`, state: 'open', answer: 'no' };
   const proposalTransport = { list: () => open, publish: (repository, prepared, files) => { published.push({ prepared, files }); open = [proposal]; return proposal; }, read: () => proposal };
-  const noTicket = await run(ctx, ['setup', '--answers', 'AAAA-AAAA-AAAA-AAAA: 1.1=B', '--ticket', 'a'.repeat(32)], { proposalTransport });
+  const noTicket = await run(ctx, ['setup', '--answers', 'AAAA-AAAA-AAAA-AAAA: turn off governance', '--ticket', 'a'.repeat(32)], { proposalTransport });
   assert.equal(noTicket.code, 2);
   assert.equal(published.length, 0, 'nothing is prepared without the owner\'s ticket');
-  const off = await answerBank(ctx, '1.1=B', { proposalTransport });
+  const off = await answerBank(ctx, 'turn off governance', { proposalTransport });
   assert.equal(off.code, 0, off.err);
   assert.equal(published.length, 1);
   assert.equal(JSON.parse(published[0].files['.github/toolkit-programme.json']).governance, 'disabled');
@@ -343,29 +321,27 @@ test('the bank turns governance off without the terminal, and a chat answer need
   startOwnerSession(ctx);
   const disabled = await run(ctx, ['setup']);
   assert.equal(disabled.code, 0);
-  assert.match(disabled.out, /\| 1\.1 \| GitHub governance \| Off \| A\. Keep current \| B\. Turn on \|/);
+  assert.match(disabled.out, /^   - \*\*A\. Keep it off \(my pick\):\*\* Nothing changes\.$/m);
   const unanswered = await run(ctx, ['setup'], { interactive: true, answers: ['maybe'] });
   assert.equal(unanswered.code, 1);
-  assert.match(unanswered.out, /answer was not read.*Nothing was written\./);
+  assert.match(unanswered.out, /This part of the answer was not read: "maybe"\. Nothing was written\./);
 });
 
 // 1460 G2 L2: turning governance back on from off gave no App line at all, while a first turn-on does.
-test('turning governance back on from off gives the App line, and staying off gives none', async t => {
+// Every turn-on now gives the owner's two commands in the summary after the merge.
+test('turning governance back on from off says the two commands come after the merge, and staying off changes nothing', async t => {
   const ctx = fixture(t);
   fs.writeFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), bindingText());
   recordMerged(ctx.repo, { registryPath: ctx.registryPath, text: JSON.stringify({ schema: 'toolkit.programme-binding.v2', repository: SLUG, governance: 'disabled' }) });
   const proposal = { repository: SLUG, number: 6, head: 'e'.repeat(40), url: `https://github.com/${SLUG}/pull/6`, state: 'open', answer: 'yes' };
   let open = [];
   const proposalTransport = { list: () => open, publish: () => { open = [proposal]; return proposal; }, read: () => proposal };
-  const shown = await run(ctx, ['setup']);
-  assert.match(shown.out, /^\| \d\.\d \| Governance App \| Not checked \| Nothing is made while governance is off\. If your answer turns it back on, Toolkit then gives you one line to paste into PowerShell/m);
-  const kept = await run(ctx, ['setup'], { interactive: true, answers: ['1.1=A'], proposalTransport });
+  const kept = await run(ctx, ['setup'], { interactive: true, answers: ['1A'], proposalTransport });
   assert.equal(kept.code, 0, kept.err);
-  assert.doesNotMatch(kept.out, /toolkit-governance-app-setup\.cjs|Governance App: paste/, 'staying off gives no App line');
-  const on = await run(ctx, ['setup'], { interactive: true, answers: ['1.1=B'], proposalTransport });
+  assert.match(kept.out, /^Nothing changed: governance stays off\.$/m);
+  const on = await run(ctx, ['setup'], { interactive: true, answers: ['1B'], proposalTransport });
   assert.equal(on.code, 0, on.err + on.out);
-  assert.match(on.out, /^Governance App: paste this one line into PowerShell and press Enter\./m);
-  assert.match(on.out, new RegExp(`toolkit-governance-app-setup\\.cjs" --repo ${SLUG} --store toolkit-test-fixture/store`));
+  assert.match(on.out, /^Next: once its checks pass, approve merging https:\/\/github\.com\/toolkit-test-fixture\/switch\/pull\/6 when Toolkit asks\. Toolkit then finishes the setup and gives you two commands to run\.$/m);
 });
 
 // A gh stand-in for the transport: answers each `gh api` call from `routes` and records writes.
@@ -421,15 +397,15 @@ test('a switch pull request drops the retired schedule_folder line in the same d
   const ctx = fixture(t);
   const calls = [];
   const switchTransport = { publishSwitch: (...args) => { calls.push(args); return { number: 4, url: `https://github.com/${SLUG}/pull/4`, head: 'a'.repeat(40) }; } };
-  for (const [layout, extra] of [['pretty, switch added', {}], ['pretty, switch set in place', { task_prs: { auto_merge: 'after-gates' } }]]) {
+  for (const [layout, extra, change] of [['pretty, switch added', {}, 'task auto-merge on'], ['pretty, switch set in place', { task_prs: { auto_merge: 'after-gates' } }, 'task auto-merge off']]) {
     const plain = bindingText(extra);
     ctx.merge(plain);
-    assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0, layout);
+    assert.equal((await answerBank(ctx, change, { switchTransport })).code, 0, layout);
     const before = calls.at(-1)[2];
     const carried = withRetired(plain);
     assert.notEqual(carried, plain, 'the fixture carries the key');
     ctx.merge(carried);
-    assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0, layout);
+    assert.equal((await answerBank(ctx, change, { switchTransport })).code, 0, layout);
     const [, mergedText, text] = calls.at(-1);
     assert.equal(mergedText, carried, `${layout}: the pull request starts from the exact merged text`);
     assert.equal(text, before, `${layout}: the only other change is the removed schedule_folder line`);
@@ -437,12 +413,12 @@ test('a switch pull request drops the retired schedule_folder line in the same d
   // A compact or CRLF binding keeps its layout too, and a key at the end takes the comma before it.
   const compact = JSON.stringify({ ...JSON.parse(bindingText()), schedule_folder: 'TOOLKIT' });
   ctx.merge(compact);
-  assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0);
-  assert.equal(calls.at(-1)[2], `${JSON.stringify(JSON.parse(bindingText())).slice(0, -1)},"task_prs":{"auto_merge":"after-gates"}}`);
+  assert.equal((await answerBank(ctx, 'task auto-merge on', { switchTransport })).code, 0);
+  assert.equal(calls.at(-1)[2], `${JSON.stringify(JSON.parse(bindingText())).slice(0, -1)},"task_prs":{"auto_merge":"after-gates","merge_train":"on"}}`);
   const crlf = withRetired(bindingText()).replace(/\n/g, '\r\n');
   ctx.merge(crlf);
-  assert.equal((await answerBank(ctx, '1.2=B', { switchTransport })).code, 0);
-  assert.equal(calls.at(-1)[2], bindingText().replace(/\n/g, '\r\n').replace(/\r\n\}\r\n$/, ',\r\n  "task_prs": { "auto_merge": "after-gates" }\r\n}\r\n'));
+  assert.equal((await answerBank(ctx, 'task auto-merge on', { switchTransport })).code, 0);
+  assert.equal(calls.at(-1)[2], bindingText().replace(/\n/g, '\r\n').replace(/\r\n\}\r\n$/, ',\r\n  "task_prs": { "auto_merge": "after-gates", "merge_train": "on" }\r\n}\r\n'));
 });
 
 test('the switch pull request text names the retired line it deletes, and only when it deletes one', () => {

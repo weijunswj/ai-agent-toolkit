@@ -137,9 +137,9 @@ test('terminal bank: an agent\'s shell never answers it, whatever terminal it ha
   assert.deepEqual([typed.asked, typed.calls, recorded(undecided)], [[], [], []]);
 });
 
-test('terminal bank: the owner\'s typed answer still turns governance off', async t => {
+test('terminal summary: the owner\'s typed change still turns governance off', async t => {
   const ctx = fixture(t);
-  const result = await run(ctx, ['setup'], { interactive: true, replies: ['1.1=B'] });
+  const result = await run(ctx, ['setup'], { interactive: true, replies: ['turn off governance'] });
   assert.equal(result.code, 0, result.err + result.out);
   assert.deepEqual(result.calls, [OFF]);
   assert.doesNotMatch(result.err, /no answer is read/);
@@ -184,8 +184,8 @@ test('bank reply ticket: an agent with none (no hooks) or another session\'s rec
   const epochs = new gate.SessionEpochs({ registryOptions: ctx.registryOptions });
   const tickets = new BankTickets({ registryOptions: ctx.registryOptions });
   const reference = tickets.pendingFor(SESSION, epochs.get(SESSION)).bank_reference;
-  assert.match(shown.out, new RegExp(reference));
-  const answer = (ticket, env) => run(ctx, reply(ticket).map(word => word ?? `${reference}: 1.1=B`), { environment: env });
+  assert.match(shown.out, /^\*\*Governance: on/m);
+  const answer = (ticket, env) => run(ctx, reply(ticket).map(word => word ?? `${reference}: turn off governance`), { environment: env });
   const none = await answer('0'.repeat(32), environment);
   assert.equal(none.code, 2);
   assert.match(none.err, /No live reply ticket from the owner for this session and repository, so nothing was written\..*An agent cannot answer for the owner\./);
@@ -204,7 +204,7 @@ test('bank reply ticket: an agent with none (no hooks) or another session\'s rec
 test('card and typed answers: an unasked tap, a made-up ticket and a publish with nothing recorded answer nothing; a recorded no publishes', async t => {
   const ctx = fixture(t, { governed: false });
   const hold = new gate.PromptHold({ registryOptions: ctx.registryOptions, environment: {} });
-  const tap = hold.picked({ cwd: ctx.repo, sessionId: SESSION, toolUseId: 'tool-never-noted', toolResponse: { answers: { [gate.PICKER_QUESTION]: 'No' } } });
+  const tap = hold.carded({ cwd: ctx.repo, sessionId: SESSION, toolResponse: { answers: { [gate.QUESTION_TEXT]: 'C. No' } } });
   assert.doesNotMatch(tap?.context || '', /no is pending/);
   assert.equal(hold.answerTicket('0'.repeat(32), 'no').ok, false);
   assert.deepEqual(recorded(ctx), []);
@@ -253,7 +253,7 @@ test('a failed turn-off: the no stays pending only where it can still be publish
   assert.equal(session.code, 2);
   assert.match(session.err, PENDING);
   // The bank's own: its lines stay on stdout with the rest of the answer.
-  const bank = await run(fixture(t), ['setup'], { interactive: true, replies: ['1.1=B'], github: unread() });
+  const bank = await run(fixture(t), ['setup'], { interactive: true, replies: ['turn off governance'], github: unread() });
   assert.equal(bank.code, 2);
   assert.match(bank.out, /Proposal publication is unverified/);
   assert.match(bank.out, PENDING);

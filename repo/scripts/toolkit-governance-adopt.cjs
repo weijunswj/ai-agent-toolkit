@@ -37,7 +37,7 @@ const { resolvePathExecutable } = require('./claude-process-launch.cjs');
 
 const GH_TIMEOUT_MS = 15000;
 const STORE_README = '# Evidence store\n\nPrivate evidence for the governed repository REPOSITORY: plans, reviews and archives that agents keep here instead of in the task repository.\n';
-const PARENT_BODY = 'Programme parent for REPOSITORY. Toolkit opened it when governance was turned on from the governance question bank. Tasks join as native sub-issues; the controller keeps the tracker here.\n';
+const PARENT_BODY = 'Programme parent for REPOSITORY. Toolkit opened it when governance was turned on through the guided governance setup. Tasks join as native sub-issues; the controller keeps the tracker here.\n';
 
 class AdoptError extends Error {
   constructor(message, made = []) { super(message); this.name = 'AdoptError'; this.made = made; }
@@ -203,6 +203,9 @@ function adopt({ root, into, plan, writer, switches = { auto_merge: 'off', merge
     parents: [{ issue, record_prefix: `INT-${discovery.initials(name)}${issue}-` }],
     store: { kind: 'github', repository: store, branch: 'main', path: `state/${owner}/${name}/` },
     task_prs: { ...switches },
+    // The guided setup's own version: a Toolkit that knows the setup hold (toolkit-governance-ready.cjs),
+    // so governance holds while a part is missing, and an older copy reads the file as too new.
+    min_toolkit: require('./toolkit-version.cjs').readToolkitVersion(),
   };
   return { binding, made, lines };
 }

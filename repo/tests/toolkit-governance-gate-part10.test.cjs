@@ -298,12 +298,13 @@ test('hosts: the Claude hook script asks once and records the answer end to end 
   // Tools run before, during and after the question.
   const tool = () => run('PreToolUse', { cwd: repo, session_id: 's1', tool_name: 'Bash', tool_input: { command: 'ls' } });
   assert.deepEqual(tool(), {});
-  // The session is noted, so Claude Code shows the card: the message goes through with it.
+  // The session is noted, so the message goes through with the question as text; how it shows is
+  // the app's choice, and no card is forced (INT-TK421-1389).
   const card = run('UserPromptSubmit', { cwd: repo, prompt: 'go', session_id: 's1' });
   assert.equal(card.decision, undefined);
-  assert.match(card.systemMessage, /Pick an answer on the card, or carry on; nothing waits on it/);
+  assert.equal(card.systemMessage, undefined, 'no card notice');
   assert.equal(noticeOf(card.hookSpecificOutput.additionalContext), gate.QUESTION.join('\n').replace('TRANSPORT-<repository name>', 'TRANSPORT-example-repo'));
-  assert.ok(card.hookSpecificOutput.additionalContext.includes(JSON.stringify(gate.PICKER_INPUT)));
+  assert.equal(card.hookSpecificOutput.additionalContext.includes('AskUserQuestion'), false);
   for (let call = 0; call < 3; call += 1) assert.deepEqual(tool(), {}, `tool call ${call + 1} of the asked run`);
   // The second and third messages of the run carry no question.
   for (const prompt of ['and then this', 'and this']) {
@@ -319,8 +320,8 @@ test('hosts: the Claude hook script asks once and records the answer end to end 
   assert.deepEqual(run('PreToolUse', { cwd: repo, tool_name: 'Bash', tool_input: { command: 'ls' } }), {});
   // A second session before any decision is asked once itself.
   run('SessionStart', { cwd: repo, session_id: 's2', source: 'startup' });
-  assert.match(run('UserPromptSubmit', { cwd: repo, prompt: 'go', session_id: 's2' }).systemMessage, /Pick an answer on the card/);
-  assert.equal(run('UserPromptSubmit', { cwd: repo, prompt: 'more', session_id: 's2' }).systemMessage, undefined);
+  assert.ok(run('UserPromptSubmit', { cwd: repo, prompt: 'go', session_id: 's2' }).hookSpecificOutput.additionalContext.includes(QUESTION_LINE));
+  assert.doesNotMatch(JSON.stringify(run('UserPromptSubmit', { cwd: repo, prompt: 'more', session_id: 's2' })), /Turn on GitHub governance/);
   // `decline` is the older word for `disable` and still answers.
   const answered = run('UserPromptSubmit', { cwd: repo, prompt: 'toolkit governance decline', session_id: 's1' });
   assert.match(answered.hookSpecificOutput.additionalContext, /no is pending/);
@@ -388,7 +389,7 @@ test('hosts: the Codex helper hook lets prompts and tools through in an undecide
   const recorded = childProcess.spawnSync(process.execPath, [gate.ANSWER_SCRIPT, 'yes', ticket], { env, encoding: 'utf8' });
   assert.equal(recorded.status, 0, recorded.stdout);
   // A yes opens the governance bank; it records nothing for an agent to publish by hand.
-  assert.match(recorded.stdout, /question bank/);
+  assert.match(recorded.stdout, /guided setup/);
   const after = run({ hook_event_name: 'UserPromptSubmit', cwd: repo, session_id: 'codex-session', prompt: 'go' });
   assert.equal(after.status, 0);
   assert.doesNotMatch(contextOf(after) || '', /is pending|ANSWER/);

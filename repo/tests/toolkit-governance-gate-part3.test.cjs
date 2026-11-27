@@ -161,8 +161,17 @@ test('nothing is held: the first message of a run carries the question once, and
   const repo = gitRepo(ctx, 'repo');
   const first = hold(ctx).decide({ cwd: repo, prompt: 'fix the login bug', sessionId: 's1' });
   assert.equal(first.action, 'pass');
-  // The agent is told to do the work, then put the question, word for word, as the last lines; never a script to run.
-  assert.deepEqual(noticeOf(first.context).split('\n'), [`${QUESTION_LINE} Records and evidence go to this repository's own private TRANSPORT-example-repo store on GitHub, found or created.`, 'Reply yes, no or later. Nothing waits on your answer, and Toolkit asks again next session.']);
+  // The agent is told to do the work, then put the question, word for word, as the last lines, in the
+  // global rules' question shape (INT-TK421-1390); never a script to run, and never a forced card.
+  assert.deepEqual(noticeOf(first.context).split('\n'), [
+    `${QUESTION_LINE} Records and evidence would go to this repository's own private TRANSPORT-example-repo store on GitHub, found or created. Nothing waits on your answer, and Toolkit asks again next session.`,
+    '',
+    '**1. Question: Turn on GitHub governance (issues, records, evidence store) for this repository?**',
+    '   - **A. Yes (my pick):** Two more short questions follow (evidence store, task auto-merge), then Toolkit sets everything up.',
+    '   - **B. Later:** Nothing changes; Toolkit asks again next session.',
+    '   - **C. No:** Toolkit prepares a pull request that records governance off; the coding rules still apply.',
+  ]);
+  assert.doesNotMatch(first.context, /AskUserQuestion|\{"questions"/);
   assert.match(first.context, /1\. Do what the user asked in the message above\./);
   assert.ok(first.context.endsWith(`For agents: ${gate.NEVER_OWNER}`));
   assert.doesNotMatch(first.context, /toolkit-governance\.cjs|node |held/);
@@ -207,7 +216,7 @@ test('only the user\'s own answer records: near-misses, a "yes" before the quest
   assert.match(gate.ANSWER.exec('Toolkit Governance Enable.')[1], /enable/i);
   const cased = hold(ctx).decide({ cwd: repo, prompt: 'Toolkit Governance Enable.', sessionId: 's1' });
   assert.equal(cased.action, 'pass');
-  assert.match(cased.context, /answered yes[\s\S]*question bank/);
+  assert.match(cased.context, /answered yes[\s\S]*guided setup/);
 });
 
 test('accepted yes opens the governance bank, hands nothing back and writes no receipt, repository or laptop decision', t => {
@@ -217,7 +226,7 @@ test('accepted yes opens the governance bank, hands nothing back and writes no r
   assert.match(replyTicket(prompts.decide({ cwd: repo, prompt: 'second request', sessionId: 's1' })), /^[0-9a-f]{32}$/, 'the next own message may be the reply');
   const answered = prompts.decide({ cwd: repo, prompt: 'toolkit governance enable', sessionId: 's1' });
   assert.equal(answered.action, 'pass');
-  assert.match(answered.context, /answered yes[\s\S]*question bank/);
+  assert.match(answered.context, /answered yes[\s\S]*guided setup/);
   assert.match(answered.context, /toolkit-governance\.cjs" setup/);
   assert.match(answered.context, /Build nothing by hand/);
   assert.doesNotMatch(answered.context, /repository-agent-rules|governance discover|publish --run/, 'the hand-built route is gone');
