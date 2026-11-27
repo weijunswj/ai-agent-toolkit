@@ -129,7 +129,8 @@ class FakeGitHub {
       }
       if (rest === '/git/trees' && verb === 'POST') {
         const files = { ...this.trees.get(input.base_tree) };
-        for (const entry of input.tree) files[entry.path] = entry.content;
+        // GitHub's tree API deletes a path whose entry has sha null.
+        for (const entry of input.tree) { if (entry.sha === null) delete files[entry.path]; else files[entry.path] = entry.content; }
         return { sha: this.treeSha(files) };
       }
       if (rest === '/git/commits' && verb === 'POST') {
@@ -180,7 +181,7 @@ function unrelatedToolkit(t, { shallow = false } = {}) {
   return { root, commit: B };
 }
 
-const runRefresh = (dir, github, extra = {}) => refresh.refreshPr({ repo: dir, root: ROOT, commit: COMMIT, ciShards: null, governance: ENABLED, github: github.api(), ...extra });
+const runRefresh = (dir, github, extra = {}) => refresh.refreshPr({ repo: dir, root: ROOT, commit: COMMIT, governance: ENABLED, github: github.api(), ...extra });
 
 test('refresh PR: governed repositories only; any other repository gets one note and nothing is read or written', t => {
   const dir = governedCheckout(t);
@@ -215,7 +216,7 @@ function offMainToolkit(t) {
 test('refresh PR: governance is checked before the Toolkit commit, so a Toolkit checkout off main only stops a governed repository', t => {
   const dir = governedCheckout(t);
   const root = offMainToolkit(t);
-  const run = (github, governance) => refresh.refreshPr({ repo: dir, root, ciShards: null, governance, github: github.api() });
+  const run = (github, governance) => refresh.refreshPr({ repo: dir, root, governance, github: github.api() });
   const ungoverned = new FakeGitHub(dir);
   const note = run(ungoverned, () => ({ state: 'DISABLED' }));
   assert.equal(note.code, 0, note.line);
@@ -530,6 +531,35 @@ test('refresh PR: a governed repository missing default workflows gets them in o
   const done = runRefresh(dir, github);
   assert.equal(done.line, 'The Toolkit copies in acme/app are current; no refresh pull request is needed.');
   assert.equal(github.pulls.length, 1);
+});
+
+// The parallel CI shards offer is retired (INT-TK421-1391): a repository still carrying an older
+// Toolkit's shard copies (the test shards workflow at the name its list chose, Shard Timings) and its
+// shard list gets them removed in the refresh pull request, each with one line saying why. Someone
+// else's workflow, even one named for shards, stays.
+test('refresh PR: Toolkit-marked shard copies and the shard list left by an older Toolkit are removed, each with why', t => {
+  const dir = governedCheckout(t, { pinned: false, vendored: false, baseline: false });
+  const mark = id => `# AI-AGENT-TOOLKIT:cloud-workflows:RENDERED ${id} toolkit=${'f'.repeat(40)} sha256=${'0'.repeat(12)} layout=1\nname: ${id}\n`;
+  const retired = { '.github/workflows/ci-shards.yml': mark('test-shards'), '.github/workflows/toolkit-shard-timings.yml': mark('shard-timings'), '.github/toolkit-test-shards.json': '{"schema":"toolkit-test-shards/v2","systems":{}}\n' };
+  const kept = { '.github/workflows/my-shards.yml': 'name: my own shards\non: push\n' };
+  for (const [file, text] of Object.entries({ ...retired, ...kept })) fs.writeFileSync(path.join(dir, file), text);
+  git(dir, ['add', '-A']);
+  git(dir, ['commit', '--quiet', '-m', 'an older Toolkit left these']);
+  const github = new FakeGitHub(dir);
+  const opened = runRefresh(dir, github);
+  assert.match(opened.line, /^Opened refresh pull request https:\/\/github\.com\/acme\/app\/pull\/1 \(3 files: /, opened.line);
+  assert.deepEqual(github.diff(github.refs.get('main'), github.refs.get(BRANCH)).map(entry => entry.filename), Object.keys(retired).sort());
+  const head = github.filesOf(github.refs.get(BRANCH));
+  for (const file of Object.keys(retired)) {
+    assert.equal(head[file], undefined, `${file} is removed`);
+    assert.ok(github.pulls[0].body.includes(`- \`${file}\`: removed: Toolkit no longer sets up CI shards (the CI check-up flags slow CI, and this repository's controller arranges shards in its own CI)`), file);
+  }
+  assert.equal(head['.github/workflows/my-shards.yml'], kept['.github/workflows/my-shards.yml'], 'a workflow without the marker stays');
+  // Merged: nothing is left to do.
+  for (const file of Object.keys(retired)) fs.rmSync(path.join(dir, file));
+  github.advanceMain('README.md', 'App, merged\n');
+  github.pulls[0].state = 'closed';
+  assert.equal(runRefresh(dir, github).line, 'The Toolkit copies in acme/app are current; no refresh pull request is needed.');
 });
 
 test('refresh PR: an edited guard is brought back, and someone else\'s file in a copied workflow\'s place is left with a note', t => {

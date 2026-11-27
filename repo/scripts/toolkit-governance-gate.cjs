@@ -1667,8 +1667,8 @@ const FINDING_ACTIONS = Object.freeze({
 function programmeLines(state, registryOptions = {}, deps = {}) {
   const lines = [];
   const checkpoints = [];
-  // Stale copies: every row of the governance check that a refresh pull request changes (the sweep, its
-  // gate and the test shards copies; the personal data guard and dependency auto-merge, copied as they
+  // Stale copies: every row of the governance check that a refresh pull request changes (the sweep and
+  // its gate; a retired copy it removes; the personal data guard and dependency auto-merge, copied as they
   // are; the vendored plain-text check), missing, edited or outdated. Rendered copies run Toolkit main,
   // but a layout change reaches the repository only through a refresh pull request, and a copied file
   // only ever changes that way. Local reads only: git on the Toolkit checkout and the repository (about
@@ -1693,7 +1693,7 @@ function staleCopyLines(state, registryOptions = {}, deps = {}) {
 }
 
 // How each row's state reads in the line.
-const COPY_STATE_WORDS = Object.freeze({ missing: 'missing', edited: 'edited by hand', outdated: 'older copy' });
+const COPY_STATE_WORDS = Object.freeze({ missing: 'missing', edited: 'edited by hand', outdated: 'older copy', retired: 'retired, to remove' });
 
 // The refresh command only when it moves every copy forward (each pinned copy's commit is already in
 // this computer's Toolkit checkout, which is on main). Otherwise a refresh from here would roll a newer

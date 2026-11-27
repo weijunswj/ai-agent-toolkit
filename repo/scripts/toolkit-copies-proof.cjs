@@ -22,7 +22,8 @@
 //     Toolkit commit, and that commit is in this computer's Toolkit checkout and on its origin/main;
 //   - every changed path is one the refresh renders at that commit for this repository's default
 //     branch as it was at the merge base, and its bytes at the head are that render, with git's plain
-//     file mode; a deleted or renamed path, any other path, or a single differing byte fails it;
+//     file mode; a deleted or renamed path (a retired copy a refresh removes included), any other
+//     path, or a single differing byte fails it;
 //   - the personal data guard's settings file is changed only where the merge base had none (it is the
 //     owner's once there).
 // What it does not check, because the controller does before it merges (gate rules, Task auto-merge;
@@ -67,19 +68,17 @@ class RefreshProof {
   #workflows;
   #refresh;
   #governance;
-  #ciShards;
 
   // `root` is the governed repository's checkout. `toolkitRoot` is a Toolkit git checkout (default:
   // this copy's, or the managed checkout for a plugin copy); `workflows` its installer.
-  // `governance(root)` gives the repository's governance state; `ciShards` the merged ci_shards answer.
-  constructor({ root, toolkitRoot = null, workflows = null, governance = null, ciShards = undefined }) {
+  // `governance(root)` gives the repository's governance state.
+  constructor({ root, toolkitRoot = null, workflows = null, governance = null }) {
     const installer = require('./toolkit-cloud-workflows.cjs');
     this.#root = root;
     this.#toolkitRoot = toolkitRoot || installer.sourceRoot();
     this.#workflows = workflows || installer.installerAt(this.#toolkitRoot);
     this.#refresh = require('./toolkit-cloud-workflows-refresh.cjs');
     this.#governance = governance || (target => require('./toolkit-governance-state.cjs').governanceState(target));
-    this.#ciShards = ciShards;
   }
 
   // { proved: true, commit, files } or { proved: false, reason, hold } (hold: try again later).
@@ -112,22 +111,21 @@ class RefreshProof {
     const changed = rawEntries(listed.stdout);
     if (!changed || !changed.length) return no('the pull request\'s changes could not be read here, or it changes nothing');
     if (late()) return no(LATE, true);
-    // Test files are listed by name only where the shard copies render (a yes to parallel CI shards).
-    const ciShards = this.#ciShardsAnswer();
     let snapshot;
-    try { snapshot = new this.#refresh.BranchSnapshot(this.#root, from, branch, { fetch: false, testNames: ciShards === 'yes' }).write(); } catch (error) {
+    try { snapshot = new this.#refresh.BranchSnapshot(this.#root, from, branch, { fetch: false }).write(); } catch (error) {
       return no(error?.name === 'RefreshError' ? error.message : 'the merge base\'s files could not be read');
     }
     try {
       if (late()) return no(LATE, true);
       let expected;
       try {
-        expected = this.#refresh.changes({ target: snapshot, root: this.#toolkitRoot, commit, ciShards, defaultBranch: branch, workflows: this.#workflows }).files;
+        expected = this.#refresh.changes({ target: snapshot, root: this.#toolkitRoot, commit, defaultBranch: branch, workflows: this.#workflows }).files;
       } catch (error) {
         if (error?.name === 'RefreshError' || error?.name === 'InstallError') return no(`a refresh at ${commit.slice(0, 7)} would not run here: ${error.message}`);
         throw error;
       }
-      const texts = new Map(expected.map(entry => [entry.file, entry.text]));
+      // Only files a refresh writes; a retired file it removes is a deletion, which fails below.
+      const texts = new Map(expected.filter(entry => !entry.remove).map(entry => [entry.file, entry.text]));
       const guardConfig = this.#refresh.GUARD_CONFIG;
       if (late()) return no(LATE, true);
       for (const entry of changed) {
@@ -142,11 +140,6 @@ class RefreshProof {
     } finally {
       fs.rmSync(snapshot, { recursive: true, force: true });
     }
-  }
-
-  #ciShardsAnswer() {
-    if (this.#ciShards !== undefined) return this.#ciShards;
-    try { return require('./toolkit-governance-state.cjs').mergedBinding(this.#root)?.ci_shards?.answer || null; } catch { return null; }
   }
 }
 

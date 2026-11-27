@@ -1419,8 +1419,8 @@ function validateBinding(binding) {
     // missing key is on, but only while governance is enabled).
     const taskPrs = binding.task_prs;
     if (taskPrs !== undefined) check(errors, v2 && isObject(taskPrs) && Object.keys(taskPrs).every(key => ['auto_merge', 'merge_train'].includes(key)) && optional(taskPrs.auto_merge, value => ['off', 'after-gates'].includes(value)) && optional(taskPrs.merge_train, value => ['off', 'on'].includes(value)), 'task_prs may hold only auto_merge (off or after-gates) and merge_train (off or on), in a version 2 binding');
-    // The sharded CI offer's answer (governance enable or refresh writes it). Read and accepted here;
-    // nothing acts on it in this release, so a copy that knows the key is out before any writer sets it.
+    // Retired: the answer to the parallel CI shards offer, which Toolkit no longer makes. Nothing reads
+    // it; it stays accepted so a binding an older Toolkit wrote stays valid (RETIRED_BINDING_KEYS).
     const ciShards = binding.ci_shards;
     if (ciShards !== undefined) check(errors, v2 && isObject(ciShards) && Object.keys(ciShards).every(key => ['answer', 'offered_at'].includes(key)) && ['yes', 'not-now', 'never'].includes(ciShards.answer) && optional(ciShards.offered_at, value => typeof value === 'string' && !Number.isNaN(Date.parse(value)) && /^\d{4}-\d{2}-\d{2}T/.test(value)), 'ci_shards may hold only answer (yes, not-now or never) and offered_at (a date and time), in a version 2 binding');
     // The oldest Toolkit release that may read this binding (a cleaned repository needs the installed
@@ -1448,16 +1448,17 @@ function validateBinding(binding) {
 const BINDING_V2_KEYS = Object.freeze(['schema', 'repository', 'governance', 'parents', 'store', 'required_checks', 'paid_security', 'dependency_updates', 'task_prs', 'ci_shards', 'min_toolkit', 'projection', 'schedule_folder', 'state', 'parent_lifecycle', 'detach_finished_children']);
 
 // Retired binding keys: nothing reads them. The reader above still accepts them, so a binding that
-// carries one stays valid, but every binding writer (a governance proposal, a switch or shards pull
-// request, the cleanup) leaves them out, so a carried key goes with the next change.
-const RETIRED_BINDING_KEYS = Object.freeze(['schedule_folder']);
+// carries one stays valid, but every binding writer (a governance proposal, a switch pull request,
+// the cleanup) leaves them out, so a carried key goes with the next change.
+const RETIRED_BINDING_KEYS = Object.freeze(['schedule_folder', 'ci_shards']);
 // The binding without its retired keys; one that has none comes back as the same object.
 function withoutRetiredKeys(binding) {
   if (!isObject(binding) || !RETIRED_BINDING_KEYS.some(key => Object.hasOwn(binding, key))) return binding;
   return Object.fromEntries(Object.entries(binding).filter(([key]) => !RETIRED_BINDING_KEYS.includes(key)));
 }
-// Binding text without its retired keys, in its own layout: each retired top-level member goes with
-// its comma (and its line, when it has one), so the pull request shows only those removed lines. Text
+// Binding text without its retired keys, in its own layout: each retired top-level member (a plain
+// value, or an object with no object inside, such as ci_shards) goes with its comma (and its line,
+// when it has one), so the pull request shows only those removed lines. Text
 // that cannot be parsed or has no retired key comes back as it is; a layout this cannot follow is
 // written out whole, so the result always parses to withoutRetiredKeys of the parsed text.
 function withoutRetiredKeysText(text) {
@@ -1467,13 +1468,13 @@ function withoutRetiredKeysText(text) {
   try { parsed = JSON.parse(raw.slice(bom.length)); } catch { return raw; }
   const expected = withoutRetiredKeys(parsed);
   if (expected === parsed) return raw;
-  const scalar = '(?:"(?:[^"\\\\\\r\\n]|\\\\.)*"|-?\\d[\\d.eE+-]*|true|false|null)';
+  const value = '(?:"(?:[^"\\\\\\r\\n]|\\\\.)*"|-?\\d[\\d.eE+-]*|true|false|null|\\{[^{}]*\\})';
   let edited = raw.slice(bom.length);
   for (const key of RETIRED_BINDING_KEYS.filter(name => Object.hasOwn(parsed, name))) {
     // A member followed by another goes with its own line and trailing comma; the last member goes
     // with the comma before it.
-    const before = new RegExp(`(?:\\r?\\n[ \\t]*)?"${key}"\\s*:\\s*${scalar}\\s*,[ \\t]*`, 'g');
-    const after = new RegExp(`,\\s*"${key}"\\s*:\\s*${scalar}`, 'g');
+    const before = new RegExp(`(?:\\r?\\n[ \\t]*)?"${key}"\\s*:\\s*${value}\\s*,[ \\t]*`, 'g');
+    const after = new RegExp(`,\\s*"${key}"\\s*:\\s*${value}`, 'g');
     const pattern = (edited.match(before) || []).length === 1 ? before : after;
     if ((edited.match(pattern) || []).length !== 1) { edited = null; break; }
     edited = edited.replace(pattern, '');

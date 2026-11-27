@@ -189,7 +189,6 @@ test('cloud workflows: install, check, refresh and the refusals', t => {
   assert.equal(run(['--repo', repo, '--check']), 1, 'missing copies are drift');
   assert.equal(run(['--repo', repo]), 0);
   for (const name of [...SWEEPS.map(row => row.file), ...COPIED_FILES]) assert.ok(fs.existsSync(path.join(repo, name)), `${name} written`);
-  assert.match(out.text(), /shard-timings: not copied/);
   assert.equal(run(['--repo', repo, '--check']), 0, 'current');
   const sweepFile = path.join(repo, SWEEP.file);
   fs.appendFileSync(sweepFile, '# local edit\n');
@@ -253,7 +252,7 @@ test('cloud workflows: a Toolkit checkout and an unpublished commit are refused,
   git(repo, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk']);
   const trunk = workflows.plan({ repo, root: ROOT, commit: COMMIT });
   assert.deepEqual([...new Set(trunk.rows.map(row => row.id))], ['personal-data-guard', 'dependency-auto-merge'], 'the guard and dependency auto-merge run on any default branch');
-  assert.deepEqual(trunk.not_copied.map(row => row.id), ['programme-sweep', 'programme-sweep-gate', 'test-shards', 'shard-timings']);
+  assert.deepEqual(trunk.not_copied.map(row => row.id), ['programme-sweep', 'programme-sweep-gate']);
   for (const row of trunk.not_copied) assert.match(row.reason, /default branch is trunk; the cloud sweep runs only on a main branch/);
   workflows.apply(trunk);
   const notes = conformance.cloudWorkflowFindings(fetchedState(repo, {}, 'trunk'), ROOT, { cloudWorkflowsCommit: COMMIT });
@@ -344,14 +343,17 @@ test('cloud workflows: a plugin copy with no git renders from the managed Toolki
   assert.equal(workflows.sourceRoot({ home, self: plugin }), path.resolve(fallback), 'then the default managed place');
 });
 
-test('cloud workflows: the copy step reads the merged binding again before it uses the ci_shards answer', t => {
+// Nothing a copy check or install shows depends on the merged binding any more (the shard copies that
+// followed its ci_shards answer are retired), so only the refresh pull request and its landing read it
+// again first.
+test('cloud workflows: --check reads no binding; --refresh-pr reads the merged binding again first', t => {
   const repo = tempRepo(t);
   const refreshed = [];
   const out = capture(), err = capture();
   workflows.main(['--repo', repo, '--check'], { out, err, root: ROOT, commit: COMMIT, refresh: target => refreshed.push(target) });
+  assert.deepEqual(refreshed, [], 'a check makes no binding read');
+  workflows.main(['--repo', repo, '--refresh-pr'], { out, err, root: ROOT, commit: COMMIT, refresh: target => refreshed.push(target), governance: () => ({ state: 'DISABLED' }) });
   assert.deepEqual(refreshed, [path.resolve(repo)], 'refreshed once, for this repository');
-  workflows.main(['--repo', repo, '--check'], { out, err, root: ROOT, commit: COMMIT, ciShards: 'yes', refresh: target => refreshed.push(target) });
-  assert.equal(refreshed.length, 1, 'an answer given by the caller needs no read');
 });
 
 test('cloud workflows: from a plugin copy the turn-on renders with the managed checkout\'s own installer, so render and pin always match', t => {
@@ -360,9 +362,9 @@ test('cloud workflows: from a plugin copy the turn-on renders with the managed c
   fs.mkdirSync(path.join(managed, 'repo', 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(managed, 'repo', 'scripts', 'toolkit-cloud-workflows.cjs'), `'use strict';
 class InstallError extends Error {}
-module.exports = { InstallError, isToolkitCheckout: () => false, plan: ({ ciShards }) => ({ rows: [{ file: '.github/workflows/managed.yml', state: 'missing', expected: 'managed render ' + ciShards + '\\n' }] }) };
+module.exports = { InstallError, isToolkitCheckout: () => false, plan: () => ({ rows: [{ file: '.github/workflows/managed.yml', state: 'missing', expected: 'managed render\\n' }] }) };
 `);
   const { cloudWorkflowFiles } = require(path.join(ROOT, 'repo/scripts/toolkit-governance-proposal.cjs'));
   const repo = tempRepo(t);
-  assert.deepEqual(cloudWorkflowFiles(repo, { source: managed, ciShards: 'yes' }), { files: { '.github/workflows/managed.yml': 'managed render yes\n' }, warning: null, notes: [], added: [] });
+  assert.deepEqual(cloudWorkflowFiles(repo, { source: managed }), { files: { '.github/workflows/managed.yml': 'managed render\n' }, warning: null, notes: [], added: [] });
 });
