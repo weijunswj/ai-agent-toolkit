@@ -140,7 +140,10 @@ test('a section runs from its heading to the next heading of the same or a highe
 
 test('nothing in the repository still uses the old label, its workflow or its status', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'toolkit-auto-merge-eligible.cjs'), 'utf8');
-  assert.deepEqual([...source.matchAll(/\brequire\s*\(([^)]*)\)/g)].map(match => match[1].trim()), ["'node:fs'", "'node:path'", "'node:child_process'"], 'it needs nothing but Node\'s own modules');
+  // Node's own modules, plus the readiness hold read by the full check only, inside a try: a copy
+  // without that module still runs and holds nothing for it.
+  assert.deepEqual([...source.matchAll(/\brequire\s*\(([^)]*)\)/g)].map(match => match[1].trim()), ["'node:fs'", "'node:path'", "'node:child_process'", "'./toolkit-governance-ready.cjs'"], 'it needs nothing but Node\'s own modules and the optional readiness read');
+  assert.match(source, /try \{ ready = require\('\.\/toolkit-governance-ready\.cjs'\); \} catch \{ return null; \}/, 'the readiness read is optional');
   assert.equal(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'workflows', 'auto-merge-eligible.yml')), false, 'the label workflow is gone');
   const old = 'toolkit-owner-merge';
   for (const file of ['repo/scripts/toolkit-auto-merge-eligible.cjs', 'repo/scripts/toolkit-merge-hold.cjs', 'repo/scripts/toolkit-governance-state.cjs',

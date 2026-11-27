@@ -482,22 +482,30 @@ function permissionsState(root, { host = require('./agent-host-markers.cjs').det
   const built = owner.build({ host, scope: host === 'claude' ? 'all' : 'computer', repoRoot: root });
   let missing = 0;
   let stale = 0;
+  // Every Toolkit line this app should have: missing equal to it, with no old line, means the lines
+  // were never set up on this computer (toolkit-governance-ready.cjs holds on that, not on drift).
+  let wanted = 0;
   for (const block of built.blocks) {
     if (host === 'codex') {
       let text = null;
       try { text = nodeFs.readFileSync(block.target, 'utf8'); } catch { text = null; }
       const have = ruleKeys(text);
       const want = ruleKeys(block.text);
+      wanted += want.length;
       missing += want.filter(key => !have.includes(key)).length;
       stale += have.filter(key => !want.includes(key)).length;
-    } else if (!nodeFs.existsSync(block.target)) missing += block.allow.length + block.ask.length + (block.autoMode || []).length;
-    else {
-      const report = owner.check(block.target, { blocks: [block] })[0];
-      missing += report.missing.length + report.auto_missing.length;
-      stale += report.stale.length + report.stale_ask.length + report.auto_old.length;
+    } else {
+      const all = block.allow.length + block.ask.length + (block.autoMode || []).length;
+      wanted += all;
+      if (!nodeFs.existsSync(block.target)) missing += all;
+      else {
+        const report = owner.check(block.target, { blocks: [block] })[0];
+        missing += report.missing.length + report.auto_missing.length;
+        stale += report.stale.length + report.stale_ask.length + report.auto_old.length;
+      }
     }
   }
-  return { checked: true, host, app: host === 'codex' ? 'Codex' : 'Claude Code', missing, stale, update: applyLine(built, '--apply', host).command, remove: applyLine(built, '--remove', host).command };
+  return { checked: true, host, app: host === 'codex' ? 'Codex' : 'Claude Code', wanted, missing, stale, update: applyLine(built, '--apply', host).command, remove: applyLine(built, '--remove', host).command };
 }
 
 // Exports first: --apply loads toolkit-permissions-apply.cjs, which reads PermissionBlocks from here.

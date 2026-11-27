@@ -399,7 +399,7 @@ class ToolkitGovernanceCli {
       return 0;
     }
     const recorded = finishing.record(this.#registryOptions, state.repository_id, outcome);
-    this.#print(json, { result: outcome.result, on: outcome.on, unavailable: outcome.unavailable, held: outcome.held }, [...lines, recorded?.line || '']);
+    this.#print(json, { result: outcome.result, on: outcome.on, unavailable: outcome.unavailable, held: outcome.held }, [...lines, recorded?.line || '', ...(recorded?.notes || [])]);
     return outcome.result === 'done' ? 0 : 2;
   }
 

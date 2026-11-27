@@ -70,8 +70,20 @@ const REASONS = Object.freeze({
 const short = sha => sha.slice(0, 7);
 const commits = count => `${count} commit${count === 1 ? '' : 's'}`;
 
+// The one step for a checkout that could not move, for the agent to take or put to the user.
+const STEPS = Object.freeze({
+  upstream: branch => `With the user's yes, the agent points it at origin/${branch}; the next session start then moves it`,
+  operation: () => 'The agent finishes or stops that operation with the user; the next session start then moves it',
+  dirty: () => 'The agent lists the changed or extra files for the user to keep or drop (Toolkit clears untracked copies identical to the merged ones itself); the next session start then moves it',
+  diverged: () => 'The agent shows the local commits for the user to put on a branch or drop; the next session start then moves it',
+  hooks: () => 'With the user\'s yes, the agent pulls it by hand',
+  filters: () => 'With the user\'s yes, the agent pulls it by hand',
+  unreadable: () => 'The next session start tries again',
+  busy: () => 'The next session start tries again',
+});
+
 function behindLine(branch, behind, reason) {
-  return `Toolkit: local ${branch} is ${commits(behind)} behind origin/${branch} and was not moved: ${REASONS[reason](branch)}.`;
+  return `Toolkit: local ${branch} is ${commits(behind)} behind origin/${branch} and was not moved: ${REASONS[reason](branch)}. ${STEPS[reason](branch)}.`;
 }
 
 function movedLine(branch, from, to, behind, instructions, cleared = []) {

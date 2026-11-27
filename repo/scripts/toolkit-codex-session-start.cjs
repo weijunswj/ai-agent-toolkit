@@ -70,10 +70,12 @@ function sessionLines(input, dependencies) {
     gate.startSession(input, { host: 'codex', onRefresh: read => { fresh = read; } });
     let caughtUp = null;
     try { caughtUp = (dependencies.catchUp || require('./toolkit-repo-catchup.cjs')).catchUp(fresh); } catch { caughtUp = null; }
+    // Codex always sends the session's cwd; without one there is no repository to describe. The
+    // catch-up line leads the governance text, or joins its held block when the setup is not complete.
+    if (!(input && typeof input.cwd === 'string' && input.cwd)) return [caughtUp].filter(Boolean);
     let governance = null;
-    // Codex always sends the session's cwd; without one there is no repository to describe.
-    try { governance = input && typeof input.cwd === 'string' && input.cwd ? gate.sessionLine(input.cwd, { sessionId: gate.sessionIdOf(input), host: 'codex' }) : null; } catch (error) { governance = unavailableLine(input, error); }
-    return [caughtUp, governance].filter(Boolean);
+    try { governance = gate.sessionLine(input.cwd, { sessionId: gate.sessionIdOf(input), host: 'codex', localCopy: caughtUp }); } catch (error) { return [caughtUp, unavailableLine(input, error)].filter(Boolean); }
+    return [governance || caughtUp].filter(Boolean);
   } catch (error) { return [unavailableLine(input, error)].filter(Boolean); }
 }
 

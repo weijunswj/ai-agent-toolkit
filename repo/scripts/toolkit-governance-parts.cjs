@@ -4,13 +4,15 @@
 // governance GitHub App and the evidence store. A governed session start names a missing one in one
 // line for the agent to pass on, so the owner hears about it without asking.
 //
-// - Governance App: missing (GitHub lists neither its variable nor its secret) or partly set up. A
-//   missing App holds no governance action: programme records, gates, merges, the bank and this
-//   computer's own refresh use the owner's own GitHub sign-in. Only the governance jobs on GitHub need
-//   it (the cloud Programme Sweep and the Shard Timings pull request), and they do nothing without it.
+// - Governance App: missing (GitHub lists neither its variable nor its secret) or partly set up. The
+//   governance jobs on GitHub (the cloud Programme Sweep and the Shard Timings pull request) do
+//   nothing without it.
 // - Evidence store: the store the merged programme file names cannot be found, is not private, or
 //   cannot be written with this computer's GitHub sign-in. Programme state lives there, so every
 //   programme write refuses until it is usable; the line says so.
+// Where the readiness hold applies (toolkit-governance-ready.cjs reads these saved results), either one
+// missing holds programme records, gate records and task auto-merge, and the session start names it
+// in its held block instead of these lines (deps.partsInBlock); elsewhere the lines stay warnings.
 // - Repository settings (INT-TK421-1378): the settings governance needs, read as the governance check
 //   reads them (toolkit-governance-conformance.cjs settingsReads): the no-force-push ruleset, the
 //   default branch's required checks, merge methods and up-to-date rule, and the dependency and
@@ -178,6 +180,18 @@ function savedStore(registryOptions, repositoryId, store) {
   } catch { return null; }
 }
 
+// The last saved App and store results for the readiness check (toolkit-governance-ready.cjs), each
+// kept only in its known shape: { app, store, checked_at }, or null when none is saved. Local read only.
+function saved(registryOptions, repositoryId) {
+  try {
+    if (typeof repositoryId !== 'string' || !repositoryId) return null;
+    const repositories = read(registryOptions).repositories;
+    const entry = Object.hasOwn(repositories, repositoryId) ? repositories[repositoryId] : null;
+    if (!entry || typeof entry !== 'object') return null;
+    return { app: cleanApp(entry.app), store: cleanStore(entry.store?.repository, entry.store), checked_at: typeof entry.checked_at === 'string' ? entry.checked_at : null };
+  } catch { return null; }
+}
+
 // The session-start lines for an ENABLED repository: the last result, then a background check when it
 // is due. `store` is the store the merged programme file names now; a result for another store is
 // not shown and is checked again.
@@ -188,17 +202,21 @@ function sessionLines(state, registryOptions = {}, deps = {}) {
     const store = deps.store !== undefined ? deps.store : require('./toolkit-governance-state.cjs').bindingStoreRepository(state.root, registryOptions);
     const entry = read(registryOptions).repositories[state.repository_id] || null;
     const lines = [];
+    // While governance is held (toolkit-governance-ready.cjs), the App and store lines are in the held
+    // block the session start leads with, so they are counted here but not given twice.
+    let inBlock = 0;
+    const partLine = line => { if (deps.partsInBlock === true) inBlock += 1; else lines.push(line); };
     const app = entry && cleanApp(entry.app);
     const slug = state.repository || 'this repository';
     if (app && !unknown(app) && app.variable === 'missing' && app.secret === 'missing') {
-      lines.push(`Toolkit governance: the Governance App is not set up on ${slug} (GitHub lists neither its variable nor its secret), so the governance jobs on GitHub (the cloud sweep and the shard refresh) do nothing; everything else, this computer's own refresh included, still works. In your first reply, tell the user once, in one line, that saying \`refresh governance\` gives the one line that sets it up; nothing waits on it.`);
+      partLine(`Toolkit governance: the Governance App is not set up on ${slug} (GitHub lists neither its variable nor its secret), so the governance jobs on GitHub (the cloud sweep and the shard refresh) do nothing; everything else, this computer's own refresh included, still works. In your first reply, tell the user once, in one line, that saying \`refresh governance\` gives the one line that sets it up; nothing waits on it.`);
     } else if (app && !unknown(app) && (app.variable === 'missing' || app.secret === 'missing')) {
-      lines.push(`Toolkit governance: the Governance App is only partly set up on ${slug} (variable ${app.variable}, secret ${app.secret}), so the governance jobs on GitHub (the cloud sweep and the shard refresh) do nothing. In your first reply, tell the user once, in one line, that saying \`refresh governance\` shows how to finish it; nothing waits on it.`);
+      partLine(`Toolkit governance: the Governance App is only partly set up on ${slug} (variable ${app.variable}, secret ${app.secret}), so the governance jobs on GitHub (the cloud sweep and the shard refresh) do nothing. In your first reply, tell the user once, in one line, that saying \`refresh governance\` shows how to finish it; nothing waits on it.`);
     }
     const kept = entry && entry.store && entry.store.repository === store ? entry.store : null;
     const why = STORE_WHY[kept?.state];
     if (why) {
-      lines.push(`Toolkit governance: the evidence store ${store} named in the programme file ${why}, so programme records and evidence cannot be saved and every governance step that writes them stops until it is fixed. In your first reply, tell the user once, in one line, what is wrong and the fix: ${STORE_STEP[kept.state]}.`);
+      partLine(`Toolkit governance: the evidence store ${store} named in the programme file ${why}, so programme records and evidence cannot be saved and every governance step that writes them stops until it is fixed. In your first reply, tell the user once, in one line, what is wrong and the fix: ${STORE_STEP[kept.state]}.`);
     }
     const settings = entry && cleanSettings(entry.settings);
     if (settings && settings.drift.length) {
@@ -208,7 +226,7 @@ function sessionLines(state, registryOptions = {}, deps = {}) {
     const checkedAt = Date.parse(entry?.checked_at || '');
     const unread = !app || unknown(app) || (store && (!kept || kept.state === 'unverified'));
     // A missing or unusable part (it has a line) is read again after an hour too: the owner may be fixing it.
-    const notReady = lines.length > 0;
+    const notReady = lines.length + inBlock > 0;
     // A result for a store the programme file no longer names is checked again at once.
     const moved = Boolean(store && entry?.store && entry.store.repository !== store);
     const due = moved || !Number.isFinite(checkedAt) || now.getTime() - checkedAt >= (unread || notReady ? RETRY_MS : FRESH_MS);
@@ -234,6 +252,7 @@ function main(argv = process.argv.slice(2)) {
   return 0;
 }
 
-if (require.main === module) process.exitCode = main();
+// Exports first: the readiness module and this file require each other through the state module.
+module.exports = Object.freeze({ SCHEMA, BASENAME, STORE_STEP, STORE_WHY, check, record, recordRead, saved, savedStore, sessionLines, startCheck, storeState });
 
-module.exports = Object.freeze({ SCHEMA, BASENAME, STORE_STEP, STORE_WHY, check, record, recordRead, savedStore, sessionLines, startCheck, storeState });
+if (require.main === module) process.exitCode = main();

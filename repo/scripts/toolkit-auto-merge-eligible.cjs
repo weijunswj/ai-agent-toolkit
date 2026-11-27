@@ -7,7 +7,9 @@
 // one line in the pull request body that says whether the owner must test it. The scope is read from
 // the pull request's commits through git, so the controller runs it on the merge head before a merge
 // and the merge hold (toolkit-merge-hold.cjs) runs the scope half on this computer before letting a
-// merge with no typed approval through. It loads only Node's own modules.
+// merge with no typed approval through. The scope half loads only Node's own modules; the full check
+// also reads whether the repository's governance setup is complete (toolkit-governance-ready.cjs) and
+// waits while it is not.
 //
 //   node repo/scripts/toolkit-auto-merge-eligible.cjs --base <commit> --head <commit> --body-file <file|-> [--json]
 //   node repo/scripts/toolkit-auto-merge-eligible.cjs --base <commit> --head <commit> --scope-only [--json]
@@ -399,13 +401,27 @@ function main(argv, { cwd = process.cwd(), stdout = process.stdout, stderr = pro
   const body = readBody(bodyFile, cwd, stdin);
   if (body === null) { stderr.write('The pull request body could not be read as text, so its UAT verdict is unknown: the file is missing, too long, or not UTF-8 (UTF-16 is read only with its byte order mark). Pipe the body straight in with --body-file -, or save it as UTF-8, and run the check again.\n'); return 2; }
   const uat = uatVerdict(body);
-  const ready = scope.eligible && uat.mergeable;
-  if (json) stdout.write(`${JSON.stringify({ ...scope, uat, ready }, null, 2)}\n`);
+  const held = setupHeld(cwd);
+  const ready = scope.eligible && uat.mergeable && !held;
+  if (json) stdout.write(`${JSON.stringify({ ...scope, uat, ...(held ? { governance_held: held } : {}), ready }, null, 2)}\n`);
   else if (ready) stdout.write(`Auto-merge: yes. Nothing here changes the merge rules and the UAT verdict is ${uat.state} (${uat.detail}), so it merges once the other gate conditions hold.${AFTER_MERGE(uat)}\n`);
-  else stdout.write(`${[...uatLines(uat), ...scopeLines, ...(scope.eligible ? [] : [AFTER_MERGE(uat).trim()].filter(Boolean))].join('\n')}\n`);
+  else stdout.write(`${[...(held ? [held] : []), ...uatLines(uat), ...scopeLines, ...(scope.eligible ? [] : [AFTER_MERGE(uat).trim()].filter(Boolean))].join('\n')}\n`);
   return ready ? 0 : 1;
 }
 
-if (require.main === module) process.exitCode = main(process.argv.slice(2));
+// The line that keeps standing task auto-merge waiting while the repository's governance setup is not
+// complete (toolkit-governance-ready.cjs), or null. A copy without that module, or a read that fails,
+// holds nothing (unknown never holds); the owner's own merge is never held.
+function setupHeld(cwd) {
+  let ready;
+  try { ready = require('./toolkit-governance-ready.cjs'); } catch { return null; }
+  try {
+    const { result } = ready.readinessAt(cwd);
+    return ready.holdFor('task-auto-merge', result) === 'refuse' ? ready.heldLine(result, 'task auto-merge') : null;
+  } catch { return null; }
+}
 
+// Exports first: the readiness read can reach this file again through a require cycle.
 module.exports = Object.freeze({ GENERAL, SECTIONS, TOOLKIT, UAT_STATES, commitOf, eligibility, eligibilityOf, main, sectionOf, uatVerdict, withoutStamps });
+
+if (require.main === module) process.exitCode = main(process.argv.slice(2));
