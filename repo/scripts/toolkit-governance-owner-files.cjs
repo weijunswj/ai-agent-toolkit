@@ -6,8 +6,8 @@
 // update of an open pull request):
 //
 //   - A settings file that is already there is the owner's and is kept: the personal data guard's, the
-//     plain-text check's (its baseline too, which belongs to its settings), the Dependabot settings and
-//     the test shard list. So is an existing plain-text workflow, as its installer keeps it.
+//     plain-text check's (its baseline too, which belongs to its settings) and the Dependabot settings.
+//     So is an existing plain-text workflow, as its installer keeps it.
 //   - A file Toolkit did not write is kept, and what depends on it is left out with it: the rest of a
 //     copied workflow's files, the other rendered copies, the rest of the plain-text check.
 //   - A Toolkit copy is brought to the wanted text; a hand-edited one is named.
@@ -129,7 +129,6 @@ class OwnerFiles {
     this.#renderedWorkflows();
     this.#plainText();
     this.#dependabot();
-    this.#owners(require('./governed-test-shards.cjs').MANIFEST_REL);
     const wanted = Object.keys(this.#wanted);
     return {
       files: this.#write,

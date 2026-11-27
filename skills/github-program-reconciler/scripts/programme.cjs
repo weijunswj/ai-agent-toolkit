@@ -543,9 +543,7 @@ function cloudLayoutFindings(context, deps = {}) {
     const toolkitRoot = path.resolve(__dirname, '..', '..', '..');
     const workflows = require(path.join(toolkitRoot, 'repo', 'scripts', 'toolkit-cloud-workflows.cjs'));
     const refresh = require(path.join(toolkitRoot, 'repo', 'scripts', 'toolkit-cloud-workflows-refresh.cjs'));
-    let ciShards = null;
-    try { ciShards = JSON.parse(fs.readFileSync(path.join(context.repoRoot, '.github', 'toolkit-programme.json'), 'utf8'))?.ci_shards?.answer || null; } catch { ciShards = null; }
-    const found = refresh.pending({ target: context.repoRoot, root: toolkitRoot, commit: workflows.toolkitHead(toolkitRoot), ciShards, workflows });
+    const found = refresh.pending({ target: context.repoRoot, root: toolkitRoot, commit: workflows.toolkitHead(toolkitRoot), workflows });
     return found.rows.length || found.unmanaged ? ['CLOUD_LAYOUT_STALE'] : [];
   } catch { return []; }
 }

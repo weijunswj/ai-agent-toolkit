@@ -732,7 +732,7 @@ cp.spawnSync = function(file, args, options) {
     const { managed, named } = this.#managedToolkit();
     const workflows = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-cloud-workflows.cjs'));
     const refresh = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-cloud-workflows-refresh.cjs'));
-    workflows.apply(workflows.plan({ repo: this.work, root: managed, commit: named, ciShards: null }));
+    workflows.apply(workflows.plan({ repo: this.work, root: managed, commit: named }));
     if (kind === 'edited') fs.appendFileSync(path.join(this.work, '.github', 'workflows', 'toolkit-programme-sweep-gate.yml'), ' ');
     this.#git(this.work, ['add', '-A']);
     this.#git(this.work, ['commit', '--quiet', '-m', refresh.TITLE, '-m', `Toolkit commit: ${named}`]);
@@ -764,7 +764,7 @@ cp.spawnSync = function(file, args, options) {
     const workflows = require(path.join(ROOT, 'repo', 'scripts', 'toolkit-cloud-workflows.cjs'));
     const start = this.#git(this.work, ['rev-parse', '--abbrev-ref', 'HEAD']).trim();
     this.#git(this.work, ['checkout', '--quiet', '-b', 'pack-origin-ahead']);
-    workflows.apply(workflows.plan({ repo: this.work, root: managed, commit: named, ciShards: null }));
+    workflows.apply(workflows.plan({ repo: this.work, root: managed, commit: named }));
     this.#git(this.work, ['add', '-A']);
     this.#git(this.work, ['commit', '--quiet', '-m', 'origin: Toolkit copies']);
     const ahead = this.#git(this.work, ['rev-parse', 'HEAD']).trim();
