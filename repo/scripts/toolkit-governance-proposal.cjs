@@ -27,7 +27,7 @@ const ownerFiles = () => require('./toolkit-governance-owner-files.cjs');
 const READBACK_TRIES = 4, READBACK_WAIT_MS = 500;
 function key(value) { return crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 32); }
 // A yes is published only by the governance question bank, whose script makes every piece itself.
-const BANK_ONLY = 'A yes is published only from the governance question bank, which makes the store, parent issue, programme file and CI checks itself.';
+const BANK_ONLY = 'A yes is published only from the guided governance setup, which makes the store, parent issue, programme file and CI checks itself.';
 // The files every turn-on pull request carries: the programme file and the plain-text check. A yes
 // missing any of them is refused. The installed Toolkit delivers the governed rules and playbooks,
 // so no instruction file is required or added.
