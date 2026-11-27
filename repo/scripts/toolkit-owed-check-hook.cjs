@@ -432,7 +432,9 @@ function permissionsHold(root, found, deps = {}) {
   try {
     const ready = require('./toolkit-governance-ready.cjs');
     const state = (deps.governanceState || (where => require('./toolkit-governance-state.cjs').governanceState(where)))(root);
-    const result = ready.readiness(state, {}, { permissions: () => found, environment: deps.env || process.env });
+    // The readiness reads it may be given (merged min_toolkit, saved parts, store) pass through as given.
+    const given = Object.fromEntries(['minToolkit', 'parts', 'store'].filter(key => deps[key] !== undefined).map(key => [key, deps[key]]));
+    const result = ready.readiness(state, {}, { ...given, permissions: () => found, environment: deps.env || process.env });
     return result.applies && result.missing.some(item => item.part === 'permissions');
   } catch { return false; }
 }

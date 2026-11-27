@@ -172,6 +172,6 @@ function main(argv = process.argv.slice(2), { log = console.log, error = console
   return result.ok ? 0 : 1;
 }
 
-module.exports = Object.freeze({ MIN_TOOLKIT, run, main });
+module.exports = Object.freeze({ MIN_TOOLKIT, run, main, sweepCopiesWithoutMinToolkit });
 
 if (require.main === module) process.exitCode = main();

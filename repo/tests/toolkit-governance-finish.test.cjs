@@ -151,7 +151,9 @@ test('a fresh repository with no required checks finishes: protection waits for 
   assert.equal(entry.status, 'done', 'final: never \'tried again in a later session\'');
   assert.doesNotMatch(entry.line, /tried again/);
   assert.match(entry.line, /finished here, apart from what waits for you below\. On and read back: the no-force-push ruleset and the free dependency and security settings\./);
-  assert.match(entry.line, /Waiting for you, default-branch protection: the programme file lists no required checks yet.*required_checks in \.github\/toolkit-programme\.json through a pull request, merge it, then run `node ".*toolkit-governance\.cjs" migrate` in your own terminal to add the protection\./);
+  // Never a hand edit of the programme file: the summary's one update pull request adds the checks.
+  assert.match(entry.line, /Waiting for you, default-branch protection: the programme file lists no required checks yet, so there is nothing for it to require\. Say toolkit governance: its summary offers one pull request that adds the checks the default branch already requires and Toolkit's own\. Merge it, then run `node ".*toolkit-governance\.cjs" migrate` in your own terminal to add the protection\./);
+  assert.doesNotMatch(entry.line, /required_checks in|by hand/);
   const started = [];
   assert.match(finishing.sessionLines(state, ctx.registryOptions, { startFinish: () => started.push(1) }).join(' '), /Waiting for you, default-branch protection/);
   assert.deepEqual(finishing.sessionLines(state, ctx.registryOptions, { startFinish: () => started.push(1) }), [], 'shown once, then dropped');

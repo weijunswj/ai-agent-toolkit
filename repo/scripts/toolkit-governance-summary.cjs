@@ -57,6 +57,98 @@ function mergedFiles(root, commit, { runGit = require('./toolkit-governance-bind
   } catch { return null; }
 }
 
+// ---- the programme file update ------------------------------------------------------------------
+// An older governed programme file can sit behind what this Toolkit needs: a min_toolkit below the
+// setup hold (toolkit-governance-ready.cjs HOLD_FROM), so a missing part never holds there, or
+// required_checks without the checks the default branch already requires or Toolkit's own checks.
+// The failure this prevents: the owner was told to edit required_checks by hand, and min_toolkit was
+// only ever written by the instruction-copies cleanup, at a version below the hold.
+
+// The checks GitHub requires on the default branch, from a protection read
+// (toolkit-governance-protection.cjs ghProtectionReader): its rulesets and classic protection. A plan
+// without branch protection requires none; any other read that failed is null (not known).
+function branchRequiredChecks(read) {
+  if (!read || typeof read !== 'object') return null;
+  if (read.ok !== true) return read.reason === 'plan-has-no-protection' ? [] : null;
+  const found = new Set();
+  for (const rule of Array.isArray(read.rules) ? read.rules : []) {
+    if (rule && rule.type === 'required_status_checks' && Array.isArray(rule.parameters?.required_status_checks)) {
+      for (const check of rule.parameters.required_status_checks) if (check && typeof check.context === 'string' && check.context) found.add(check.context);
+    }
+  }
+  for (const check of Array.isArray(read.classic?.checks) ? read.classic.checks : []) if (check && typeof check.context === 'string' && check.context) found.add(check.context);
+  return [...found].sort();
+}
+
+// Toolkit's own checks (plain-text, personal-data) whose workflow the merged commit defines, read
+// through the binding reader's git runner, as mergedFiles is. Unreadable files add none.
+function mergedOwnChecks(root, commit, { runGit = require('./toolkit-governance-binding.cjs').defaultRunGit } = {}) {
+  if (typeof root !== 'string' || !/^[0-9a-f]{40}$/i.test(String(commit || ''))) return [];
+  const { OWN_CHECKS, withOwnChecks } = require('./toolkit-governance-proposal.cjs');
+  const files = {};
+  for (const entry of OWN_CHECKS) {
+    try {
+      const shown = runGit(['show', `${commit}:${entry.file}`], { cwd: root, timeout: 10000 });
+      if (shown.status === 0) files[entry.file] = String(shown.stdout);
+    } catch { /* not read: that check is not added */ }
+  }
+  return withOwnChecks([], files);
+}
+
+// What one programme file pull request would change, or null when it is in step: { min_toolkit:
+// { from, to } | null, required_checks (the whole new list), added, branchUnread }. min_toolkit moves
+// to the running release only where it is below `holdFrom`; the repository's own checks all stay, in
+// their order, and the missing ones follow sorted. `branchChecks` null means the default branch's
+// protection could not be read, so only Toolkit's own checks can be added. `keyReadable` is false where
+// the file has no min_toolkit and the repository's pinned sweep copies might not know the key
+// (toolkit-governance-cleanup.cjs): adding it there would stop the programme board, so it waits.
+function programmeUpdate({ binding, running, holdFrom, branchChecks = null, ownChecks = [], keyReadable = true }) {
+  if (!binding || binding.governance !== 'enabled') return null;
+  const { compareVersions } = require('./toolkit-version.cjs');
+  const at = value => /^\d+\.\d+\.\d+$/.test(String(value || ''));
+  const current = at(binding.min_toolkit) ? binding.min_toolkit : null;
+  let minToolkit = null;
+  try {
+    if (at(running) && at(holdFrom) && (current || keyReadable) && (!current || compareVersions(current, holdFrom) < 0) && compareVersions(running, holdFrom) >= 0) minToolkit = { from: current, to: running };
+  } catch { minToolkit = null; }
+  const kept = Array.isArray(binding.required_checks) ? binding.required_checks : [];
+  const added = [...new Set([...(branchChecks || []), ...(ownChecks || [])])].filter(check => typeof check === 'string' && check && !kept.includes(check)).sort();
+  if (!minToolkit && !added.length) return null;
+  return { min_toolkit: minToolkit, required_checks: [...kept, ...added], added, branchUnread: branchChecks === null };
+}
+
+// What the update changes, in words: the pull request's own wording (the proposal module, which the
+// hooks load, so it never loads this one).
+const updateWords = update => require('./toolkit-governance-proposal.cjs').updateWords(update);
+
+// The programme file with the update applied, in its own layout (indent, line endings, byte order
+// mark), so the pull request shows only the changed lines; a layout it cannot follow is written out
+// whole. A retired key (programme-state.cjs) goes in the same change, as switches do.
+function programmeUpdateText(mergedText, binding, update) {
+  const util = require('node:util');
+  const programme = require('../../skills/github-program-reconciler/scripts/programme-state.cjs');
+  const text = programme.withoutRetiredKeysText(String(mergedText));
+  const expected = { ...programme.withoutRetiredKeys(binding), required_checks: update.required_checks, ...(update.min_toolkit ? { min_toolkit: update.min_toolkit.to } : {}) };
+  const bom = text.startsWith('﻿') ? '﻿' : '';
+  let edited = text.slice(bom.length);
+  const checks = /("required_checks"\s*:\s*)\[[^[\]]*\]/g;
+  if ((edited.match(checks) || []).length === 1) edited = edited.replace(checks, `$1[${update.required_checks.map(check => JSON.stringify(check)).join(', ')}]`);
+  else edited = null;
+  if (edited !== null && update.min_toolkit) {
+    if (Object.hasOwn(binding, 'min_toolkit')) edited = edited.replace(/("min_toolkit"\s*:\s*)"[^"]*"/, `$1"${update.min_toolkit.to}"`);
+    else {
+      const close = edited.lastIndexOf('}');
+      const head = edited.slice(0, close).replace(/\s+$/, '');
+      const newline = edited.includes('\r\n') ? '\r\n' : '\n';
+      const indent = /\n([ \t]+)"/.exec(head)?.[1];
+      edited = indent === undefined ? `${head}, "min_toolkit": "${update.min_toolkit.to}"${edited.slice(head.length)}` : `${head},${newline}${indent}"min_toolkit": "${update.min_toolkit.to}"${edited.slice(head.length)}`;
+    }
+  }
+  let same = false;
+  try { same = edited !== null && util.isDeepStrictEqual(JSON.parse(edited), expected); } catch { same = false; }
+  return same ? `${bom}${edited}` : `${JSON.stringify(expected, null, 2)}\n`;
+}
+
 function presenceRow(entries, files, { defaultBranch = null } = {}) {
   if (!files) return { state: 'Not read', missing: [] };
   const wanted = entries.filter(entry => !entry.main || defaultBranch === 'main');
@@ -108,6 +200,10 @@ function summaryRows(facts) {
   const auto = task.auto_merge === 'after-gates';
   rows.push(['Task auto-merge with merge train', auto ? (task.merge_train === 'on' ? 'On' : 'On, merge trains off') : 'Off', DOES['task-auto-merge']]);
   rows.push(['Required checks', facts.requiredChecks?.length ? `Set: ${facts.requiredChecks.join(', ')}` : 'None listed', DOES.checks]);
+  // The programme file update: a pull request already waiting is the step; else the question below.
+  const update = facts.update;
+  if (update?.open) steps.push({ part: 'Programme file', text: `An update waits in ${update.open.url}: merge it, then say toolkit governance.` });
+  else if (update?.offer) steps.push({ part: 'Programme file', text: `It is behind this Toolkit: one pull request ${updateWords(update.offer)}.${update.offer.branchUnread ? " The default branch's required checks could not be read, so only Toolkit's own are added." : ''} Answer question 1 below.` });
   const finish = finishRows(facts.finish, facts.drift);
   rows.push(['Branch protection and rulesets', finish.protection, finish.free ? DOES['protection-free'] : DOES.protection]);
   rows.push(['Security settings', finish.security, DOES.security]);
@@ -162,13 +258,19 @@ function renderSummary(facts, { held = false } = {}) {
     '',
     ...(facts.stale ? [`GitHub could not be read just now (${facts.stale}), so the programme file values are the ones this computer last read.`, ''] : []),
     'To change something later, say: turn off governance, task auto-merge on or off, or change store.',
+    ...(facts.update?.offer && !facts.update.open ? [
+      '',
+      '**1. Question: Bring the programme file up to date?**',
+      `   - **A. Yes (my pick):** One pull request ${updateWords(facts.update.offer)}. Nothing else changes, and it applies only after you merge it.`,
+      '   - **B. No:** Nothing is written, and Toolkit asks again next time.',
+    ] : []),
   ].join('\n');
 }
 
 // A change the owner asked for in words after the summary: { governance: 'off' } | { taskAutoMerge }
-// | { changeStore: true } | { cleanCopies: true } | { shards }, or a GuidedAnswerError. `copies` and
-// `shards` say whether the summary offers those changes.
-function parseChange(text, { copies = false, shards = false } = {}) {
+// | { changeStore: true } | { cleanCopies: true } | { shards } | { update: 'yes' | 'no' }, or a
+// GuidedAnswerError. `copies`, `shards` and `update` say whether the summary offers those changes.
+function parseChange(text, { copies = false, shards = false, update = false } = {}) {
   const { GuidedAnswerError } = require('./toolkit-governance-guided.cjs');
   const lower = String(text || '').trim().replace(/[.!]+$/, '').toLowerCase().replace(/\s+/g, ' ');
   if (/^(?:turn (?:it )?off governance|turn governance off|governance off)$/.test(lower)) return { governance: 'off' };
@@ -178,7 +280,9 @@ function parseChange(text, { copies = false, shards = false } = {}) {
   if (copies && /^clean ?up (?:the )?(?:instruction )?copies$/.test(lower)) return { cleanCopies: true };
   const split = /^shards ?= ?(yes|not-now|never)$/.exec(lower);
   if (shards && split) return { shards: split[1] };
-  throw new GuidedAnswerError(`This was not read as a change: "${String(text || '').trim()}". Say turn off governance, task auto-merge on or off, or change store.`);
+  if (update && /^(?:(?:1 ?)?a(?:\W+yes)?|yes|(?:update|bring) (?:the )?programme file(?: up to date)?)$/.test(lower)) return { update: 'yes' };
+  if (update && /^(?:(?:1 ?)?b(?:\W+no)?|no)$/.test(lower)) return { update: 'no' };
+  throw new GuidedAnswerError(`This was not read as a change: "${String(text || '').trim()}". Say turn off governance, task auto-merge on or off, or change store${update ? ', or answer question 1 with A or B' : ''}.`);
 }
 
-module.exports = Object.freeze({ DOES, finishRows, mergedFiles, parseChange, renderSummary, summaryRows });
+module.exports = Object.freeze({ DOES, branchRequiredChecks, finishRows, mergedFiles, mergedOwnChecks, parseChange, programmeUpdate, programmeUpdateText, renderSummary, summaryRows, updateWords });

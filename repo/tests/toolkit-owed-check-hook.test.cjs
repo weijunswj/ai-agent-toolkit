@@ -706,6 +706,24 @@ test('O-32 out-of-date permission lines get one line to the owner at the first t
   assert.match(gate.run().output.systemMessage, LINE);
 });
 
+// G2 Low on the setup hold: the turn-end wording for permissions that hold governance had no test.
+test('O-33 permission lines never set up here, where the setup hold applies, say governance is held; drift and older programme files keep the nag', t => {
+  const HELD = /^Toolkit permissions: Claude Code's Toolkit permission lines are not set up on this computer, so governance here is held until they are: programme records, gate records and task auto-merge wait\. Say toolkit permissions for the one command that sets them up\.$/m;
+  const NAG = /are out of date \(\d+ missing(?:, \d+ old)?\)\. Say toolkit permissions for the one command that brings them up to date; nothing waits on it\.$/m;
+  const turnEnd = ({ permissions, minToolkit }) => {
+    const fx = fixture(t).brief('Fix the typo.').writeTranscript();
+    fx.deps.permissions = () => permissions;
+    fx.deps.minToolkit = minToolkit;
+    fx.deps.parts = null;
+    return fx.run().output.systemMessage;
+  };
+  const never = { checked: true, app: 'Claude Code', wanted: 5, missing: 5, stale: 0 };
+  assert.match(turnEnd({ permissions: never, minToolkit: '3.199.0' }), HELD, 'never set up, hold applies: held');
+  assert.match(turnEnd({ permissions: { ...never, missing: 2 }, minToolkit: '3.199.0' }), NAG, 'some lines missing beside others is drift: the nag');
+  assert.match(turnEnd({ permissions: never, minToolkit: '3.137.0' }), NAG, 'an older programme file: warnings only');
+  assert.doesNotMatch(turnEnd({ permissions: never, minToolkit: '3.137.0' }), HELD);
+});
+
 test('O-34 a new chat\'s stamp removes stamps older than a month, and only stamps', t => {
   const fx = fixture(t).brief('Fix the typo.').writeTranscript();
   fx.deps.permissions = () => ({ checked: true, app: 'Claude Code', missing: 0, stale: 0 });

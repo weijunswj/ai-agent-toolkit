@@ -473,6 +473,26 @@ test('27: a move that fails after the leftovers were cleared puts them back exac
   assert.deepEqual(bytesOf(f.clone, LEFTOVERS), LEFTOVERS);
 });
 
+test('28: a leftover changed after the comparison is never removed, and the ones already cleared are put back', t => {
+  // Each file in turn is edited between the comparison and the removal (the changed-files read comes
+  // after the comparison), so the files cleared before it are restored too.
+  for (const edited of Object.keys(LEFTOVERS)) {
+    const f = fixture(t);
+    const before = head(f.clone);
+    setupLeftovers(f);
+    const spy = recorder();
+    const late = (args, options) => {
+      if (args.includes('diff') && args.includes('--name-only')) fs.writeFileSync(path.join(f.clone, edited), 'changed after the comparison\n');
+      return spy.runGit(args, options);
+    };
+    const line = catchup.catchUp(f.read(), { runGit: late, controlRoot: f.control, environment: { ...process.env } });
+    ALL_CALLS.push(...spy.calls);
+    assert.deepEqual(NOT_MOVED.exec(line).slice(1), ['1', 'uncommitted changes'], edited);
+    assert.equal(head(f.clone), before, edited);
+    assert.deepEqual(bytesOf(f.clone, LEFTOVERS), { ...LEFTOVERS, [edited]: 'changed after the comparison\n' }, edited);
+  }
+});
+
 // Runs after every row above: the catch-up only ever ran the allowed read verbs and one fast-forward.
 test('21: every git call the catch-up made used only the allowed verbs, and never a moving or forcing one', () => {
   assert.ok(ALL_CALLS.length > 50, 'the rows above made real calls');

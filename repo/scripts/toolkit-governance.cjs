@@ -584,10 +584,14 @@ class ToolkitGovernanceCli {
     // here as ready no longer gets its session-start line.
     const storeCheck = merged?.store?.repository ? this.#storeCheck(state, merged.store.repository, app) : null;
     const specs = governanceBank.governanceBankSpecs({ state, task: task ? task.value : 'unset', train: switches.train, merged, mergedRead: read, permissions, adoption, ciShards, app, copies: copiesRow(copies), storeCheck });
-    const reference = governanceBank.bankReference(specs);
     // What the owner sees: the guided questions where governance is not on, the summary where it is,
     // or one line where neither can be shown yet.
     const view = this.#view({ state, specs, adoption, found, merged, read, switches, permissions, app, storeCheck, copies });
+    // The programme file update offered is part of what was shown: a yes to one offer never applies to another.
+    const shownReference = governanceBank.bankReference(specs);
+    const reference = view.update?.offer
+      ? require('./toolkit-question-bank.cjs').bankReferenceFromIdentity(crypto.createHash('sha256').update(JSON.stringify([shownReference, view.update.offer, view.update.open?.url || null])).digest('hex'))
+      : shownReference;
     if (answers === null) {
       if (json) { this.#print(true, { state: state.state, bank_reference: reference, questions: specs }, []); return BANK_SHOWN; }
       if (view.kind === 'line') { this.#print(false, {}, [...view.lines, '', BANK_UNREAD_AGENTS]); return view.code; }
@@ -638,7 +642,7 @@ class ToolkitGovernanceCli {
     const answer = answers.replace(REFERENCE_PREFIX, '');
     // After an answer was used, a plain yes, no or later meant for something else is never read as a
     // second one (a stray yes after "later" once made the store, parent issue and pull request).
-    if (entry.used === true && view.kind === 'guided' && PLAIN_WORD.test(answer)) return again([ANSWER_USED], REPLY_AGAIN);
+    if (entry.used === true && PLAIN_WORD.test(answer)) return again([ANSWER_USED], view.kind === 'summary' ? CHANGE_ANOTHER : REPLY_AGAIN);
     let chosen;
     try { chosen = view.parse(answer); }
     catch (error) {
@@ -667,7 +671,8 @@ class ToolkitGovernanceCli {
       try { const result = require('./toolkit-governance-ready.cjs').readiness(state, this.#registryOptions); held = result.applies && !result.ready; } catch { held = false; }
       const shards = specs.some(spec => spec.id === 'ci-shards' && spec.shards_default);
       const cleanable = Boolean(copies && copies.ok && copiesRow(copies)?.files > 0);
-      return { kind: 'summary', text: summary.renderSummary(facts, { held }), agents: governanceBank.agentsSummary(), parse: reply => summary.parseChange(reply, { copies: cleanable, shards }) };
+      const update = Boolean(facts.update?.offer && !facts.update.open);
+      return { kind: 'summary', text: summary.renderSummary(facts, { held }), agents: governanceBank.agentsSummary(), update: facts.update, parse: reply => summary.parseChange(reply, { copies: cleanable, shards, update }) };
     }
     // The search's own reason is for the logs, not the owner: nothing can be set up until it works.
     if (adoption && adoption.blocked) return { kind: 'line', code: 1, lines: ['GitHub could not be read just now, so Toolkit cannot find or suggest the evidence store and parent issue yet, and the setup questions are not shown. Nothing changed. Type toolkit governance again in a moment.'] };
@@ -712,12 +717,61 @@ class ToolkitGovernanceCli {
       appCommand: state.repository ? governanceApp.setupCommand(state.repository, store) : null,
       copies: copiesRow(copies),
       stale: read && !read.fresh ? read.refresh_error || 'no fresh read' : null,
+      update: this.#programmeUpdate(state, merged, read),
     };
+  }
+
+  // Whether the merged programme file is behind this Toolkit (toolkit-governance-summary.cjs
+  // programmeUpdate), from a fresh read only: { offer, open } (an update pull request already open),
+  // or null. Reads the default branch's protection (never in tests without a reader).
+  #programmeUpdate(state, merged, read) {
+    if (!merged || !read?.fresh || !state.root || !state.repository) return null;
+    let running = null;
+    try { running = require('./toolkit-version.cjs').readToolkitVersion(); } catch { running = null; }
+    let branchChecks = null;
+    if (this.#protectionReader || (this.#registryOptions.testOnly !== true && process.env.TOOLKIT_GOVERNANCE_OFFLINE !== '1')) {
+      try { branchChecks = summary.branchRequiredChecks((this.#protectionReader || protection.ghProtectionReader)(state.repository)); } catch { branchChecks = null; }
+    }
+    let keyReadable = Object.hasOwn(merged, 'min_toolkit');
+    if (!keyReadable) {
+      try { const copies = cleanupRoute.sweepCopiesWithoutMinToolkit(state.root); keyReadable = !copies.tooOld.length && !copies.unchecked.length; } catch { keyReadable = false; }
+    }
+    const offer = summary.programmeUpdate({
+      binding: merged, running, holdFrom: require('./toolkit-governance-ready.cjs').HOLD_FROM, branchChecks,
+      ownChecks: summary.mergedOwnChecks(state.root, state.merged?.commit), keyReadable,
+    });
+    if (!offer) return null;
+    let open = null;
+    if (this.#switchTransport) { try { open = this.#switchTransport.openProgrammeUpdate(state.repository); } catch { open = null; } }
+    return { offer, open };
+  }
+
+  // The owner's yes to the programme file update: one pull request from the exact merged text.
+  #prepareProgrammeUpdate(root, update) {
+    if (!this.#switchTransport) throw new GovernanceCliError('GitHub cannot be reached from here, so no pull request was prepared. Nothing was written.');
+    const identity = governance.readIdentity(root);
+    const entry = bindingCache.readBindingCache(identity, governance.userStateDirectory(this.#registryOptions));
+    let parsed;
+    try { parsed = JSON.parse(String(entry?.text).replace(/^﻿/, '')); } catch { parsed = null; }
+    if (!parsed || parsed.schema !== 'toolkit.programme-binding.v2' || parsed.governance !== 'enabled') throw new GovernanceCliError('The merged binding is not an enabled version 2 binding, so it cannot be updated yet. Nothing was written.');
+    const text = summary.programmeUpdateText(entry.text, parsed, update);
+    let proposal;
+    try { proposal = JSON.parse(text.replace(/^﻿/, '')); } catch { proposal = null; }
+    if (!proposal || governance.bindingProblems(proposal, identity).length) throw new GovernanceCliError('The updated binding would not be valid, so no pull request was prepared. Nothing was written.');
+    try {
+      return this.#switchTransport.publishProgrammeUpdate(proposal.repository, entry.text, text, update);
+    } catch (error) {
+      throw new GovernanceCliError(error.code === 'SWITCH_BASE_CHANGED'
+        ? `The binding on the default branch changed since this computer read it. Run ${CMD('status')}, then ask again. Nothing was written.`
+        : error.code === 'UPDATE_PR_OPEN'
+          ? `A programme file update is already open, so no second one was prepared: ${error.url}. Merge it, or close it and answer again. Nothing was written.`
+          : `The programme file update could not be prepared (${error.code || 'unavailable'}). Check GitHub access and open pull requests before retrying.`);
+    }
   }
 
   // The answer applied: the guided setup's turn-on, off or later, or a change after setup.
   #applyView(view, state, task, chosen, found, specs) {
-    if (view.kind === 'summary') return this.#applyChange(state, task, chosen, specs);
+    if (view.kind === 'summary') return this.#applyChange(state, task, chosen, specs, view.update);
     // Parallel CI shards are no question: the turn-on takes Toolkit's default for them.
     const shards = specs.find(spec => spec.id === 'ci-shards' && spec.shards_default);
     return this.#applyBank(state, { ...chosen, ...(chosen.governance === 'on' && shards ? { ciShards: shards.shards_default } : {}) }, found);
@@ -851,8 +905,21 @@ class ToolkitGovernanceCli {
 
   // A change the owner asked for after setup, in words (toolkit-governance-summary.cjs parseChange): at
   // most one pull request, which applies only after the owner merges it.
-  #applyChange(state, task, chosen, specs) {
+  #applyChange(state, task, chosen, specs, update = null) {
     if (chosen.governance === 'off') return this.#prepareOff();
+    if (chosen.update === 'no') {
+      this.#print(false, {}, ['Programme file: not updated. Nothing was written; Toolkit asks again next time.']);
+      return 0;
+    }
+    if (chosen.update === 'yes') {
+      if (!update?.offer || update.open) {
+        this.#print(false, {}, [update?.open ? `A programme file update is already open: ${update.open.url}. Merge it, or close it and answer again. Nothing was written.` : 'The programme file is already up to date. Nothing was written.']);
+        return 0;
+      }
+      const prepared = this.#prepareProgrammeUpdate(state.root, update.offer);
+      this.#print(false, {}, [`Prepared ${prepared.url}: it ${summary.updateWords(update.offer)}, and changes nothing else. It applies only after you merge it.`]);
+      return 0;
+    }
     if (chosen.changeStore) {
       this.#print(false, {}, ['A new evidence store is set up with the controller: say change store in your controller chat, and it sets up the new store with you. Nothing changed here.']);
       return 0;
