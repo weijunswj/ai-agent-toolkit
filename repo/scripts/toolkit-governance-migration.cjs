@@ -94,8 +94,16 @@ function protectionOffer(result) {
 // no job produces; P4: a job that can be skipped or never reports), each one line naming the check
 // and its file, said once (an unreadable workflow file is named under both). They are fixed in a pull
 // request by the repository's controller, never on GitHub.
+const workflowChecks = result => ['P3', 'P4'].map(id => result?.checks?.[id]).filter(check => check && ['drift', 'unverified'].includes(check.status));
 function workflowNotes(result) {
-  return [...new Set(['P3', 'P4'].flatMap(id => (result?.checks?.[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details : [])))];
+  return [...new Set(workflowChecks(result).flatMap(check => check.details))];
+}
+// The same, each with what it is about ({ kind, check, file, detail }: producerVerdict in
+// toolkit-governance-protection.cjs), for filing as the controller's task.
+function workflowFindings(result) {
+  const found = new Map();
+  for (const finding of workflowChecks(result).flatMap(check => check.findings)) if (!found.has(finding.detail)) found.set(finding.detail, finding);
+  return [...found.values()];
 }
 
 // What a protection candidate needs changed, for the run's own log: the settings that drift, then the
@@ -111,14 +119,14 @@ function protectionNotes(result) {
 // It never reads, copies, repairs or writes a historical local governance answer. Keep the command
 // name for existing operators until the explicit migration route separates inventory and maintenance.
 class GovernanceMaintenance {
-  #stdout; #confirm; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #ownRulesetWriter; #firstSweep; #now;
+  #stdout; #confirm; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #ownRulesetWriter; #firstSweep; #weaknessTasks; #now;
   // Every step line this run said, kept in its private run record. The owner never sees this log:
   // the finish's outcome is what they read (SQAG, 28 November 2026: about 20 raw lines after a yes,
   // the same CI line three times).
   #log = [];
 
   // `firstSweep` runs the first-install sweep (toolkit-governance-first-sweep.cjs), or null where it cannot run here.
-  constructor({ stdout, confirm, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, ownRulesetWriter = null, firstSweep = null, now = () => new Date() }) {
+  constructor({ stdout, confirm, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, ownRulesetWriter = null, firstSweep = null, weaknessTasks = null, now = () => new Date() }) {
     this.#stdout = stdout;
     this.#confirm = confirm;
     this.#interactive = interactive === true;
@@ -133,6 +141,7 @@ class GovernanceMaintenance {
     this.#securityFileWriter = securityFileWriter || security.writeSecurityFiles;
     this.#ownRulesetWriter = ownRulesetWriter || protection.ghOwnRulesetWriter;
     this.#firstSweep = firstSweep;
+    this.#weaknessTasks = weaknessTasks;
     this.#now = now;
   }
 
@@ -220,7 +229,19 @@ class GovernanceMaintenance {
     const owed = sweep ? this.#sweepEnd(slug, { held, reports }) : null;
     // Security files written into this working tree still need a pull request; the result says so.
     const files = securities.flatMap(entry => (entry.files || []).filter(file => file.result === 'written').map(file => file.file));
-    return { result: retry.length ? 'failed' : 'done', reason: [...new Set(retry)].join('; '), changed, on, unavailable, held, controller: [...new Set(controller)], reports, files, ...(owed ? { sweep_owed: owed } : {}) };
+    return { result: retry.length ? 'failed' : 'done', reason: [...new Set(retry)].join('; '), changed, on, unavailable, held, controller: this.#fileWeaknesses(rows[0], controller), reports, files, ...(owed ? { sweep_owed: owed } : {}) };
+  }
+
+  // Each workflow weakness for the controller, filed once as a child task under the programme parent
+  // (toolkit-governance-weakness.cjs, owner decision of 28 November 2026): [{ note, task }], where
+  // task says whether it was filed, is already open, or why it was not filed.
+  #fileWeaknesses(row, findings) {
+    if (!findings.length) return [];
+    const parent = governance.mergedBinding(row.root, this.#registryOptions)?.parents?.[0]?.issue ?? null;
+    let tasks;
+    try { tasks = this.#weaknessTasks ? this.#weaknessTasks.file(row.slug, parent, findings) : null; } catch { tasks = null; }
+    const why = this.#weaknessTasks ? 'the GitHub request failed' : 'this run does not write to GitHub';
+    return findings.map(finding => ({ note: finding.detail, task: tasks?.find(entry => entry.finding.detail === finding.detail) || { state: 'not-filed', parent, why } }));
   }
 
   // What this run wrote and read back, each once, in plain words: the rulesets added, the repository's
@@ -306,7 +327,7 @@ class GovernanceMaintenance {
     } else if (protection.SETTINGS_CHECKS.some(id => result.checks[id]?.status === 'unverified')) retry.push(`${name} could not be read back`);
     else {
       const settings = protection.SETTINGS_CHECKS.flatMap(id => (result.checks[id]?.status === 'drift' ? result.checks[id].details : []));
-      const workflows = workflowNotes(result);
+      const workflows = workflowFindings(result);
       controller.push(...workflows);
       if (settings.length) held.push({ name, step: `change by hand: ${settings.join('; ')}. ${require('./toolkit-governance-summary.cjs').WHERE.protection}. Then say refresh governance, and your agent checks it again.` });
       else if (workflows.length) on.push(name);

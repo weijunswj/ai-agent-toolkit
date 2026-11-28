@@ -275,7 +275,7 @@ test('dependency auto-merge waiting on a workflow fix for the controller waits w
   const line = finishing.entryFor(ctx.registryOptions, state.repository_id).line;
   assert.equal(code, 0, `${run.out.join('')}\n${line}`);
   assert.match(line, /^Toolkit: governance setup finished here, apart from what is left below\./);
-  assert.match(line, /Your controller fixes this in a pull request: "validate" \(\.github\/workflows\/ci\.yml\): its pull_request trigger lists activity types/);
+  assert.match(line, /Your controller fixes this in a pull request: "validate" \(\.github\/workflows\/ci\.yml\): its pull_request trigger lists activity types[^.]*\. Not filed as a task \(this run does not write to GitHub\); your controller files it\./, 'where no task can be filed, it says why');
   assert.match(line, /Waiting for you, some dependency and security settings: dependency auto-merge waits until your controller's workflow fix above has landed\./);
   assert.doesNotMatch(line, /change by hand|default-branch protection: /, 'the workflow is not the owner\'s by hand');
 });

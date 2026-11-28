@@ -130,7 +130,7 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #proposals; #proposalsLive; #pullOutcome; #stdout; #stderr; #ask; #confirm; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #ownRulesetWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #firstSweep; #copiesReader; #doneWhen;
+  #proposals; #proposalsLive; #pullOutcome; #stdout; #stderr; #ask; #confirm; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #ownRulesetWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #firstSweep; #weaknessTasks; #copiesReader; #doneWhen;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
@@ -143,7 +143,7 @@ class ToolkitGovernanceCli {
   // ticket is bound to) are for tests too, as are `firstSweep` (the finish's first-install sweep),
   // `copiesReader` (version => the release identity check's read of this computer's Toolkit copies) and
   // `doneWhenBackfill` ((root, { apply }) => the DONE WHEN backfill's result, toolkit-governance-done-when.cjs).
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, confirm = null, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, ownRulesetWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, firstSweep = null, copiesReader = null, doneWhenBackfill = null } = {}) {
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, confirm = null, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, ownRulesetWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, firstSweep = null, weaknessTasks = null, copiesReader = null, doneWhenBackfill = null } = {}) {
     const pulls = proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport());
     this.#proposals = new GovernanceProposals({ registryOptions, ...(cloudWorkflows ? { cloudWorkflows } : {}), transport: pulls });
     // The turn-on pull request's outcome, read before a post-merge finish (offline and in tests: unread).
@@ -170,6 +170,8 @@ class ToolkitGovernanceCli {
     this.#securityWriter = securityWriter;
     this.#securityFileWriter = securityFileWriter;
     this.#firstSweep = firstSweep;
+    // Files the CI weaknesses a settings fix finds as the controller's tasks; none where GitHub is not written.
+    this.#weaknessTasks = weaknessTasks || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new (require('./toolkit-governance-weakness.cjs').WeaknessTasks)());
     this.#hookReader = hookReader || (() => hookCapability.hookCapability());
     this.#appReader = appReader;
     this.#switchTransport = switchTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport());
@@ -800,7 +802,7 @@ class ToolkitGovernanceCli {
       rulesetReader: this.#rulesetReader, rulesetCreator: this.#rulesetCreator, stateRulesetCreator: this.#stateRulesetCreator,
       protectionReader: this.#protectionReader, protectionWriter: this.#protectionWriter, ownRulesetWriter: this.#ownRulesetWriter,
       securityReader: this.#securityReader, securityWriter: this.#securityWriter, securityFileWriter: this.#securityFileWriter,
-      firstSweep,
+      firstSweep, weaknessTasks: this.#weaknessTasks,
     });
   }
 

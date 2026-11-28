@@ -635,50 +635,55 @@ function producerVerdict(requiredChecks, workflows, defaultBranch) {
   const missing = [];
   const p4 = [];
   const p4Unverified = [];
-  const unreadable = [
-    ...workflows.filter(entry => entry.error).map(entry => `${entry.file} could not be read`),
-    ...workflows.filter(entry => entry.workflow && entry.workflow.problems && entry.workflow.problems.length).map(entry => `${entry.file}: ${entry.workflow.problems.join('; ')}`),
-  ];
+  // Each detail line with what it is about ({ kind, check, file }), so a weakness can be filed for the
+  // repository's controller (toolkit-governance-weakness.cjs) without reading the words back.
+  const about = new Map();
+  const say = (list, detail, kind, check, file) => { list.push(detail); if (!about.has(detail)) about.set(detail, { kind, check, file }); };
+  const unreadable = [];
+  for (const entry of workflows.filter(item => item.error)) say(unreadable, `${entry.file} could not be read`, 'workflow-unreadable', null, entry.file);
+  for (const entry of workflows.filter(item => item.workflow && item.workflow.problems && item.workflow.problems.length)) say(unreadable, `${entry.file}: ${entry.workflow.problems.join('; ')}`, 'workflow-unreadable', null, entry.file);
   const neverReports = [];
   for (const check of requiredChecks) {
     const producers = [];
     for (const entry of workflows) {
       if (!entry.workflow) continue;
       for (const job of entry.workflow.jobs) {
-        if (job.name_unreadable) p3Unverified.push(`${entry.file} ${job.key} has an empty or unreadable name, so it could produce "${check}"`);
+        if (job.name_unreadable) say(p3Unverified, `${entry.file} ${job.key} has an empty or unreadable name, so it could produce "${check}"`, 'name-unclear', check, entry.file);
         else if (job.dynamic_name || job.matrix || job.reusable) {
           const problem = derivedNameProblem(job, check);
-          if (problem) p3Unverified.push(`${entry.file} ${job.key} ${problem}`);
+          if (problem) say(p3Unverified, `${entry.file} ${job.key} ${problem}`, 'name-unclear', check, entry.file);
         } else if (job.name === check) producers.push({ file: entry.file, workflow: entry.workflow, job });
-        else if (job.name.toLowerCase() === check.toLowerCase()) p3Unverified.push(`${entry.file} ${job.key} is named "${job.name}", which differs from "${check}" only in letter case`);
+        else if (job.name.toLowerCase() === check.toLowerCase()) say(p3Unverified, `${entry.file} ${job.key} is named "${job.name}", which differs from "${check}" only in letter case`, 'name-unclear', check, entry.file);
       }
     }
     if (producers.length === 0) missing.push(check);
     // No producer among the workflows read is drift only when every workflow could be read.
-    if (producers.length === 0 && unreadable.length) { p3Unverified.push(`no readable workflow job is named "${check}"`); continue; }
+    if (producers.length === 0 && unreadable.length) { say(p3Unverified, `no readable workflow job is named "${check}"`, 'no-producer', check, null); continue; }
     if (producers.length !== 1) {
-      p3.push(producers.length === 0
-        ? `no workflow job is named "${check}"`
-        : `"${check}" is produced by ${producers.length} jobs (${producers.map(item => `${item.file} ${item.job.key}`).join(', ')})`);
+      if (producers.length === 0) say(p3, `no workflow job is named "${check}"`, 'no-producer', check, null);
+      else say(p3, `"${check}" is produced by ${producers.length} jobs (${producers.map(item => `${item.file} ${item.job.key}`).join(', ')})`, 'many-producers', check, producers[0].file);
       continue;
     }
     const [{ file, workflow, job }] = producers;
     const trigger = maskingTrigger(workflow, defaultBranch);
-    if (trigger && trigger.unverified) p4Unverified.push(`"${check}" (${file}): ${trigger.unverified}`);
-    else if (trigger) { p4.push(`"${check}" (${file}): ${trigger}`); neverReports.push(check); }
-    if (job.unreadable && job.unreadable.length) { p4Unverified.push(`"${check}" (${file}): ${job.unreadable.join('; ')}`); continue; }
+    if (trigger && trigger.unverified) say(p4Unverified, `"${check}" (${file}): ${trigger.unverified}`, 'trigger', check, file);
+    else if (trigger) { say(p4, `"${check}" (${file}): ${trigger}`, 'trigger', check, file); neverReports.push(check); }
+    if (job.unreadable && job.unreadable.length) { say(p4Unverified, `"${check}" (${file}): ${job.unreadable.join('; ')}`, 'job-unclear', check, file); continue; }
     const safeIf = job.if !== null && SAFE_IF.test(job.if.trim());
-    if (job.if !== null && !safeIf) p4.push(`"${check}" (${file}) has a job condition other than \`always()\` or \`!cancelled()\`, so it can be skipped, and a skipped job reports success`);
+    if (job.if !== null && !safeIf) say(p4, `"${check}" (${file}) has a job condition other than \`always()\` or \`!cancelled()\`, so it can be skipped, and a skipped job reports success`, 'skippable', check, file);
     else if (job.needs.length > 0) {
-      if (!safeIf) p4.push(`"${check}" (${file}) waits for ${job.needs.join(', ')} without \`if: always()\`, so a failed one skips it and a skipped job reports success`);
-      else if (job.aggregate_problem) p4Unverified.push(`"${check}" (${file}) runs after ${job.needs.join(', ')}, but nothing proves it fails when one of them did not succeed: ${job.aggregate_problem}`);
+      if (!safeIf) say(p4, `"${check}" (${file}) waits for ${job.needs.join(', ')} without \`if: always()\`, so a failed one skips it and a skipped job reports success`, 'skippable', check, file);
+      else if (job.aggregate_problem) say(p4Unverified, `"${check}" (${file}) runs after ${job.needs.join(', ')}, but nothing proves it fails when one of them did not succeed: ${job.aggregate_problem}`, 'job-unclear', check, file);
     }
   }
   const p3Status = p3.length ? 'drift' : (p3Unverified.length || unreadable.length) ? 'unverified' : 'ok';
   const p4Status = p4.length ? 'drift' : (p4Unverified.length || unreadable.length) ? 'unverified' : 'ok';
+  const p3Details = p3.length ? p3 : [...p3Unverified, ...unreadable];
+  const p4Details = p4.length ? p4 : [...p4Unverified, ...unreadable];
+  const findings = details => details.map(detail => ({ ...about.get(detail), detail }));
   return {
-    P3: { status: p3Status, details: p3.length ? p3 : [...p3Unverified, ...unreadable], missing },
-    P4: { status: p4Status, details: p4.length ? p4 : [...p4Unverified, ...unreadable], never_reports: neverReports },
+    P3: { status: p3Status, details: p3Details, findings: findings(p3Details), missing },
+    P4: { status: p4Status, details: p4Details, findings: findings(p4Details), never_reports: neverReports },
   };
 }
 

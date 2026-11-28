@@ -18,7 +18,7 @@ Relay rule: paste setup's question bank exactly as printed, one table per sectio
 
 ## Command list
 
-If the whole message looks like a typed Toolkit command (such as `toolkit cmd`, `toolkit governance` or `refresh governance`), run `node <Toolkit>/repo/scripts/toolkit-commands.cjs "<the message>"` from the managed Toolkit checkout and do exactly what the line it prints says. For `toolkit governance` that is the guided governance setup (its summary table where governance is on), never a status or check summary. After the owner's answer, show only Toolkit's short result as printed (what changed, what is left and who acts, then the table), never a raw step log, and give a code or CI fix to the repository's controller as a pull request, never to the owner by hand.
+If the whole message looks like a typed Toolkit command (such as `toolkit cmd`, `toolkit governance` or `refresh governance`), run `node <Toolkit>/repo/scripts/toolkit-commands.cjs "<the message>"` from the managed Toolkit checkout and do exactly what the line it prints says. For `toolkit governance` that is the guided governance setup (its summary table where governance is on), never a status or check summary. After the owner's answer, show only Toolkit's short result as printed (what changed, what is left and who acts, then the table), never a raw step log, and give a code or CI fix to the repository's controller as a pull request (Toolkit files it once as a child task under the programme parent), never to the owner by hand.
 
 ## Controller takeover
 

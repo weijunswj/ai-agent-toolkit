@@ -323,8 +323,14 @@ function settingsRows(reads) {
 // with where on GitHub to change what only the owner can (`where`). All on is just On, and every
 // part unread for the same one reason is said once, in the cell.
 // The failure this prevents: SQAG's protection cell held about 12 clauses (owner UAT, 28 November 2026).
-// A change to the repository's own workflow files, handed to its controller as one line.
-const controllerLine = note => `Your controller fixes this in a pull request: ${String(note).replace(/\.$/, '')}.`;
+// A change to the repository's own workflow files, handed to its controller as one line: a detail line,
+// or { note, task } after a settings fix, where task says where it was filed as the controller's task
+// (toolkit-governance-weakness.cjs filedWords).
+const controllerLine = item => {
+  const note = typeof item === 'string' ? item : item.note;
+  const filed = typeof item === 'string' ? '' : require('./toolkit-governance-weakness.cjs').filedWords(item.task);
+  return `Your controller fixes this in a pull request: ${String(note).replace(/\.$/, '')}.${filed}`;
+};
 // The cell's pointer to the items under the table; the short table after a yes has none.
 const LISTED_BELOW = ', listed below';
 

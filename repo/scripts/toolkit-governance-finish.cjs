@@ -74,11 +74,11 @@ function listed(items) { return items.length > 1 ? `${items.slice(0, -1).join(',
 // 'done' is final and shown once by the next session, then dropped; 'failed' (something to retry)
 // stays pending. `files` are security files the finish wrote into this working tree, which still
 // need a pull request.
-// `controller` are problems in the repository's own workflow files, for its controller to fix in a
-// pull request, never a by-hand step for the owner.
+// `controller` ([{ note, task }]) are problems in the repository's own workflow files, for its
+// controller to fix in a pull request and filed as its task, never a by-hand step for the owner.
 function resultLine(outcome) {
   const on = outcome.on || [], unavailable = outcome.unavailable || [], held = outcome.held || [], files = outcome.files || [];
-  const controller = [...new Set(outcome.controller || [])];
+  const controller = outcome.controller || [];
   const parts = [outcome.result === 'done'
     ? `Toolkit: governance setup finished here${held.length || controller.length || files.length ? ', apart from what is left below' : ''}.`
     : `Toolkit: governance setup could not finish here yet (${outcome.reason || 'GitHub could not be written'}); it is tried again in a later session.`];

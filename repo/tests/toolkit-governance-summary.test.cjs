@@ -742,8 +742,19 @@ test('the summary hands a skippable required CI job to the repository\'s control
 
 test('after the yes, the SQAG shape shows each change once, hands the CI job to the controller once, then the table, with no step log', async t => {
   const { ctx, github } = ownRulesetGitHub(t, { requiredChecks: ['plain-text', 'validate'], ci: CI_SKIPPABLE, noForcePush: false });
+  // The CI weakness is filed as the controller's child task under the programme parent (#1), once
+  // (owner decision INT-TK421-1399).
+  const issues = [];
+  const { WeaknessTasks } = require(path.join(scripts, 'toolkit-governance-weakness.cjs'));
+  ctx.cli = { ...ctx.cli, weaknessTasks: new WeaknessTasks({ request: (method, endpoint, input) => {
+    if (method === 'GET') return { ok: true, value: issues.filter(issue => issue.state === 'open') };
+    if (endpoint === `repos/${SLUG}/issues`) { issues.push({ number: 41, id: 4100, state: 'open', ...input }); return { ok: true, value: { number: 41, id: 4100 } }; }
+    if (endpoint === `repos/${SLUG}/issues/1/sub_issues`) { issues.find(issue => issue.id === input.sub_issue_id).parent = 1; return { ok: true, value: {} }; }
+    return { ok: false, reason: 'gh-request-failed' };
+  } }) };
   assert.equal((await run(ctx, ['setup'])).code, 0);
   const yes = await reply(ctx, '1A');
+  assert.deepEqual(issues.map(issue => [issue.number, issue.parent, issue.title]), [[41, 1, 'CI: Required check "validate" can be skipped and still count as passed (.github/workflows/ci.yml)']]);
   assert.equal(yes.code, 0, yes.err);
   assert.deepEqual(github.writes.map(entry => entry[0]), ['no-force-push ruleset', 'own ruleset', 'toolkit ruleset']);
   const out = yes.out.slice(0, yes.out.indexOf('\nAgents:'));
@@ -757,7 +768,7 @@ test('after the yes, the SQAG shape shows each change once, hands the CI job to 
     '- The "Toolkit: protected default branch" ruleset on the default branch, added',
   ], out);
   // What is left, with who acts: the CI job once, for the controller, naming its file and job.
-  assert.deepEqual(lines.slice(at('**Left to do:**'), at('**Left to do:**') + 2), ['**Left to do:**', `- Your controller fixes this in a pull request: ${CI_LINE}.`], out);
+  assert.deepEqual(lines.slice(at('**Left to do:**'), at('**Left to do:**') + 2), ['**Left to do:**', `- Your controller fixes this in a pull request: ${CI_LINE}. Filed as #41 under #1.`], out);
   assert.equal(out.split('secret-scan without').length - 1, 1, 'the CI line is said once');
   assert.doesNotMatch(out, /by hand|Waiting for you/, 'nothing is left to the owner by hand');
   // Then the table, read again after the writes, with no pointer to items it does not list.
