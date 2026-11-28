@@ -161,8 +161,10 @@ class GovernanceMaintenance {
     if (state.state !== 'ENABLED' || state.programme_records_bind !== true || !slug) return { result: 'not-ready' };
     const rows = [{ root: path.resolve(root), state, slug }];
     const rulesets = [...this.#finishRulesets(rows), ...this.#finishStateRulesets(rows)];
-    const protections = this.#finishProtection(rows);
+    // The owner's own ruleset changes go first, so the protection plan, its by-hand notes and Toolkit's
+    // read-back all see them: nothing the yes changes is ever listed to change by hand.
     const owned = Array.isArray(ownRulesets) ? this.#applyOwnRulesets(rows[0], ownRulesets) : [];
+    const protections = this.#finishProtection(rows);
     const securities = await this.#applySecurity(rows);
     if (rulesets.length || owned.length || protections.length || securities.length) this.#writeRecord([], [...rulesets, ...owned], protections, securities);
     const on = [], unavailable = [], held = [], retry = [], reports = [];
@@ -374,7 +376,7 @@ class GovernanceMaintenance {
       const check = result.checks[id];
       if (check && check.status === 'drift') notes.push(...check.details);
     }
-    if (notes.length) this.#say([`${row.slug}: change by hand (Toolkit edits only its own ruleset):`, ...notes.map(note => `  - ${note}`)]);
+    if (notes.length) this.#say([`${row.slug}: change by hand:`, ...notes.map(note => `  - ${note}`)]);
   }
 
   // Reads only: the repositories whose default branch the Toolkit ruleset would fix, and notes on the
@@ -481,4 +483,4 @@ class GovernanceMaintenance {
 
 
 
-module.exports = Object.freeze({ GovernanceMaintenance, appendRunRecord, protectionNotes, protectionOffer, SettingsOperationHistory, RECORD_BASENAME });
+module.exports = Object.freeze({ GovernanceMaintenance, appendRunRecord, protectionOffer, SettingsOperationHistory, RECORD_BASENAME });

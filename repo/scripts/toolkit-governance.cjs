@@ -752,16 +752,18 @@ class ToolkitGovernanceCli {
     if (!offer) return null;
     let open = null;
     if (this.#switchTransport) { try { open = this.#switchTransport.openProgrammeUpdate(state.repository); } catch { open = null; } }
-    if (open) return { offer, open };
     // One refresh, one binding pull request: while Toolkit's refresh pull request is open and adds a
     // check of Toolkit's own that the update would not list, the update waits for it to land, so the
     // owner never merges two binding pull requests in a row (SQAG, 28 November 2026: one for min_toolkit
     // and checks, then one for personal-data once the guard landed). Listing the check before its
-    // workflow is on the default branch would require a check no job produces yet.
+    // workflow is on the default branch would require a check no job produces yet. An update already
+    // open stays the step, and says so, since it was made before the refresh added the check.
     let refresh = null;
     if (this.#switchTransport) { try { refresh = this.#switchTransport.openRefresh(state.repository); } catch { refresh = null; } }
     const coming = refresh ? refresh.checks.filter(check => !offer.required_checks.includes(check)) : [];
-    if (coming.length) return { offer: null, open: null, refresh: { number: refresh.number, url: refresh.url, checks: coming } };
+    const waiting = coming.length ? { number: refresh.number, url: refresh.url, checks: coming } : null;
+    if (open) return { offer, open, ...(waiting ? { refresh: waiting } : {}) };
+    if (waiting) return { offer: null, open: null, refresh: waiting };
     return { offer, open };
   }
 

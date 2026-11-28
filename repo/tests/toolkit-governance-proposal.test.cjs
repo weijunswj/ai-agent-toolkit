@@ -873,3 +873,34 @@ test('a disabled repository turned back on: the turn-on names the post-merge set
   const after = stdout.join('').slice(shown[0].length);
   assert.doesNotMatch(after, /required_checks|migrate|no required checks yet/, 'Toolkit sets the checks; the owner edits nothing and runs no migrate');
 });
+
+// One binding pull request per refresh (G-4e): openRefresh reads only this repository's own Toolkit
+// refresh pull request and the checks of Toolkit's own its head defines (G2 round 1, L3).
+test('openRefresh reads the repository\'s own refresh pull request and the own checks its head defines', () => {
+  const sha = 'a'.repeat(40);
+  const base64 = text => Buffer.from(text).toString('base64');
+  const guard = 'name: personal-data\non: [pull_request]\njobs:\n  personal-data:\n    runs-on: ubuntu-latest\n';
+  const plain = 'name: plain-text\non: [pull_request]\njobs:\n  plain-text:\n    runs-on: ubuntu-latest\n';
+  const refresh = (head = {}) => ({ number: 40, html_url: 'https://github.com/acme/app/pull/40', head: { ref: 'toolkit/refresh-cloud-workflows', sha, repo: { full_name: 'acme/app' }, ...head } });
+  const read = (pulls, files) => {
+    const calls = [];
+    const transport = new GitHubProposalTransport({ run(args) {
+      calls.push(args.join(' '));
+      if (args[0] === 'auth') return '';
+      if (args[1] === 'user') return JSON.stringify({ login: 'fixture' });
+      if (/\/pulls\?/.test(args[1])) return JSON.stringify(pulls);
+      const file = /contents\/(.+)\?ref=(.+)$/.exec(args[1]);
+      if (file && file[2] === sha && file[1] in files) return JSON.stringify({ type: 'file', encoding: 'base64', content: base64(files[file[1]]) });
+      throw Object.assign(new Error('not found'), { code: 'PROPOSAL_NOT_FOUND' });
+    } });
+    return { result: transport.openRefresh('acme/app'), calls };
+  };
+  const both = read([refresh()], { '.github/workflows/personal-data-guard.yml': guard, '.github/workflows/plain-text.yml': plain });
+  assert.deepEqual(both.result, { number: 40, url: 'https://github.com/acme/app/pull/40', checks: ['personal-data', 'plain-text'] });
+  assert.ok(both.calls.some(call => call.includes('pulls?state=open&head=acme%3Atoolkit%2Frefresh-cloud-workflows')), both.calls.join('\n'));
+  assert.ok(both.calls.every(call => !/--method/.test(call)), 'reads only');
+  assert.deepEqual(read([refresh()], {}).result.checks, [], 'a refresh that adds no own check');
+  assert.equal(read([], {}).result, null, 'no refresh open');
+  assert.equal(read([refresh({ repo: { full_name: 'someone/app' } })], { '.github/workflows/personal-data-guard.yml': guard }).result, null, 'a fork\'s branch of the same name is not this repository\'s refresh');
+  assert.equal(read([refresh({ sha: 'not-a-sha' })], {}).result, null, 'a head that is not a commit is not read');
+});

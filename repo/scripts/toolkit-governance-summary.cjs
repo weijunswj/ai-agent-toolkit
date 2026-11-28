@@ -218,7 +218,7 @@ const WHERE = Object.freeze({
 // with why). `fix` lists what one yes changes, the same writes a turn-on's post-merge finish makes
 // (toolkit-governance-migration.cjs finish), or is null when nothing drifted that Toolkit fixes.
 function settingsRows(reads) {
-  const { protectionOffer, protectionNotes } = require('./toolkit-governance-migration.cjs');
+  const { protectionOffer } = require('./toolkit-governance-migration.cjs');
   const rulesets = require('./toolkit-governance-ruleset.cjs');
   const protection = require('./toolkit-governance-protection.cjs');
   const security = require('./toolkit-governance-security.cjs');
@@ -272,14 +272,13 @@ function settingsRows(reads) {
       const after = own.length && branch.own_after ? { ...branch.checks, ...branch.own_after } : branch.checks;
       const left = protection.SETTINGS_CHECKS.flatMap(id => (after[id]?.status === 'drift' ? after[id].details : []));
       rules.drift.push(...settingsDrift.filter(detail => !left.includes(detail)));
-      const changeByHand = left.length > 0 || ['P3', 'P4'].some(id => branch.checks[id]?.status === 'drift');
-      const notes = branch.status === 'drift' ? protectionNotes({ checks: after }) : workflowNotes;
-      const why = [
-        offer.fixes && offer.unproduced.length ? `Toolkit's ruleset is not offered while no workflow job produces ${offer.unproduced.map(check => `"${check}"`).join(', ')}` : '',
-        offer.fixes && offer.silent.length ? `Toolkit's ruleset is not offered while ${offer.silent.map(check => `"${check}"`).join(', ')} does not report on every pull request` : '',
-      ].filter(Boolean);
-      const items = [...notes, ...why];
-      if (items.length || !own.length) rules.waiting.push(...(items.length ? items : ['it is not confirmed']).map(item => `${name}, ${changeByHand ? 'change' : 'check'} by hand: ${item}`));
+      // Each line says one thing: a setting to change by hand, a workflow to check, or why Toolkit's
+      // ruleset is not offered.
+      rules.waiting.push(...left.map(detail => `${name}, change by hand: ${detail}`));
+      rules.waiting.push(...workflowNotes.map(note => `check the workflow by hand: ${note}`));
+      if (offer.fixes && offer.unproduced.length) rules.waiting.push(`${name}: Toolkit's ruleset is not offered while no workflow job produces ${offer.unproduced.map(check => `"${check}"`).join(', ')}`);
+      if (offer.fixes && offer.silent.length) rules.waiting.push(`${name}: Toolkit's ruleset is not offered while ${offer.silent.map(check => `"${check}"`).join(', ')} does not report on every pull request`);
+      if (!left.length && !workflowNotes.length && !own.length && !(offer.fixes && (offer.unproduced.length || offer.silent.length))) rules.waiting.push(`${name}, check by hand: it is not confirmed`);
       if (left.length) rules.where = WHERE.protection;
     }
   }
@@ -377,7 +376,10 @@ function summaryRows(facts) {
   rows.push(['Required checks', facts.requiredChecks?.length ? `Set: ${facts.requiredChecks.join(', ')}` : 'None listed', DOES.checks]);
   // The programme file update: a pull request already waiting is the step; else the question below.
   const update = facts.update;
-  if (update?.open) steps.push({ part: 'Programme file', text: `An update waits in ${update.open.url}: merge it, then say toolkit governance.` });
+  if (update?.open && update.refresh) {
+    const checks = update.refresh.checks;
+    steps.push({ part: 'Programme file', text: `An update waits in ${update.open.url}, but Toolkit's refresh pull request ${update.refresh.url} adds the ${listed(checks)} ${checks.length === 1 ? 'check' : 'checks'}, which that update does not list. Merge the refresh pull request first, then close the update on GitHub and say toolkit governance: one update then covers ${checks.length === 1 ? 'it' : 'them'} too. Merging the update now means a second one afterwards.` });
+  } else if (update?.open) steps.push({ part: 'Programme file', text: `An update waits in ${update.open.url}: merge it, then say toolkit governance.` });
   else if (update?.refresh) {
     const checks = update.refresh.checks;
     steps.push({ part: 'Programme file', text: `It is behind this Toolkit, and Toolkit's refresh pull request ${update.refresh.url} adds the ${listed(checks)} ${checks.length === 1 ? 'check' : 'checks'}. Once it has merged, say toolkit governance: one pull request then brings the programme file up to date, with ${checks.length === 1 ? 'that check' : 'those checks'} included.` });

@@ -731,6 +731,14 @@ function ghProtectionReader(slug, { spawn = childProcess.spawnSync } = {}) {
   if (!list.ok) return list;
   const listed = Array.isArray(list.value) ? list.value : [];
   const own = listed.find(entry => entry && entry.name === RULESET_NAME && entry.source_type !== 'Organization');
+  // The branches each of the repository's own rulesets on this branch covers, so a change to it can
+  // say where it applies; null when that ruleset could not be read (then it is not offered).
+  const onBranch = new Set(rules.value.map(rule => rule && rule.ruleset_id));
+  const branchesOf = entry => {
+    if (entry.source_type !== 'Repository' || entry.name === RULESET_NAME || !onBranch.has(entry.id)) return undefined;
+    const ruleset = ghJson([`repos/${slug}/rulesets/${entry.id}`], spawn);
+    return ruleset.ok ? ownBranches(ruleset.value) : null;
+  };
   return {
     ok: true,
     default_branch: branch,
@@ -738,7 +746,10 @@ function ghProtectionReader(slug, { spawn = childProcess.spawnSync } = {}) {
     rules: rules.value,
     classic,
     toolkit_ruleset: own && Number.isInteger(own.id) ? { id: own.id } : null,
-    rulesets: listed.filter(entry => entry && Number.isInteger(entry.id) && typeof entry.name === 'string').map(entry => ({ id: entry.id, name: entry.name, source_type: entry.source_type })),
+    rulesets: listed.filter(entry => entry && Number.isInteger(entry.id) && typeof entry.name === 'string').map(entry => {
+      const branches = branchesOf(entry);
+      return { id: entry.id, name: entry.name, source_type: entry.source_type, ...(branches === undefined ? {} : { branches }) };
+    }),
   };
 }
 
@@ -786,22 +797,32 @@ function protectionRulesetBody(requiredChecks) {
 // squash and rebase and did not require up-to-date branches, and Toolkit could only say to change it
 // by hand (28 November 2026).
 
+// A ruleset's branch conditions as { include, exclude } (lists of patterns), or null when unreadable.
+function ownBranches(ruleset) {
+  const refs = ruleset && ruleset.conditions && ruleset.conditions.ref_name;
+  if (!refs || !Array.isArray(refs.include) || !refs.include.every(item => typeof item === 'string')) return null;
+  const exclude = Array.isArray(refs.exclude) ? refs.exclude.filter(item => typeof item === 'string') : [];
+  return { include: [...refs.include], exclude };
+}
+
 const OWN_SETTINGS = Object.freeze({
   allowed_merge_methods: { rule: 'pull_request', parameter: 'allowed_merge_methods' },
   strict_required_status_checks_policy: { rule: 'required_status_checks', parameter: 'strict_required_status_checks_policy' },
   pinned_checks: { rule: 'required_status_checks', parameter: 'required_status_checks' },
 });
 
-// [{ id, name, changes: [{ setting, before, after }] }] for the repository's own rulesets on the
-// default branch, from a protection read (ghProtectionReader); [] when the read failed.
+// [{ id, name, branches, changes: [{ setting, before, after }] }] for the repository's own rulesets on
+// the default branch, from a protection read (ghProtectionReader); [] when the read failed. A ruleset
+// whose branches could not be read is not offered: the owner must see where a change applies.
 function ownRulesetChanges(read, requiredChecks, { pin = false } = {}) {
   if (!read || read.ok !== true || !Array.isArray(read.rules)) return [];
   const toolkitId = read.toolkit_ruleset ? read.toolkit_ruleset.id : null;
-  const names = new Map((read.rulesets || []).filter(entry => entry.source_type === 'Repository' && !/^Toolkit: /.test(entry.name)).map(entry => [entry.id, entry.name]));
+  const names = new Map((read.rulesets || []).filter(entry => entry.source_type === 'Repository' && !/^Toolkit: /.test(entry.name) && entry.branches).map(entry => [entry.id, entry]));
   const found = new Map();
   for (const rule of read.rules) {
     if (!rule || !rule.parameters || !Number.isInteger(rule.ruleset_id) || rule.ruleset_id === toolkitId || !names.has(rule.ruleset_id)) continue;
-    const entry = found.get(rule.ruleset_id) || { id: rule.ruleset_id, name: names.get(rule.ruleset_id), changes: [] };
+    const listedRuleset = names.get(rule.ruleset_id);
+    const entry = found.get(rule.ruleset_id) || { id: rule.ruleset_id, name: listedRuleset.name, branches: listedRuleset.branches, changes: [] };
     found.set(rule.ruleset_id, entry);
     const methods = rule.parameters.allowed_merge_methods;
     if (rule.type === 'pull_request' && Array.isArray(methods) && !(methods.length === 1 && methods[0] === 'merge')) entry.changes.push({ setting: 'allowed_merge_methods', before: [...methods], after: ['merge'] });
@@ -837,23 +858,26 @@ function applyOwnChanges(rules, changes) {
   return next;
 }
 
-// Writes the shown `entry` ({ id, name, changes }) to the repository's own ruleset: reads it, refuses
-// when it is not that repository ruleset or a value differs from the one shown (ruleset-changed),
-// sends only its rules (name, conditions, enforcement and bypass stay as they are), then reads it back.
-// { ok: true } or { ok: false, reason }.
+// Writes the shown `entry` ({ id, name, branches, changes }) to the repository's own ruleset: reads it,
+// refuses when it is not that repository ruleset, its branches or a value differ from the ones shown
+// (ruleset-changed), sends only its rules, then reads it back: each change holds, and its name,
+// target, enforcement, branches and bypass list are as they were. { ok: true } or { ok: false, reason }.
 function ghOwnRulesetWriter(slug, entry, { spawn = childProcess.spawnSync } = {}) {
   const endpoint = `repos/${slug}/rulesets/${entry.id}`;
   const before = ghJson([endpoint], spawn);
   if (!before.ok) return before;
   const ruleset = before.value || {};
-  if (ruleset.id !== entry.id || ruleset.name !== entry.name || ruleset.source_type !== 'Repository') return { ok: false, reason: 'ruleset-changed' };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  if (ruleset.id !== entry.id || ruleset.name !== entry.name || ruleset.source_type !== 'Repository' || !same(ownBranches(ruleset), entry.branches)) return { ok: false, reason: 'ruleset-changed' };
   const rules = applyOwnChanges(ruleset.rules, entry.changes);
   if (!rules) return { ok: false, reason: 'ruleset-changed' };
   const written = ghJson(['-X', 'PUT', endpoint, '--input', '-'], spawn, JSON.stringify({ rules }));
   if (!written.ok) return written;
   const after = ghJson([endpoint], spawn);
   if (!after.ok) return { ok: false, reason: 'not-read-back' };
-  const back = (after.value && after.value.rules) || [];
+  const kept = ['name', 'target', 'enforcement', 'conditions', 'bypass_actors'];
+  if (!after.value || kept.some(key => !same(after.value[key], ruleset[key]))) return { ok: false, reason: 'not-read-back' };
+  const back = after.value.rules || [];
   const holds = entry.changes.every(change => {
     const rule = back.find(item => item && item.type === OWN_SETTINGS[change.setting].rule && item.parameters);
     if (!rule) return false;
@@ -868,7 +892,10 @@ function ownRulesetWords(entry) {
   const words = change => (change.setting === 'allowed_merge_methods' ? `merge methods from ${change.before.join(', ') || 'none'} to merge commits only`
     : change.setting === 'strict_required_status_checks_policy' ? 'branches up to date before merging from not required to required'
       : `${change.before.map(context => `"${context}"`).join(', ')} from any source to pinned to GitHub Actions`);
-  return `changes the repository's own ruleset "${entry.name}": ${entry.changes.map(words).join('; ')}`;
+  const branch = pattern => (pattern === '~DEFAULT_BRANCH' ? 'the default branch' : pattern === '~ALL' ? 'every branch' : String(pattern).replace(/^refs\/heads\//, ''));
+  const list = items => (items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items.at(-1)}` : items[0] || 'no branch');
+  const covers = `it covers ${list(entry.branches.include.map(branch))}${entry.branches.exclude.length ? `, except ${list(entry.branches.exclude.map(branch))}` : ''}`;
+  return `changes the repository's own ruleset "${entry.name}" (${covers}): ${entry.changes.map(words).join('; ')}`;
 }
 
 // Creates the Toolkit ruleset, or updates it when `existingId` names it. { ok, id } or { ok: false, reason }.

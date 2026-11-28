@@ -856,7 +856,7 @@ test('P-20: a block scalar under a key the reader never reads is skipped, so the
 test('P-21: the repository\'s own ruleset changes are exact, never touch Toolkit\'s or an organization\'s, and the writer refuses a ruleset that changed', () => {
   const read = {
     ok: true, default_branch: 'main', repository: {}, classic: null, toolkit_ruleset: { id: 99 },
-    rulesets: [{ id: 7, name: 'protect-main', source_type: 'Repository' }, { id: 8, name: 'org rules', source_type: 'Organization' }, { id: 99, name: protection.RULESET_NAME, source_type: 'Repository' }],
+    rulesets: [{ id: 7, name: 'protect-main', source_type: 'Repository', branches: { include: ['~DEFAULT_BRANCH', 'refs/heads/release/*'], exclude: ['refs/heads/release/old'] } }, { id: 8, name: 'org rules', source_type: 'Organization' }, { id: 99, name: protection.RULESET_NAME, source_type: 'Repository' }],
     rules: [
       { type: 'pull_request', ruleset_id: 7, parameters: { allowed_merge_methods: ['merge', 'squash', 'rebase'] } },
       { type: 'required_status_checks', ruleset_id: 7, parameters: { strict_required_status_checks_policy: false, required_status_checks: [{ context: 'validate' }, { context: 'other' }] } },
@@ -865,15 +865,18 @@ test('P-21: the repository\'s own ruleset changes are exact, never touch Toolkit
     ],
   };
   const changes = protection.ownRulesetChanges(read, ['validate'], { pin: true });
-  assert.deepEqual(changes, [{ id: 7, name: 'protect-main', changes: [
+  const branches = { include: ['~DEFAULT_BRANCH', 'refs/heads/release/*'], exclude: ['refs/heads/release/old'] };
+  assert.deepEqual(changes, [{ id: 7, name: 'protect-main', branches, changes: [
     { setting: 'allowed_merge_methods', before: ['merge', 'squash', 'rebase'], after: ['merge'] },
     { setting: 'strict_required_status_checks_policy', before: false, after: true },
     { setting: 'pinned_checks', before: ['validate'], after: [{ context: 'validate', integration_id: 15368 }] },
   ] }], 'only the repository ruleset; a check outside the binding is never pinned or removed');
   assert.deepEqual(protection.ownRulesetChanges(read, ['validate']).flatMap(entry => entry.changes.map(change => change.setting)), ['allowed_merge_methods', 'strict_required_status_checks_policy'], 'no pinning unless every check has its one producer');
-  assert.match(protection.ownRulesetWords(changes[0]), /^changes the repository's own ruleset "protect-main": merge methods from merge, squash, rebase to merge commits only; branches up to date before merging from not required to required; "validate" from any source to pinned to GitHub Actions$/);
+  // The change names the branches the ruleset covers (G2 round 1, L2); one whose branches could not be read is not offered.
+  assert.deepEqual(protection.ownRulesetChanges({ ...read, rulesets: read.rulesets.map(entry => (entry.id === 7 ? { ...entry, branches: null } : entry)) }, ['validate']), []);
+  assert.match(protection.ownRulesetWords(changes[0]), /^changes the repository's own ruleset "protect-main" \(it covers the default branch and release\/\*, except release\/old\): merge methods from merge, squash, rebase to merge commits only; branches up to date before merging from not required to required; "validate" from any source to pinned to GitHub Actions$/);
   // The writer: reads the ruleset, sends only its rules with the change, reads it back.
-  const stored = { id: 7, name: 'protect-main', source_type: 'Repository', enforcement: 'active', bypass_actors: [{ actor_id: 5 }], rules: read.rules.filter(rule => rule.ruleset_id === 7).map(({ type, parameters }) => ({ type, parameters })) };
+  const stored = { id: 7, name: 'protect-main', target: 'branch', source_type: 'Repository', enforcement: 'active', bypass_actors: [{ actor_id: 5 }], conditions: { ref_name: { ...branches } }, rules: read.rules.filter(rule => rule.ruleset_id === 7).map(({ type, parameters }) => ({ type, parameters })) };
   const calls = [];
   const spawn = (command, args, options) => {
     calls.push(args.join(' '));
@@ -896,4 +899,34 @@ test('P-21: the repository\'s own ruleset changes are exact, never touch Toolkit
   stored.name = 'renamed';
   assert.deepEqual(protection.ghOwnRulesetWriter('o/r', changes[0], { spawn }), { ok: false, reason: 'ruleset-changed' });
   assert.equal(protection.applyOwnChanges([{ type: 'pull_request', parameters: { allowed_merge_methods: ['merge'] } }], changes[0].changes.slice(0, 1)), null, 'a value that differs from before is refused');
+  // Branches that differ from the ones shown: nothing is written (G2 round 1, L2).
+  stored.name = 'protect-main';
+  stored.conditions = { ref_name: { include: ['~ALL'], exclude: [] } };
+  calls.length = 0;
+  assert.deepEqual(protection.ghOwnRulesetWriter('o/r', changes[0], { spawn }), { ok: false, reason: 'ruleset-changed' });
+  assert.deepEqual(calls, ['api repos/o/r/rulesets/7'], 'no write');
+  // The read-back also proves its name, target, enforcement, branches and bypass list stayed (G2 round 1, L1).
+  stored.conditions = { ref_name: { ...branches } };
+  stored.rules = read.rules.filter(rule => rule.ruleset_id === 7).map(({ type, parameters }) => ({ type, parameters: JSON.parse(JSON.stringify(parameters)) }));
+  const moved = (command, args, options) => {
+    const answer = spawn(command, args, options);
+    if (args.includes('PUT')) stored.bypass_actors = [];
+    return answer;
+  };
+  assert.deepEqual(protection.ghOwnRulesetWriter('o/r', changes[0], { spawn: moved }), { ok: false, reason: 'not-read-back' });
+  // The reader reads the branches of each repository ruleset with rules on the default branch, with GETs only.
+  const readCalls = [];
+  const answers = {
+    'repos/o/r': { default_branch: 'main' },
+    'repos/o/r/rules/branches/main?per_page=100': read.rules,
+    'repos/o/r/rulesets?targets=branch&per_page=100': [{ id: 7, name: 'protect-main', source_type: 'Repository' }, { id: 8, name: 'org rules', source_type: 'Organization' }, { id: 9, name: 'elsewhere', source_type: 'Repository' }, { id: 99, name: protection.RULESET_NAME, source_type: 'Repository' }],
+    'repos/o/r/rulesets/7': { ...stored, conditions: { ref_name: { ...branches } } },
+  };
+  const reader = protection.ghProtectionReader('o/r', { spawn: (command, args) => {
+    readCalls.push(args);
+    if (args[1].endsWith('/protection')) return { status: 1, stdout: '', stderr: 'gh: Branch not protected (HTTP 404)' };
+    return args[1] in answers ? { status: 0, stdout: JSON.stringify(answers[args[1]]) } : { status: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' };
+  } });
+  assert.deepEqual(reader.rulesets.map(entry => [entry.id, entry.branches]), [[7, branches], [8, undefined], [9, undefined], [99, undefined]], 'only the repository ruleset with rules on the branch, never Toolkit\'s or an organization\'s');
+  assert.ok(readCalls.every(args => args[0] === 'api' && !args.includes('-X')), 'only GET requests');
 });
