@@ -176,13 +176,6 @@ class WeaknessTasks {
   }
 }
 
-// What the owner reads about one filed weakness, after "Your controller fixes this in a pull request: ...".
-function filedWords(task) {
-  if (!task) return '';
-  if (task.state === 'filed') return ` Filed as #${task.number} under #${task.parent}.`;
-  if (task.state === 'open') return ` Already filed as #${task.number}, still open.`;
-  if (task.state === 'unlinked') return ` Filed as #${task.number}, but it could not be linked under #${task.parent} (${task.why}); your controller links it.`;
-  return ` Not filed as a task (${task.why}); your controller files it.`;
-}
-
-module.exports = Object.freeze({ WORDS, WeaknessTasks, filedWords, ghRequest, keyOf, taskFor });
+// What the owner reads about each result (filedWords) lives with the result lines the session-start
+// hooks already load (toolkit-governance-finish.cjs), so the hooks load nothing more.
+module.exports = Object.freeze({ WORDS, WeaknessTasks, ghRequest, keyOf, taskFor });

@@ -4,7 +4,8 @@
 // parent (owner decision of 28 November 2026, refining G-4f): filed, already open, and cannot-write.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { WeaknessTasks, filedWords, ghRequest, keyOf, taskFor } = require('../scripts/toolkit-governance-weakness.cjs');
+const { WeaknessTasks, ghRequest, keyOf, taskFor } = require('../scripts/toolkit-governance-weakness.cjs');
+const { filedWords } = require('../scripts/toolkit-governance-finish.cjs');
 
 const REPO = 'toolkit-test-fixture/card';
 const SKIPPABLE = Object.freeze({ kind: 'skippable', check: 'Quote Basis click budget', file: '.github/workflows/ci.yml', detail: '"Quote Basis click budget" (.github/workflows/ci.yml) waits for secret-scan without `if: always()`, so a failed one skips it and a skipped job reports success' });
