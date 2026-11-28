@@ -726,12 +726,22 @@ function describeOutcome(slug, root, result, outcome) {
     if (check.status === 'unverified') lines.push(`- ${slug}: could not check ${id}: ${check.details.join('; ')}.`);
   }
   if (result.pending_policy) lines.push(`- ${slug}: the working-tree binding asks for ${JSON.stringify(result.pending_policy)}; it counts only once merged into the default branch.`);
-  const byHand = [];
-  if (result.checks.S3 && result.checks.S3.status === 'drift' && !(result.files && result.files.dependabot)) byHand.push(...result.checks.S3.details);
-  if (result.checks.S7 && result.checks.S7.status === 'drift') byHand.push(...result.checks.S7.details.filter(detail => !detail.includes(WORKFLOW_REL) || result.workflow === 'foreign'));
-  for (const id of ['S4', 'S5']) if (result.checks[id] && result.checks[id].status === 'drift' && !(result.fixes && (id === 'S4' ? result.fixes.secret_scanning : result.fixes.code_scanning))) byHand.push(...result.checks[id].details);
+  const byHand = byHandNotes(result);
   if (byHand.length) lines.push(`${slug}: still to do (Toolkit never edits a file it did not write):`, ...byHand.map(note => `  - ${note}`));
   return lines;
+}
+
+// The drift in a dependencySecurity verdict that applySecurity does not fix, so a person changes it:
+// a Dependabot file Toolkit did not write that misses an ecosystem, a Dependabot auto-merge problem
+// (apart from Toolkit's own workflow file, which it writes), and secret scanning or CodeQL it does not
+// turn on here.
+function byHandNotes(result) {
+  const checks = (result && result.checks) || {};
+  const notes = [];
+  if (checks.S3 && checks.S3.status === 'drift' && !(result.files && result.files.dependabot)) notes.push(...checks.S3.details);
+  if (checks.S7 && checks.S7.status === 'drift') notes.push(...checks.S7.details.filter(detail => !detail.includes(WORKFLOW_REL) || result.workflow === 'foreign'));
+  for (const id of ['S4', 'S5']) if (checks[id] && checks[id].status === 'drift' && !(result.fixes && (id === 'S4' ? result.fixes.secret_scanning : result.fixes.code_scanning))) notes.push(...checks[id].details);
+  return notes;
 }
 
 // ---- the verdict --------------------------------------------------------------------------------
@@ -755,7 +765,8 @@ function sameValues(a, b) {
 }
 
 // { status: conformant | drift | unverified | not-applicable, reason, checks: { S1..S8 }, policy,
-// policy_source, pending_policy, settings, missing_ecosystems, fixes, files } for the repository at
+// policy_source, pending_policy, settings, missing_ecosystems, fixes, files, unread (why GitHub could not be
+// read, or null) } for the repository at
 // `root`. Options: `offline`, `reader(slug)` (tests), `protectionResult` (the default-branch
 // verdict, for S7), `toolkitRoot`.
 function dependencySecurity(root, { offline = false, reader = ghSecurityReader, protectionResult = null, toolkitRoot = ROOT } = {}) {
@@ -862,7 +873,7 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
   const settings = online ? Object.fromEntries(SNAPSHOT_KEYS.map(key => [key, read[key]])) : null;
   return verdict(status, null, checks, {
     slug, policy, policy_source: source, pending_policy: pendingPolicy, visibility: online ? read.visibility : null,
-    settings, missing_ecosystems: missingEcosystems, workflow, fixes, files,
+    settings, missing_ecosystems: missingEcosystems, workflow, fixes, files, unread: offline || online ? null : (read && read.reason) || 'reader-failed',
   });
 }
 
@@ -885,6 +896,8 @@ module.exports = Object.freeze({
   ghSecurityWriter,
   writeSecurityFiles,
   applySecurity,
+  byHandNotes,
   describeOutcome,
+  SETTING_LABELS,
   dependencySecurity,
 });
