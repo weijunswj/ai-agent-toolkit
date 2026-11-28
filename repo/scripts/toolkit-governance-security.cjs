@@ -727,21 +727,33 @@ function describeOutcome(slug, root, result, outcome) {
   }
   if (result.pending_policy) lines.push(`- ${slug}: the working-tree binding asks for ${JSON.stringify(result.pending_policy)}; it counts only once merged into the default branch.`);
   const byHand = byHandNotes(result);
-  if (byHand.length) lines.push(`${slug}: still to do (Toolkit never edits a file it did not write):`, ...byHand.map(note => `  - ${note}`));
+  if (byHand.length) lines.push(`${slug}: still to do on GitHub, by hand:`, ...byHand.map(note => `  - ${note}`));
+  const files = repositoryFileFindings(result);
+  if (files.length) lines.push(`${slug}: for the repository's controller, in a pull request (Toolkit never edits a file it did not write):`, ...files.map(finding => `  - ${finding.detail}`));
   return lines;
 }
 
-// The drift in a dependencySecurity verdict that applySecurity does not fix, so a person changes it:
-// a Dependabot file Toolkit did not write that misses an ecosystem, a Dependabot auto-merge problem
-// (apart from Toolkit's own workflow file, which it writes), and secret scanning or CodeQL it does not
-// turn on here.
+// The drift in a dependencySecurity verdict that applySecurity does not fix and that only a person can
+// change on GitHub: a Dependabot auto-merge setting problem, and secret scanning or CodeQL it does not
+// turn on here. A file in the repository is never here (repositoryFileFindings).
 function byHandNotes(result) {
   const checks = (result && result.checks) || {};
   const notes = [];
-  if (checks.S3 && checks.S3.status === 'drift' && !(result.files && result.files.dependabot)) notes.push(...checks.S3.details);
-  if (checks.S7 && checks.S7.status === 'drift') notes.push(...checks.S7.details.filter(detail => !detail.includes(WORKFLOW_REL) || result.workflow === 'foreign'));
+  if (checks.S7 && checks.S7.status === 'drift') notes.push(...checks.S7.details.filter(detail => !detail.includes(WORKFLOW_REL)));
   for (const id of ['S4', 'S5']) if (checks[id] && checks[id].status === 'drift' && !(result.fixes && (id === 'S4' ? result.fixes.secret_scanning : result.fixes.code_scanning))) notes.push(...checks[id].details);
   return notes;
+}
+
+// The drift that needs a change to a file in the repository that Toolkit did not write (a Dependabot
+// file missing an ecosystem; a workflow at Toolkit's auto-merge path that is not Toolkit's): the
+// repository's controller's work in a pull request, filed as its task (owner decision of 28 November
+// 2026), never the owner's by hand. Each { kind, check, file, detail, unverified }.
+function repositoryFileFindings(result) {
+  const checks = (result && result.checks) || {};
+  return [
+    ...(checks.S3?.status === 'drift' && !(result.files && result.files.dependabot) ? checks.S3.findings || [] : []),
+    ...(checks.S7?.status === 'drift' ? checks.S7.findings || [] : []),
+  ];
 }
 
 // ---- the verdict --------------------------------------------------------------------------------
@@ -799,7 +811,11 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
     S2: settingCheck(value('security_updates'), 'Dependabot security updates'),
     S3: missingEcosystems.length === 0
       ? { status: 'ok', details: [] }
-      : { status: 'drift', details: missingEcosystems.map(item => `${dependabotFile(root) || DEPENDABOT_REL} has no "${item.ecosystem}" entry for ${item.directory}`) },
+      : (() => {
+        const file = dependabotFile(root) || DEPENDABOT_REL;
+        const details = missingEcosystems.map(item => `${file} has no "${item.ecosystem}" entry for ${item.directory}`);
+        return { status: 'drift', details, findings: details.map(detail => ({ kind: 'dependabot-ecosystem', check: null, file, detail, unverified: false })) };
+      })(),
   };
   const scanning = settingCheck(value('secret_scanning'), 'Secret scanning');
   const pushProtection = settingCheck(value('push_protection'), 'Push protection');
@@ -850,6 +866,8 @@ function dependencySecurity(root, { offline = false, reader = ghSecurityReader, 
     status: s7Status,
     details: s7.length ? s7 : s7Status === 'not-checked' ? ['offline']
       : s7Status === 'unverified' ? [online && !known ? 'the programme binding on the default branch could not be read, so the auto-merge policy is unknown and auto-merge stays off' : s7Unverified || 'the repository settings or default-branch protection could not be read'] : [],
+    // A workflow file at Toolkit's path that Toolkit did not write is the repository's own file.
+    findings: s7.filter(detail => detail === `${WORKFLOW_REL} is not Toolkit's file`).map(detail => ({ kind: 'auto-merge-workflow', check: null, file: WORKFLOW_REL, detail, unverified: false })),
   };
   checks.S8 = settingCheck(value('delete_branch_on_merge'), 'Automatically delete head branches');
   const statuses = Object.values(checks).map(entry => entry.status);
@@ -896,7 +914,7 @@ module.exports = Object.freeze({
   ghSecurityWriter,
   writeSecurityFiles,
   applySecurity,
-  byHandNotes,
+  byHandNotes, repositoryFileFindings,
   describeOutcome,
   SETTING_LABELS,
   dependencySecurity,

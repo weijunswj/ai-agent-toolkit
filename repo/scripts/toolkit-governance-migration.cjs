@@ -90,12 +90,28 @@ function protectionOffer(result) {
   return { fixes, offered: fixes && unproduced.length === 0 && silent.length === 0, unproduced, silent };
 }
 
-// What a protection candidate needs changed: the settings that drift, then the workflow problems the
-// ruleset does not fix, which are shown by hand.
+// The problems in the repository's own workflow files that a required check depends on (P3: a check
+// no job produces; P4: a job that can be skipped or never reports), each one line naming the check
+// and its file, said once (an unreadable workflow file is named under both). They are fixed in a pull
+// request by the repository's controller, never on GitHub.
+const workflowChecks = result => ['P3', 'P4'].map(id => result?.checks?.[id]).filter(check => check && ['drift', 'unverified'].includes(check.status));
+function workflowNotes(result) {
+  return [...new Set(workflowChecks(result).flatMap(check => check.details))];
+}
+// The same, each with what it is about ({ kind, check, file, detail }: producerVerdict in
+// toolkit-governance-protection.cjs), for filing as the controller's task.
+function workflowFindings(result) {
+  const found = new Map();
+  for (const finding of workflowChecks(result).flatMap(check => check.findings)) if (!found.has(finding.detail)) found.set(finding.detail, finding);
+  return [...found.values()];
+}
+
+// What a protection candidate needs changed, for the run's own log: the settings that drift, then the
+// workflow problems the ruleset does not fix.
 function protectionNotes(result) {
   return [
     ...protection.SETTINGS_CHECKS.flatMap(id => (result.checks[id] && result.checks[id].status === 'drift' ? result.checks[id].details : [])),
-    ...['P3', 'P4'].flatMap(id => (result.checks[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details.map(detail => `workflow (${result.checks[id].status}, fix by hand): ${detail}`) : [])),
+    ...workflowNotes(result).map(detail => `workflow, for the controller: ${detail}`),
   ];
 }
 
@@ -103,10 +119,14 @@ function protectionNotes(result) {
 // It never reads, copies, repairs or writes a historical local governance answer. Keep the command
 // name for existing operators until the explicit migration route separates inventory and maintenance.
 class GovernanceMaintenance {
-  #stdout; #confirm; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #ownRulesetWriter; #firstSweep; #now;
+  #stdout; #confirm; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #ownRulesetWriter; #firstSweep; #weaknessTasks; #now;
+  // Every step line this run said, kept in its private run record. The owner never sees this log:
+  // the finish's outcome is what they read (SQAG, 28 November 2026: about 20 raw lines after a yes,
+  // the same CI line three times).
+  #log = [];
 
   // `firstSweep` runs the first-install sweep (toolkit-governance-first-sweep.cjs), or null where it cannot run here.
-  constructor({ stdout, confirm, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, ownRulesetWriter = null, firstSweep = null, now = () => new Date() }) {
+  constructor({ stdout, confirm, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, ownRulesetWriter = null, firstSweep = null, weaknessTasks = null, now = () => new Date() }) {
     this.#stdout = stdout;
     this.#confirm = confirm;
     this.#interactive = interactive === true;
@@ -121,10 +141,14 @@ class GovernanceMaintenance {
     this.#securityFileWriter = securityFileWriter || security.writeSecurityFiles;
     this.#ownRulesetWriter = ownRulesetWriter || protection.ghOwnRulesetWriter;
     this.#firstSweep = firstSweep;
+    this.#weaknessTasks = weaknessTasks;
     this.#now = now;
   }
 
-  #say(lines) { this.#stdout.write(`${[].concat(lines).join('\n')}\n`); }
+  #say(lines) {
+    this.#log.push(...[].concat(lines));
+    this.#stdout.write(`${[].concat(lines).join('\n')}\n`);
+  }
 
 
   async run(roots) {
@@ -167,7 +191,8 @@ class GovernanceMaintenance {
     const protections = this.#finishProtection(rows);
     const securities = await this.#applySecurity(rows);
     if (rulesets.length || owned.length || protections.length || securities.length) this.#writeRecord([], [...rulesets, ...owned], protections, securities);
-    const on = [], unavailable = [], held = [], retry = [], reports = [];
+    const on = [], unavailable = [], held = [], retry = [], reports = [], controller = [];
+    const { changed, unconfirmed } = GovernanceMaintenance.#changed({ rulesets, owned, protections, securities });
     const reader = this.#rulesetReader ? { reader: this.#rulesetReader } : {};
     // GitHub's own answer to a refused write goes into the reason, so a refusal that repeats is not
     // hidden behind "not read back". A refusal for this account (forbidden: not an admin) does not
@@ -199,12 +224,56 @@ class GovernanceMaintenance {
     // A write that did not read back is retried; only what is left after a clean write is held.
     if (forbidden(answered(protections))) held.push({ name: 'default-branch protection', step: admin });
     else if (protections.some(entry => ['failed', 'unverified'].includes(entry.result))) retry.push(`default-branch protection did not read back after the write${because(answered(protections))}`);
-    else this.#protectionEnd(rows[0], { on, unavailable, held, retry }, { rulesetsUnavailable: noForcePush.status === 'not-enforceable' });
-    this.#securityEnd(rows[0], securities, { on, held, retry, because });
+    else this.#protectionEnd(rows[0], { on, unavailable, held, retry, controller }, { rulesetsUnavailable: noForcePush.status === 'not-enforceable' });
+    this.#securityEnd(rows[0], securities, { on, held, retry, because, controller });
     const owed = sweep ? this.#sweepEnd(slug, { held, reports }) : null;
     // Security files written into this working tree still need a pull request; the result says so.
     const files = securities.flatMap(entry => (entry.files || []).filter(file => file.result === 'written').map(file => file.file));
-    return { result: retry.length ? 'failed' : 'done', reason: [...new Set(retry)].join('; '), on, unavailable, held, reports, files, ...(owed ? { sweep_owed: owed } : {}) };
+    return { result: retry.length ? 'failed' : 'done', reason: [...new Set(retry)].join('; '), changed, unconfirmed, on, unavailable, held, controller: this.#fileWeaknesses(rows[0], controller), reports, files, ...(owed ? { sweep_owed: owed } : {}) };
+  }
+
+  // Each workflow weakness for the controller, filed once as a child task under the programme parent
+  // (toolkit-governance-weakness.cjs, owner decision of 28 November 2026): [{ note, task }], where
+  // task says whether it was filed, is already open, or why it was not filed.
+  #fileWeaknesses(row, findings) {
+    if (!findings.length) return [];
+    const parent = governance.mergedBinding(row.root, this.#registryOptions)?.parents?.[0]?.issue ?? null;
+    let tasks;
+    try { tasks = this.#weaknessTasks ? this.#weaknessTasks.file(row.slug, parent, findings) : null; } catch { tasks = null; }
+    const why = this.#weaknessTasks ? 'the GitHub request failed' : 'this run does not write to GitHub';
+    return findings.map(finding => ({ note: finding.detail, task: tasks?.find(entry => entry.finding.detail === finding.detail) || { state: 'not-filed', parent, why } }));
+  }
+
+  // What this run wrote, each once, in plain words: { changed } (written and read back: the rulesets
+  // added, the repository's own rulesets changed, Toolkit's default-branch ruleset added or updated, each
+  // free security setting turned on and read back on) and { unconfirmed } (GitHub accepted the write,
+  // but reading it back does not show it yet). A write GitHub accepted is never left out.
+  // The failure this prevents: after a yes whose write did not read back, the result said "Nothing
+  // was changed on GitHub" (G2 round 1, M1).
+  static #changed({ rulesets, owned, protections, securities }) {
+    const changed = [], unconfirmed = [];
+    for (const entry of rulesets) {
+      const name = `the "${entry.ruleset === 'keep-programme-state' ? ruleset.KEEP_STATE_RULESET_NAME : ruleset.RULESET_NAME}" ruleset`;
+      if (entry.result === 'added') changed.push(`${name}, added`);
+      else if (entry.written) unconfirmed.push(`${name}: GitHub accepted it, but it was not found when read back`);
+    }
+    for (const entry of owned) {
+      if (entry.result === 'changed') changed.push(`the repository's own ruleset "${entry.name}", changed`);
+      else if (entry.written) unconfirmed.push(`the repository's own ruleset "${entry.name}": GitHub accepted the change, but reading it back does not show it as shown`);
+    }
+    for (const entry of protections) {
+      if (['added', 'updated'].includes(entry.result)) changed.push(`the "${protection.RULESET_NAME}" ruleset on the default branch, ${entry.result}`);
+      else if (entry.written) unconfirmed.push(`the "${protection.RULESET_NAME}" ruleset on the default branch: GitHub accepted it, but reading it back still shows drift`);
+    }
+    const label = setting => security.SETTING_LABELS[setting] || setting;
+    for (const entry of securities) {
+      const notBack = new Set([...(entry.still_off || []), ...(entry.unconfirmed || [])]);
+      const turned = (entry.settings || []).filter(item => item.ok && !notBack.has(item.setting)).map(item => label(item.setting));
+      if (turned.length) changed.push(`${turned.join(', ')}, turned on`);
+      for (const setting of entry.still_off || []) unconfirmed.push(`${label(setting)}: GitHub accepted it, but it still reads off`);
+      for (const setting of entry.unconfirmed || []) unconfirmed.push(`${label(setting)}: GitHub accepted it, but it could not be read back`);
+    }
+    return { changed: [...new Set(changed)], unconfirmed: [...new Set(unconfirmed)] };
   }
 
   // Where the first-install sweep ended: its report line or an owner step, never a reason to run the
@@ -222,10 +291,16 @@ class GovernanceMaintenance {
   // free setting Toolkit would still turn on itself. Drift Toolkit does not fix, a check only a person
   // can make (by_hand) and dependency auto-merge waiting only for held protection are held with the
   // step: reading again would show the same thing.
-  #securityEnd(row, securities, { on, held, retry, because }) {
+  // A file in the repository Toolkit did not write (a Dependabot file missing an ecosystem, a workflow at
+  // Toolkit's auto-merge path) goes to the controller like a workflow weakness, never by hand.
+  #securityEnd(row, securities, { on, held, retry, because, controller = [] }) {
     const result = this.#securityFor(row);
     if (result.status === 'conformant') { on.push('the free dependency and security settings'); return; }
     if (result.status === 'not-applicable') return;
+    const protectionLeft = controller.length > 0;
+    const files = security.repositoryFileFindings(result);
+    const fileDetails = new Set(files.map(finding => finding.detail));
+    controller.push(...files);
     // Settings GitHub refused as not available here (plan or policy) are not failures and never retried.
     const unavailable = new Set(securities.flatMap(entry => entry.unavailable || []));
     const refused = securities.flatMap(entry => (entry.result === 'failed' ? (entry.settings || []).filter(item => !item.ok && item.reason && !unavailable.has(item.setting)).map(item => item.reason) : []));
@@ -233,25 +308,36 @@ class GovernanceMaintenance {
     if (securities.some(entry => entry.result === 'unverified')) { retry.push('the security settings could not be read back'); return; }
     if (Object.entries(result.fixes || {}).some(([setting, wanted]) => wanted && !unavailable.has(setting))) { retry.push('a free security setting Toolkit turns on is still off'); return; }
     const protectionHeld = held.some(entry => entry.name === 'default-branch protection');
-    // S7 waits only on protection when the auto-merge policy is known and allow auto-merge was read.
-    const waitsOnProtection = protectionHeld && ['default-branch', 'not-merged'].includes(result.policy_source)
+    // S7 waits only on protection when the auto-merge policy is known and allow auto-merge was read:
+    // on the owner's protection step, or on the controller's workflow fix when that is all protection
+    // still needs (then it is neither retried nor the owner's by hand).
+    const waitsOnProtection = (protectionHeld || protectionLeft) && ['default-branch', 'not-merged'].includes(result.policy_source)
       && typeof result.settings?.allow_auto_merge === 'boolean';
-    const steps = [];
+    const wait = protectionHeld ? 'dependency auto-merge waits until default-branch protection is set (its step is above)' : 'dependency auto-merge waits until your controller\'s workflow fix above has landed';
+    const onlyProtection = check => check.details.length > 0 && check.details.every(detail => detail.startsWith('the default branch is not protected the way auto-merge needs'));
+    const steps = [], waits = [];
     for (const [id, check] of Object.entries(result.checks || {})) {
-      if (check.status === 'drift' || (check.status === 'unverified' && check.by_hand === true)) steps.push(...check.details);
-      else if (check.status === 'unverified' && id === 'S7' && waitsOnProtection) steps.push('dependency auto-merge waits until default-branch protection is set (its step is above)');
+      if (id === 'S7' && waitsOnProtection && !protectionHeld && check.status === 'drift' && onlyProtection(check)) waits.push(wait);
+      else if (check.status === 'drift' || (check.status === 'unverified' && check.by_hand === true)) steps.push(...check.details.filter(detail => !fileDetails.has(detail)));
+      else if (check.status === 'unverified' && id === 'S7' && waitsOnProtection) (protectionHeld ? steps : waits).push(wait);
       else if (check.status === 'unverified') { retry.push('the security settings could not be read back'); return; }
     }
-    if (!steps.length) { retry.push('the security settings could not be read back'); return; }
-    held.push({ name: 'some dependency and security settings', step: `change by hand: ${steps.join('; ')}.` });
+    if (!steps.length && !waits.length) {
+      if (!files.length) retry.push('the security settings could not be read back');
+      return;
+    }
+    held.push({ name: 'some dependency and security settings', step: [steps.length ? `change by hand: ${steps.join('; ')}.` : '', waits.length ? `${waits.join('; ')}.` : ''].filter(Boolean).join(' ') });
   }
 
   // Where default-branch protection ended after the finish's write. A binding with no required checks
   // has nothing to require yet, and drift Toolkit's own ruleset cannot fix (or a required check no
   // workflow produces) needs the owner: both are held with the step, never retried in the background.
   // Where GitHub cannot enforce rulesets at all (rulesetsUnavailable), protection is named with them,
-  // never as a step that cannot work there.
-  #protectionEnd(row, { on, unavailable, held, retry }, { rulesetsUnavailable = false } = {}) {
+  // never as a step that cannot work there. A problem in the repository's own workflow files (a
+  // required check no job produces, or a job that can be skipped) is work for the repository's
+  // controller in a pull request (`controller`), never a by-hand step for the owner: only GitHub
+  // settings the owner alone can change are by hand (SQAG, 28 November 2026).
+  #protectionEnd(row, { on, unavailable, held, retry, controller }, { rulesetsUnavailable = false } = {}) {
     const name = 'default-branch protection';
     const read = this.#protectionFor(row);
     if (!read) { retry.push('the binding\'s required checks could not be read'); return; }
@@ -262,9 +348,19 @@ class GovernanceMaintenance {
       held.push({ name, step: 'the programme file lists no required checks yet, so there is nothing for it to require. Say refresh governance: it offers one pull request that adds the checks the default branch already requires and Toolkit\'s own. Once that is merged, refresh governance offers to add the protection.' });
     } else if (protection.SETTINGS_CHECKS.some(id => result.checks[id]?.status === 'unverified')) retry.push(`${name} could not be read back`);
     else {
-      const notes = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'].flatMap(id => (result.checks[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details : []));
-      const where = protection.SETTINGS_CHECKS.some(id => result.checks[id]?.status === 'drift') ? ` ${require('./toolkit-governance-summary.cjs').WHERE.protection}.` : '';
-      held.push({ name, step: `change by hand: ${notes.join('; ') || 'reading it back still shows drift'}.${where} Then say refresh governance, and your agent checks it again.` });
+      // A required check no job produces (or one that does not report on every pull request) waits for
+      // the controller's fix: requiring it now would block every merge, so it is never a by-hand step.
+      const offer = protectionOffer(result);
+      const waiting = [...offer.unproduced, ...offer.silent];
+      const settings = protection.SETTINGS_CHECKS.flatMap(id => (result.checks[id]?.status === 'drift' ? result.checks[id].details : []))
+        .filter(detail => !waiting.some(check => detail.startsWith(`"${check}" `)));
+      const workflows = workflowFindings(result);
+      controller.push(...workflows);
+      const wait = waiting.length ? `it waits until your controller's workflow fix above has landed, since requiring ${waiting.map(check => `"${check}"`).join(', ')} before a job reports it on every pull request would block every merge.` : '';
+      if (settings.length) held.push({ name, step: `change by hand: ${settings.join('; ')}. ${require('./toolkit-governance-summary.cjs').WHERE.protection}.${wait ? ` Then ${wait}` : ''} Then say refresh governance, and your agent checks it again.` });
+      else if (wait) held.push({ name, step: `${wait} Then say refresh governance, and Toolkit offers its ruleset.` });
+      else if (workflows.length) on.push(name);
+      else held.push({ name, step: 'change by hand: reading it back still shows drift. Then say refresh governance, and your agent checks it again.' });
     }
   }
 
@@ -313,7 +409,7 @@ class GovernanceMaintenance {
       const verified = created && created.ok ? ruleset.noForcePushRuleset(row.root, this.#rulesetReader ? { reader: this.#rulesetReader } : {}) : null;
       const ok = verified && verified.status === 'present';
       this.#say(`- ${row.slug}: ${ok ? 'ruleset added and read back' : `not added (${created && created.reason ? created.reason : 'read-back did not find it'})`}.`);
-      results.push({ repository_id: row.state.repository_id, result: ok ? 'added' : 'failed', ...(ok ? {} : { reason: created && created.reason ? created.reason : 'not-read-back' }) });
+      results.push({ repository_id: row.state.repository_id, result: ok ? 'added' : 'failed', ...(ok ? {} : { reason: created && created.reason ? created.reason : 'not-read-back', written: Boolean(created && created.ok) }) });
     }
     return results;
   }
@@ -351,7 +447,7 @@ class GovernanceMaintenance {
       const verified = created && created.ok ? ruleset.keepStateRuleset(row.root, reader) : null;
       const ok = verified && verified.status === 'present';
       this.#say(`- ${row.slug}: ${ok ? 'programme state ruleset added and read back' : `not added (${created && created.reason ? created.reason : 'read-back did not find it'})`}.`);
-      results.push({ repository_id: row.state.repository_id, ruleset: 'keep-programme-state', result: ok ? 'added' : 'failed', ...(ok ? {} : { reason: created && created.reason ? created.reason : 'not-read-back' }) });
+      results.push({ repository_id: row.state.repository_id, ruleset: 'keep-programme-state', result: ok ? 'added' : 'failed', ...(ok ? {} : { reason: created && created.reason ? created.reason : 'not-read-back', written: Boolean(created && created.ok) }) });
     }
     return results;
   }
@@ -370,13 +466,12 @@ class GovernanceMaintenance {
     return { requiredChecks, result: protection.defaultBranchProtection(row.root, { requiredChecks, commit: row.state.merged?.commit, ...(this.#protectionReader ? { reader: this.#protectionReader } : {}) }) };
   }
 
+  // What is left after a read: GitHub settings by hand, workflow files for the repository's controller.
   #byHand(row, result) {
-    const notes = [];
-    for (const id of ['P1', 'P2', 'P3', 'P4', 'P5', 'P6']) {
-      const check = result.checks[id];
-      if (check && check.status === 'drift') notes.push(...check.details);
-    }
-    if (notes.length) this.#say([`${row.slug}: change by hand:`, ...notes.map(note => `  - ${note}`)]);
+    const settings = protection.SETTINGS_CHECKS.flatMap(id => (result.checks[id]?.status === 'drift' ? result.checks[id].details : []));
+    const workflows = ['P3', 'P4'].flatMap(id => (result.checks[id]?.status === 'drift' ? result.checks[id].details : []));
+    if (settings.length) this.#say([`${row.slug}: change by hand on GitHub:`, ...settings.map(note => `  - ${note}`)]);
+    if (workflows.length) this.#say([`${row.slug}: for the repository's controller, in a pull request:`, ...workflows.map(note => `  - ${note}`)]);
   }
 
   // Reads only: the repositories whose default branch the Toolkit ruleset would fix, and notes on the
@@ -419,7 +514,7 @@ class GovernanceMaintenance {
       const fixed = !rulesetFixes(after) && ['P1', 'P5'].every(id => after.checks[id] && after.checks[id].status !== 'unverified');
       this.#say(`- ${row.slug}: ruleset ${existing ? 'updated' : 'added'}${fixed ? ' and read back' : ', but reading it back still shows drift'}.`);
       if (after.status === 'drift') this.#byHand(row, after);
-      results.push({ repository_id: row.state.repository_id, result: fixed ? (existing ? 'updated' : 'added') : 'failed' });
+      results.push({ repository_id: row.state.repository_id, result: fixed ? (existing ? 'updated' : 'added') : 'failed', ...(fixed ? {} : { written: true }) });
     }
     return results;
   }
@@ -453,7 +548,7 @@ class GovernanceMaintenance {
       try { written = this.#ownRulesetWriter(row.slug, entry); } catch { written = { ok: false, reason: 'writer-failed' }; }
       const ok = Boolean(written && written.ok);
       this.#say(`- ${row.slug}: the repository's own ruleset "${entry.name}" ${ok ? 'changed and read back' : `not changed (${written && written.reason ? written.reason : 'unknown'})`}.`);
-      results.push({ repository_id: row.state.repository_id, ruleset: `own:${entry.id}`, name: entry.name, result: ok ? 'changed' : 'failed', ...(ok ? {} : { reason: written && written.reason ? written.reason : 'unknown' }) });
+      results.push({ repository_id: row.state.repository_id, ruleset: `own:${entry.id}`, name: entry.name, result: ok ? 'changed' : 'failed', ...(ok ? {} : { reason: written && written.reason ? written.reason : 'unknown', written: written?.reason === 'not-read-back' }) });
     }
     return results;
   }
@@ -470,17 +565,32 @@ class GovernanceMaintenance {
         writer: this.#securityWriter, fileWriter: this.#securityFileWriter, reread: () => this.#securityFor(row),
       });
       for (const line of security.describeOutcome(row.slug, row.root, result, outcome)) this.#say(line);
-      if (outcome.result !== 'nothing') results.push({ repository_id: row.state.repository_id, prior: outcome.prior, settings: outcome.settings, files: outcome.files, unavailable: outcome.unavailable, result: outcome.result });
+      if (outcome.result !== 'nothing') results.push({ repository_id: row.state.repository_id, prior: outcome.prior, settings: outcome.settings, files: outcome.files, unavailable: outcome.unavailable, still_off: outcome.still_off, unconfirmed: outcome.unconfirmed, result: outcome.result });
     }
     return results;
   }
 
   // One private record per run that changed something, next to the decision file.
   #writeRecord(decisions, rulesets, protections = [], securities = []) {
-    appendRunRecord(this.#registryOptions, { at: this.#now().toISOString(), decisions, rulesets, protections, securities });
+    appendRunRecord(this.#registryOptions, { at: this.#now().toISOString(), decisions, rulesets, protections, securities, log: GovernanceMaintenance.#logTail(this.#log) });
+  }
+
+  // The run's step log for its record, capped by size so the record (kept to 1 MiB with its last 20
+  // runs) never grows past what it can read back: each line at most 500 characters, the newest lines
+  // up to 32 KiB in all.
+  static #logTail(log) {
+    const kept = [];
+    let size = 0;
+    for (const line of [...log].reverse()) {
+      const short = String(line).slice(0, 500);
+      size += Buffer.byteLength(short, 'utf8') + 1;
+      if (size > 32 * 1024) break;
+      kept.unshift(short);
+    }
+    return kept;
   }
 }
 
 
 
-module.exports = Object.freeze({ GovernanceMaintenance, appendRunRecord, protectionOffer, SettingsOperationHistory, RECORD_BASENAME });
+module.exports = Object.freeze({ GovernanceMaintenance, appendRunRecord, protectionOffer, workflowNotes, SettingsOperationHistory, RECORD_BASENAME });

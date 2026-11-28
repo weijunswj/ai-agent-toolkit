@@ -1,5 +1,14 @@
 # Toolkit Changelog
 
+## 3.212.0
+
+### Changed
+
+- **Short result after a governance settings yes:** after the owner answers yes to fixing drifted GitHub settings, refresh governance now shows what changed (each item once, read back), anything GitHub accepted that does not read back yet, then what is left with who acts, then the summary table read again. The raw step log stays in the private run record and is never shown, so no line repeats.
+- **Repository fixes go to the controller:** a problem in the repository's own files, such as a required job that waits for others without `if: always()`, a Dependabot file missing an ecosystem or a workflow at Toolkit's auto-merge path that is not Toolkit's, is now handed to the repository's controller as one line ("Your controller fixes this in a pull request") in the summary, the result after a yes and the post-merge finish, instead of "change by hand" for the owner. "By hand" stays for GitHub settings only the owner can change, with where to click. Security files Toolkit wrote into the working tree are also the controller's to commit. A required check no job produces waits for that fix instead of being a by-hand step, since requiring it would block every merge.
+- **Weaknesses filed as the controller's tasks:** after a settings yes or a turn-on finish, each such problem is filed once as a native child task under the programme parent, with the file, the job, why it matters and the fix; one Toolkit could not confirm is filed as one to check. The result names the task, names it again while it is still open (linking it under the parent if an earlier link failed) instead of filing a second one, or says why it could not be filed so the controller files it. The yes question and the turn-on's after-merge list say so.
+- **Dependency auto-merge waits for the controller's fix:** where default-branch protection is only waiting for that fix, dependency auto-merge waits with it instead of being retried every session.
+
 ## 3.211.0
 
 ### Added

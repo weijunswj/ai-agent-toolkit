@@ -844,3 +844,18 @@ test('SE-13: the binding accepts only the known dependency update values', () =>
     assert.equal(JSON.parse(fs.readFileSync(path.join(ROOT, file), 'utf8')).dependency_updates.github_actions, 'owner', `${file}: GitHub Actions updates stay with the owner`);
   }
 });
+
+// G2 round 1, M2 (owner decision INT-TK421-1399): a file in the repository Toolkit did not write (a
+// Dependabot file missing an ecosystem, a workflow at Toolkit's auto-merge path that is not Toolkit's)
+// is the controller's to change in a pull request, never a by-hand note for the owner.
+test('a repository file Toolkit did not write is the controller\'s finding, never a by-hand note', (t) => {
+  const own = 'version: 2\nupdates:\n  - package-ecosystem: "github-actions"\n    directory: "/"\n';
+  const root = repo(t, { 'package.json': '{}', '.github/dependabot.yml': own, [security.WORKFLOW_REL]: 'name: mine\n' });
+  const result = security.dependencySecurity(root, { reader: reader({ binding: merged(PATCH_MINOR) }), protectionResult: CONFORMANT });
+  const byHand = security.byHandNotes(result);
+  assert.ok(!byHand.some(note => /dependabot\.yml has no "npm" entry|is not Toolkit's file/.test(note)), `no repository file in the by-hand notes: ${byHand.join('; ')}`);
+  assert.deepEqual(security.repositoryFileFindings(result).map(finding => [finding.kind, finding.file, finding.detail]), [
+    ['dependabot-ecosystem', '.github/dependabot.yml', '.github/dependabot.yml has no "npm" entry for /'],
+    ['auto-merge-workflow', security.WORKFLOW_REL, `${security.WORKFLOW_REL} is not Toolkit's file`],
+  ]);
+});

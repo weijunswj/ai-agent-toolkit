@@ -131,7 +131,8 @@ test('the result names security files the finish wrote into the working tree', t
   const state = governance.governanceState(ctx.repo, ctx.registryOptions);
   finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 1 });
   finishing.record(ctx.registryOptions, state.repository_id, { result: 'done', files: ['.github/dependabot.yml'] });
-  assert.match(finishing.entryFor(ctx.registryOptions, state.repository_id).line, /It also wrote \.github\/dependabot\.yml in this working tree; commit it through a pull request\./);
+  // A file in the repository is its controller's to commit, never the owner's (G-4f).
+  assert.match(finishing.entryFor(ctx.registryOptions, state.repository_id).line, /Your controller commits \.github\/dependabot\.yml through a pull request: Toolkit wrote it in this working tree\./);
 });
 
 // A fresh repository: no protection on the default branch, GitHub's default merge methods.
@@ -150,7 +151,7 @@ test('a fresh repository with no required checks finishes: protection waits for 
   const entry = finishing.entryFor(ctx.registryOptions, state.repository_id);
   assert.equal(entry.status, 'done', 'final: never \'tried again in a later session\'');
   assert.doesNotMatch(entry.line, /tried again/);
-  assert.match(entry.line, /finished here, apart from what waits for you below\. On and read back: the no-force-push ruleset and the free dependency and security settings\./);
+  assert.match(entry.line, /finished here, apart from what is left below\. On and read back: the no-force-push ruleset and the free dependency and security settings\./);
   // Never a hand edit of the programme file: the summary's one update pull request adds the checks.
   // Never a command for the owner's own terminal: the agent runs refresh governance (SQAG, 28 Nov).
   assert.match(entry.line, /Waiting for you, default-branch protection: the programme file lists no required checks yet, so there is nothing for it to require\. Say refresh governance: it offers one pull request that adds the checks the default branch already requires and Toolkit's own\. Once that is merged, refresh governance offers to add the protection\./);
@@ -172,8 +173,12 @@ test('protection held for a by-hand fix ends the finish with that step in the re
   assert.deepEqual(wrote, []);
   const entry = finishing.entryFor(ctx.registryOptions, state.repository_id);
   assert.equal(entry.status, 'done');
-  // Where on GitHub to change it, then the agent checks again: never a command for the owner.
-  assert.match(entry.line, /Waiting for you, default-branch protection: change by hand: .*validate.*\. Where on GitHub: the repository's Settings, then Rules, then Rulesets[^.]*\. Then say refresh governance, and your agent checks it again\./);
+  // Where on GitHub to change it, then the agent checks again: never a command for the owner. The
+  // required check no job produces waits for the controller's fix, with the warning kept, and is never
+  // a by-hand step (G2 round 1, L1).
+  assert.match(entry.line, /Waiting for you, default-branch protection: change by hand: main allows merge, squash, rebase[^.]*\. Where on GitHub: the repository's Settings, then Rules, then Rulesets[^.]*\. Then it waits until your controller's workflow fix above has landed, since requiring "validate" before a job reports it on every pull request would block every merge\. Then say refresh governance, and your agent checks it again\./);
+  assert.match(entry.line, /Your controller fixes this in a pull request: no workflow job is named "validate"\./);
+  assert.doesNotMatch(entry.line, /change by hand:[^.]*"validate"/);
   assert.doesNotMatch(entry.line, /migrate|own terminal/);
 });
 
@@ -256,9 +261,10 @@ test('a write GitHub refuses keeps its answer in the reason the owner sees', asy
     /could not finish here yet \(the no-force-push ruleset is not read back \(GitHub answered: gh-request-failed\); default-branch protection did not read back after the write \(GitHub answered: gh-request-failed\)\)/);
 });
 
-test('dependency auto-merge waiting on protection held for a by-hand fix is held with it, not retried', async t => {
+test('dependency auto-merge waiting on a workflow fix for the controller waits with it, not retried and not by hand', async t => {
   // "validate" only reports on some pull requests (its trigger lists activity types), so protection
-  // reads unverified and is held; dependency auto-merge needs that protection, so it waits too.
+  // reads unverified: a workflow fix for the repository's controller (G-4f), never a by-hand step.
+  // Dependency auto-merge needs that protection, so it waits for the fix too.
   const ctx = governedRepo(t, { workflow: true });
   fs.writeFileSync(path.join(ctx.repo, '.github', 'workflows', 'ci.yml'), 'name: CI\non:\n  pull_request:\n    types: [opened]\njobs:\n  validate:\n    name: validate\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n');
   const bindingFile = path.join(ctx.repo, '.github', 'toolkit-programme.json');
@@ -272,8 +278,10 @@ test('dependency auto-merge waiting on protection held for a by-hand fix is held
   const code = await run.run();
   const line = finishing.entryFor(ctx.registryOptions, state.repository_id).line;
   assert.equal(code, 0, `${run.out.join('')}\n${line}`);
-  assert.match(line, /Waiting for you, default-branch protection: change by hand: .*validate/);
-  assert.match(line, /dependency auto-merge waits until default-branch protection is set \(its step is above\)/);
+  assert.match(line, /^Toolkit: governance setup finished here, apart from what is left below\./);
+  assert.match(line, /Your controller fixes this in a pull request: "validate" \(\.github\/workflows\/ci\.yml\): its pull_request trigger lists activity types[^.]*\. Not filed as a task \(this run does not write to GitHub\); your controller files it\./, 'where no task can be filed, it says why');
+  assert.match(line, /Waiting for you, some dependency and security settings: dependency auto-merge waits until your controller's workflow fix above has landed\./);
+  assert.doesNotMatch(line, /change by hand|default-branch protection: /, 'the workflow is not the owner\'s by hand');
 });
 
 test('a security read or write GitHub did not confirm is retried, never held as a by-hand step', async t => {
@@ -382,8 +390,9 @@ test('a turn-on finish never changes the repository\'s own ruleset, even where i
   const state = governance.governanceState(ctx.repo, ctx.registryOptions);
   finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 1 });
   const ownRuleset = () => ({ ...unprotected(), rules: [{ type: 'pull_request', ruleset_id: 7, parameters: { allowed_merge_methods: ['merge', 'squash', 'rebase'] } }], rulesets: [{ id: 7, name: 'protect-main', source_type: 'Repository' }] });
-  const run = cli(ctx, rulesets, created, { protectionReader: ownRuleset, protectionWriter: () => ({ ok: true, id: 9 }), ownRulesetWriter: (...args) => { own.push(args); return { ok: true }; }, securityReader: publicSecurity(ctx) });
+  const toolkit = [];
+  const run = cli(ctx, rulesets, created, { protectionReader: ownRuleset, protectionWriter: (...args) => { toolkit.push(args); return { ok: true, id: 9 }; }, ownRulesetWriter: (...args) => { own.push(args); return { ok: true }; }, securityReader: publicSecurity(ctx) });
   await run.run();
-  assert.match(run.out.join(''), /These governed GitHub repositories need default-branch protection/, 'the finish ran its protection step');
+  assert.equal(toolkit.length, 1, 'the finish ran its protection step');
   assert.deepEqual(own, [], 'the repository\'s own ruleset is not written');
 });

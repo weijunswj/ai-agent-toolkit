@@ -29,7 +29,7 @@ const SWEEP_SCRIPT = path.join(__dirname, 'toolkit-governance-first-sweep.cjs');
 const SWEEP_OWED_MS = 3 * 24 * 60 * 60 * 1000;
 const SWEEP_LAPSED = 'First personal data sweep: its result could not be read here within three days; on GitHub, open Actions and choose Personal data sweep to see its list.';
 // What the finish turns on, as the bank's end lines and the session line say it.
-const WHAT = 'default-branch protection (pull requests only, the required checks, merge commits only, nobody can bypass it), a ruleset that blocks force pushes, a ruleset that keeps the programme state branch where programme state lives there, the free dependency and security settings, and, where it adds the personal data guard, one report-only sweep of what is already there (files, commit messages, pull request text and comments), which changes and posts nothing (on a public repository anyone can read its list)';
+const WHAT = 'default-branch protection (pull requests only, the required checks, merge commits only, nobody can bypass it), a ruleset that blocks force pushes, a ruleset that keeps the programme state branch where programme state lives there, the free dependency and security settings, one task for the controller of the repository under the parent issue for each weakness it finds in the CI or files of the repository (filed once, as a sub-issue), and, where it adds the personal data guard, one report-only sweep of what is already there (files, commit messages, pull request text and comments), which changes and posts nothing (on a public repository anyone can read its list)';
 
 function fileOf(registryOptions = {}) { return path.join(userStateDirectory(registryOptions), BASENAME); }
 
@@ -74,15 +74,39 @@ function listed(items) { return items.length > 1 ? `${items.slice(0, -1).join(',
 // 'done' is final and shown once by the next session, then dropped; 'failed' (something to retry)
 // stays pending. `files` are security files the finish wrote into this working tree, which still
 // need a pull request.
+// What the owner reads about one weakness filed as the controller's task
+// (toolkit-governance-weakness.cjs): filed, already open, filed but not linked, or not filed and why.
+function filedWords(task) {
+  if (!task) return '';
+  if (task.state === 'filed') return ` Filed as #${task.number} under #${task.parent}.`;
+  if (task.state === 'open') return ` Already filed as #${task.number}, still open.`;
+  if (task.state === 'relinked') return ` Already filed as #${task.number}, still open, and now linked under #${task.parent}.`;
+  if (task.state === 'unlinked') return ` Filed as #${task.number}, but it could not be linked under #${task.parent} (${task.why}); your controller links it.`;
+  return ` Not filed as a task (${task.why}); your controller files it.`;
+}
+
+// A change to the repository's own workflow files, handed to its controller as one line: a detail
+// line, or { note, task } after a settings fix or this finish. Kept here, where the session-start
+// hooks already load it, so the summary and this result say it the same way without the hooks
+// loading the summary.
+function controllerLine(item) {
+  const note = typeof item === 'string' ? item : item.note;
+  return `Your controller fixes this in a pull request: ${String(note).replace(/\.$/, '')}.${typeof item === 'string' ? '' : filedWords(item.task)}`;
+}
+
+// `controller` ([{ note, task }]) are problems in the repository's own workflow files, for its
+// controller to fix in a pull request and filed as its task, never a by-hand step for the owner.
 function resultLine(outcome) {
   const on = outcome.on || [], unavailable = outcome.unavailable || [], held = outcome.held || [], files = outcome.files || [];
+  const controller = outcome.controller || [];
   const parts = [outcome.result === 'done'
-    ? `Toolkit: governance setup finished here${held.length ? ', apart from what waits for you below' : ''}.`
+    ? `Toolkit: governance setup finished here${held.length || controller.length || files.length ? ', apart from what is left below' : ''}.`
     : `Toolkit: governance setup could not finish here yet (${outcome.reason || 'GitHub could not be written'}); it is tried again in a later session.`];
   if (on.length) parts.push(`On and read back: ${listed(on)}.`);
   if (unavailable.length) parts.push(`Not set: GitHub cannot enforce ${listed(unavailable)} on a private repository on GitHub Free, so nothing was written for ${unavailable.length > 1 ? 'them' : 'it'}; the local guards stay the fallback.`);
+  parts.push(...controller.map(controllerLine));
+  if (files.length) parts.push(`Your controller commits ${files.join(', ')} through a pull request: Toolkit wrote ${files.length > 1 ? 'them' : 'it'} in this working tree.`);
   for (const entry of held) parts.push(`Waiting for you, ${entry.name}: ${entry.step}`);
-  if (files.length) parts.push(`It also wrote ${files.join(', ')} in this working tree; commit ${files.length > 1 ? 'them' : 'it'} through a pull request.`);
   return parts.join(' ');
 }
 
@@ -197,4 +221,4 @@ function sessionLines(state, registryOptions = {}, deps = {}) {
   } catch { return []; }
 }
 
-module.exports = Object.freeze({ BASENAME, FINISH_GAP_MS, SCHEMA, WHAT, claim, clear, entryFor, markPending, record, recordSweep, sessionLines, startFinish, touch });
+module.exports = Object.freeze({ BASENAME, FINISH_GAP_MS, SCHEMA, WHAT, claim, controllerLine, filedWords, clear, entryFor, markPending, record, recordSweep, sessionLines, startFinish, touch });
