@@ -5,7 +5,7 @@
 // at a turn end or session start that sees the refresh pull request open; the cloud sweep never does.
 // It never merges, pushes or writes to GitHub: like the merge train's `land`, it names the pull
 // request, its head and the exact merge command, and the controller runs that command, which the merge
-// hold checks again (the copy proof included). After the merge the controller posts the notice it
+// hold checks again (the copy proof included). After the merge the controller posts the line it
 // gives, once.
 //
 // The route, in the order checked (the closure matrix its tests hold, toolkit-copies-carry.test.cjs):
@@ -20,7 +20,7 @@
 //   attention a required check failed or never ran: the controller finds out why (a copy that breaks
 //             CI needs a person) and tells the owner only if it cannot route it;
 //   land      every condition holds: run `gh pr merge N --merge --match-head-commit <full head>` from
-//             the repository's folder, then post the notice.
+//             the repository's folder, then post its owner line (the notice).
 // The owner's `hold N` and "no other merge running" stay the controller's to check (gate rules, Task
 // auto-merge); a G2 verdict is not needed, since the copy proof stands in for it (a scripted carry).
 //
@@ -79,7 +79,9 @@ class RefreshLanding {
     this.#fetchBranches = fetch;
   }
 
-  // { route, line, pr?, head?, merge?, notice? }.
+  // { route, line, pr?, head?, merge?, owner_line? }. With an open refresh pull request, `owner_line` is
+  // the bold line that ends the controller's message to the owner (the controller principles' Plain owner
+  // posts): which pull request, what it brings and what happens next; for `land`, to post after the merge.
   decide() {
     const done = (route, line, extra = {}) => ({ route, line, ...extra });
     const workflows = require('./toolkit-cloud-workflows.cjs');
@@ -103,29 +105,31 @@ class RefreshLanding {
     const head = pr.head?.sha;
     if (!SHA.test(String(head || ''))) return done('hold', `Pull request #${pr.number}'s head could not be read; try again at a later turn.`);
     const facts = { pr: pr.number, head };
+    const said = (route, line, next, extra = {}) => done(route, line, { ...facts, ...extra, owner_line: `**Toolkit refresh pull request ${repository}#${pr.number}: brings its Toolkit copies${extra.files ? ` (${extra.files.join(', ')})` : ''} up to Toolkit main; ${next}.**` });
+    const later = 'the controller checks it again at a later turn';
     const answer = reads.taskAutoMerge(this.#root, this.#registryOptions);
-    if (answer?.auto_merge !== 'after-gates' || answer?.fresh !== true) return done('owner', `Task auto-merge is off for ${repository}, so refresh pull request #${pr.number} waits for the owner's typed merge.`, facts);
-    try { pin = this.#github(`repos/${repository}/actions/variables/TOOLKIT_REF`, { missing: true }); } catch { return done('hold', 'The repository\'s TOOLKIT_REF variable could not be read; try again at a later turn.', facts); }
-    if (pin) return done('owner', `${repository} holds its Toolkit copies on one Toolkit commit (its TOOLKIT_REF variable is set), so refresh pull request #${pr.number} waits for the owner's typed merge.`, facts);
+    if (answer?.auto_merge !== 'after-gates' || answer?.fresh !== true) return said('owner', `Task auto-merge is off for ${repository}, so refresh pull request #${pr.number} waits for the owner's typed merge.`, 'it needs your merge, since task auto-merge is off here');
+    try { pin = this.#github(`repos/${repository}/actions/variables/TOOLKIT_REF`, { missing: true }); } catch { return said('hold', 'The repository\'s TOOLKIT_REF variable could not be read; try again at a later turn.', later); }
+    if (pin) return said('owner', `${repository} holds its Toolkit copies on one Toolkit commit (its TOOLKIT_REF variable is set), so refresh pull request #${pr.number} waits for the owner's typed merge.`, 'it needs your merge, since a TOOLKIT_REF variable holds this repository on one Toolkit commit');
     // The copies' `vars.TOOLKIT_REF` also reads an organization's variable shared with the repository
     // (they name no environment, so no environment variable applies). A user's repository has none, and
     // GitHub refuses that read there, so it is read for an organization's repository only.
     const ownerType = pr.head?.repo?.owner?.type;
-    if (ownerType !== 'User' && ownerType !== 'Organization') return done('hold', `Who owns ${repository} could not be read; try again at a later turn.`, facts);
+    if (ownerType !== 'User' && ownerType !== 'Organization') return said('hold', `Who owns ${repository} could not be read; try again at a later turn.`, later);
     if (ownerType === 'Organization') {
       const shared = this.#organizationPin(repository);
-      if (shared === null) return done('hold', 'The organization variables shared with the repository could not be read in full; try again at a later turn.', facts);
-      if (shared) return done('owner', `${repository} holds its Toolkit copies on one Toolkit commit (its organization's TOOLKIT_REF variable is shared with it), so refresh pull request #${pr.number} waits for the owner's typed merge.`, facts);
+      if (shared === null) return said('hold', 'The organization variables shared with the repository could not be read in full; try again at a later turn.', later);
+      if (shared) return said('owner', `${repository} holds its Toolkit copies on one Toolkit commit (its organization's TOOLKIT_REF variable is shared with it), so refresh pull request #${pr.number} waits for the owner's typed merge.`, 'it needs your merge, since a TOOLKIT_REF variable holds this repository on one Toolkit commit');
     }
-    if (!this.#fetchBranches(this.#root, [branch, this.#refresh.BRANCH])) return done('hold', `The pull request's head and ${branch} could not be fetched here; try again at a later turn.`, facts);
+    if (!this.#fetchBranches(this.#root, [branch, this.#refresh.BRANCH])) return said('hold', `The pull request's head and ${branch} could not be fetched here; try again at a later turn.`, later);
     const base = spawnSync('git', ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}^{commit}`], { cwd: this.#root, encoding: 'utf8', windowsHide: true }).stdout?.trim();
-    if (!SHA.test(String(base || ''))) return done('hold', `${branch} could not be read here after the fetch; try again at a later turn.`, facts);
+    if (!SHA.test(String(base || ''))) return said('hold', `${branch} could not be read here after the fetch; try again at a later turn.`, later);
     const proof = this.#proof(this.#root).prove(base, head);
-    if (!proof.proved) return done(proof.hold ? 'hold' : 'owner', `Refresh pull request #${pr.number} is not proved, so it ${proof.hold ? 'waits for a later turn' : 'waits for the owner\'s typed merge'}: ${proof.reason}.`, facts);
+    if (!proof.proved) return said(proof.hold ? 'hold' : 'owner', `Refresh pull request #${pr.number} is not proved, so it ${proof.hold ? 'waits for a later turn' : 'waits for the owner\'s typed merge'}: ${proof.reason}.`, proof.hold ? later : 'it needs your merge, since not every file is proved to be Toolkit\'s own render');
     const required = this.#requiredChecks();
-    if (!required) return done('hold', 'The merged binding\'s required checks could not be read here; try again at a later turn.', facts);
+    if (!required) return said('hold', 'The merged binding\'s required checks could not be read here; try again at a later turn.', later, { files: proof.files });
     // With no required check listed, nothing shows the copies pass this repository's CI.
-    if (!required.length) return done('attention', `Refresh pull request #${pr.number}: the merged binding lists no required check, so nothing shows the copies pass this repository's CI. Controller: set the required checks (refresh governance) or run its merge, which the merge hold asks the owner about.`, facts);
+    if (!required.length) return said('attention', `Refresh pull request #${pr.number}: the merged binding lists no required check, so nothing shows the copies pass this repository's CI. Controller: set the required checks (refresh governance) or run its merge, which the merge hold asks the owner about.`, 'no required check shows it passes this repository\'s CI, so the controller sets them or asks for your merge', { files: proof.files });
     try {
       checks = [];
       // Every page of check runs (a busy head holds more than one page of 100), up to ten.
@@ -135,17 +139,17 @@ class RefreshLanding {
         if ((read.check_runs || []).length < 100 || checks.length >= Number(read.total_count || 0)) break;
       }
       statuses = (this.#github(`repos/${repository}/commits/${head}/status`) || {}).statuses || [];
-    } catch { return done('hold', 'The pull request\'s checks could not be read; try again at a later turn.', facts); }
+    } catch { return said('hold', 'The pull request\'s checks could not be read; try again at a later turn.', later, { files: proof.files }); }
     const states = checkStates(required, checks, statuses);
     const failed = required.filter(name => states[name] === 'failed' || states[name] === 'missing');
-    if (failed.length) return done('attention', `Refresh pull request #${pr.number}: ${failed.map(name => `${name} ${states[name] === 'missing' ? 'never ran' : 'failed'}`).join(', ')} at ${head.slice(0, 7)}. Controller: find out why (gh pr checks ${pr.number}); a Toolkit copy that breaks this repository's CI needs a person, so tell the owner only if you cannot route it.`, facts);
+    if (failed.length) return said('attention', `Refresh pull request #${pr.number}: ${failed.map(name => `${name} ${states[name] === 'missing' ? 'never ran' : 'failed'}`).join(', ')} at ${head.slice(0, 7)}. Controller: find out why (gh pr checks ${pr.number}); a Toolkit copy that breaks this repository's CI needs a person, so tell the owner only if you cannot route it.`, `${failed.join(', ')} ${failed.length === 1 ? 'is' : 'are'} not green, so the controller is finding out why`, { files: proof.files });
     const running = required.filter(name => states[name] === 'running');
-    if (running.length) return done('wait', `Refresh pull request #${pr.number} is proved; ${running.join(', ')} ${running.length === 1 ? 'is' : 'are'} still running at ${head.slice(0, 7)}. Land it at a later turn once green; nothing to ask.`, facts);
+    if (running.length) return said('wait', `Refresh pull request #${pr.number} is proved; ${running.join(', ')} ${running.length === 1 ? 'is' : 'are'} still running at ${head.slice(0, 7)}. Land it at a later turn once green; nothing to ask.`, `it lands on its own once ${running.join(', ')} ${running.length === 1 ? 'is' : 'are'} green, with a notice after`, { files: proof.files });
     const merge = `gh pr merge ${pr.number} --merge --match-head-commit ${head}`;
     const short = proof.commit.slice(0, 7);
     return done('land', `Refresh pull request #${pr.number} is proved (every file is Toolkit commit ${short}'s render, on Toolkit main) and green at ${head.slice(0, 7)}. Unless the owner said hold ${pr.number} or another merge is running here, run from this repository's folder: ${merge}`, {
       ...facts, merge, commit: proof.commit, files: proof.files,
-      notice: `Landed ${repository}#${pr.number}: its Toolkit copies (${proof.files.join(', ')}) now match Toolkit main at ${short}, under this repository's task auto-merge. To undo it, revert that merge in a pull request; to hold this repository on one Toolkit commit, set its TOOLKIT_REF variable; to stop automatic landings, merge an Off switch (refresh governance).`,
+      owner_line: `**Landed ${repository}#${pr.number}: its Toolkit copies (${proof.files.join(', ')}) now match Toolkit main at ${short}, under this repository's task auto-merge. To undo it, revert that merge in a pull request; to hold this repository on one Toolkit commit, set its TOOLKIT_REF variable; to stop automatic landings, merge an Off switch (refresh governance).**`,
     });
   }
 
@@ -172,7 +176,8 @@ class RefreshLanding {
 // Runs the decision for `--land-refresh`: { code, line, result }.
 function landRefresh({ repo, ...dependencies }) {
   const result = new RefreshLanding({ root: path.resolve(repo), ...dependencies }).decide();
-  const lines = [result.line, ...(result.notice ? [`After the merge, tell the owner once: ${result.notice}`] : [])];
+  const label = result.route === 'land' ? 'After the merge, end your message to the owner with this line, on its own' : 'End your message to the owner with this line, on its own';
+  const lines = [result.line, ...(result.owner_line ? [`${label}: ${result.owner_line}`] : [])];
   return { code: result.route === 'land' ? 0 : 1, line: lines.join('\n'), result };
 }
 

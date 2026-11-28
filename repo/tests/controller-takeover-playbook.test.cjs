@@ -266,7 +266,7 @@ const closureRows = [
   ['attention', '### 9. Governance checks', 'takes an action or a dispose, never an acknowledgement'],
   ['attention-owner', '### 9. Governance checks', 'Never invent an acknowledgement for the owner.'],
   ['done-extras', '### 10. Goal and done line', 'Controller work starts only after both the generic journey and applicable extras are complete. Unknown evidence never becomes done by silence.'],
-  ['done-status', '### 10. Goal and done line', 'End with one short status: what runs, what is next, what waits on the owner.'],
+  ['done-status', '### 10. Goal and done line', "End with one short status: what runs, what is next, what waits on the owner, then each Toolkit pull request's own bold line ([Plain owner posts](../../controller/principles.md))."],
   ['pack-no-authority', '## Relay packs and results', 'These formats carry prepared steps, not authority.'],
   ['read-pack', '### Step groups', "**Read pack:** step 7's dry run line (account, governance, stop, versions, sweep and epoch)"],
   ['read-pack-guard', '### Step groups', 'Guard all programme, cloud sweep and shard reads with fresh ENABLED. Read CURRENT, not an attention refresh that writes programme state.'],
@@ -391,8 +391,10 @@ test('the evidence-store record line is the one the dry run prints', () => {
 });
 
 // The playbook is read in full at every takeover: it stays under this (CRLF bytes), or a rule leaves it first.
+// 30,100 from 30,000 (owner record 1397, 28 November): step 10's status points to the bold line each
+// Toolkit pull request gets at the end of the owner post, after one was missed inside a takeover status.
 test('the playbook stays under its size cap', () => {
-  assert.ok(Buffer.byteLength(read(PLAYBOOK).replace(/\n/g, '\r\n')) <= 30000);
+  assert.ok(Buffer.byteLength(read(PLAYBOOK).replace(/\n/g, '\r\n')) <= 30100);
 });
 
 test('forbidden phrases require a preceding prohibition in the same clause', () => {

@@ -129,7 +129,7 @@ For other states: "governance off: no programme, sharding or cloud sweep checks"
 
 ### 10. Goal and done line
 
-Goal: the parent programme when enabled, otherwise the owner's stated goal. Report the command's done line, then surface, mode, governance state with its freshness, each step's status and route, pack ids, a "Supplied by user:" list and what cannot run here. End with one short status: what runs, what is next, what waits on the owner. Projects then completes its extras. Controller work starts only after both the generic journey and applicable extras are complete. Unknown evidence never becomes done by silence.
+Goal: the parent programme when enabled, otherwise the owner's stated goal. Report the command's done line, then surface, mode, governance state with its freshness, each step's status and route, pack ids, a "Supplied by user:" list and what cannot run here. End with one short status: what runs, what is next, what waits on the owner, then each Toolkit pull request's own bold line ([Plain owner posts](../../controller/principles.md)). Projects then completes its extras. Controller work starts only after both the generic journey and applicable extras are complete. Unknown evidence never becomes done by silence.
 
 ## Relay packs and results
 

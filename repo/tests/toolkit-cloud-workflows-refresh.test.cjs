@@ -235,6 +235,8 @@ test('refresh PR: one pull request with only Toolkit-made files, read back and n
   const first = runRefresh(dir, github);
   assert.equal(first.code, 0, first.line);
   assert.match(first.line, /^Opened refresh pull request https:\/\/github\.com\/acme\/app\/pull\/1 \(4 files: /);
+  // Opening it is news for the owner: the line sends the controller to the bold line that ends its message.
+  assert.match(first.line, / Run --land-refresh either way: it prints the bold line that ends your message to the owner\.$/);
   assert.equal(github.pulls.length, 1);
   const pr = github.pulls[0];
   assert.equal(pr.head, BRANCH);
