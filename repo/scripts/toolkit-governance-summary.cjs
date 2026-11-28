@@ -271,19 +271,23 @@ function settingsRows(reads) {
     } else {
       // What the own ruleset changes fix is drift the yes fixes; the rest stays the owner's.
       const after = own.length && branch.own_after ? { ...branch.checks, ...branch.own_after } : branch.checks;
-      const left = protection.SETTINGS_CHECKS.flatMap(id => (after[id]?.status === 'drift' ? after[id].details : []));
-      rules.drift.push(...settingsDrift.filter(detail => !left.includes(detail)));
+      // A required check no job produces waits for the controller's fix (requiring it now would block
+      // every merge): neither drift the yes fixes nor a by-hand step.
+      const waiting = offer.fixes ? [...offer.unproduced, ...offer.silent] : [];
+      const waits = detail => waiting.some(check => detail.startsWith(`"${check}" `));
+      const left = protection.SETTINGS_CHECKS.flatMap(id => (after[id]?.status === 'drift' ? after[id].details : [])).filter(detail => !waits(detail));
+      rules.drift.push(...settingsDrift.filter(detail => !left.includes(detail) && !waits(detail)));
       // Each line says one thing: a setting to change by hand, a workflow for the controller, or why
       // Toolkit's ruleset is not offered.
       rules.waiting.push(...left.map(detail => `${name}, change by hand: ${detail}`));
       rules.controller.push(...workflowNotes);
-      if (offer.fixes && offer.unproduced.length) rules.waiting.push(`${name}: Toolkit's ruleset is not offered while no workflow job produces ${offer.unproduced.map(check => `"${check}"`).join(', ')}`);
-      if (offer.fixes && offer.silent.length) rules.waiting.push(`${name}: Toolkit's ruleset is not offered while ${offer.silent.map(check => `"${check}"`).join(', ')} does not report on every pull request`);
+      if (offer.fixes && offer.unproduced.length) rules.waiting.push(`${name}: waits for your controller's fix: Toolkit's ruleset is not offered while no workflow job produces ${offer.unproduced.map(check => `"${check}"`).join(', ')}, since requiring it would block every merge`);
+      if (offer.fixes && offer.silent.length) rules.waiting.push(`${name}: waits for your controller's fix: Toolkit's ruleset is not offered while ${offer.silent.map(check => `"${check}"`).join(', ')} does not report on every pull request, since requiring it would block those merges`);
       if (!left.length && !workflowNotes.length && !own.length && !(offer.fixes && (offer.unproduced.length || offer.silent.length))) rules.waiting.push(`${name}, check by hand: it is not confirmed`);
       if (left.length) rules.where = WHERE.protection;
     }
   }
-  const secure = { on: [], drift: [], free: [], waiting: [], unread: [] };
+  const secure = { on: [], drift: [], free: [], waiting: [], controller: [], unread: [] };
   const result = reads.securityResult;
   const settingsName = 'the dependency and security settings';
   if (!result) secure.unread.push({ name: settingsName, why: 'the programme file is not in this working tree' });
@@ -292,8 +296,10 @@ function settingsRows(reads) {
   else if (result.status === 'conformant') secure.on.push('the free dependency and security settings');
   else {
     const byHand = security.byHandNotes(result);
+    const fileNotes = security.repositoryFileFindings(result).map(finding => finding.detail);
+    secure.controller.push(...fileNotes);
     for (const check of Object.values(result.checks || {})) {
-      if (check.status === 'drift') secure.drift.push(...check.details.filter(detail => !byHand.includes(detail)));
+      if (check.status === 'drift') secure.drift.push(...check.details.filter(detail => !byHand.includes(detail) && !fileNotes.includes(detail)));
       else if (check.status === 'not-on-plan') secure.free.push(...check.details);
       else if (check.status === 'unverified' && check.by_hand === true) byHand.push(...check.details);
       else if (check.status === 'unverified') secure.unread.push({ name: check.details.join('; '), why: null });
@@ -303,9 +309,12 @@ function settingsRows(reads) {
     const turnOn = Object.entries(result.fixes).filter(([, wanted]) => wanted).map(([setting]) => security.SETTING_LABELS[setting] || setting);
     if (turnOn.length) changes.push(`turns on ${listed(turnOn)}`);
     const files = [result.files?.dependabot ? security.DEPENDABOT_REL : null, result.files?.workflow ? security.WORKFLOW_REL : null].filter(Boolean);
-    if (files.length) changes.push(`writes ${listed(files)} into this working tree, for you to commit through a pull request`);
-    if (!secure.drift.length && !secure.waiting.length && !secure.unread.length) secure.on.push('the free dependency and security settings');
+    if (files.length) changes.push(`writes ${listed(files)} into this working tree, for your controller to commit through a pull request`);
+    if (!secure.drift.length && !secure.waiting.length && !secure.controller.length && !secure.unread.length) secure.on.push('the free dependency and security settings');
   }
+  // The yes also files each weakness listed for the controller as its task, once (owner decision
+  // INT-TK421-1399): an approval names every effect.
+  if (changes.length && (rules.controller.length || secure.controller.length)) changes.push(FILES_TASKS);
   const free = rules.free.length > 0 && !rules.on.length && !rules.drift.length && !rules.waiting.length && !rules.controller.length && !rules.unread.length;
   const protectionPart = free ? { state: 'Not available on GitHub Free (private)', items: [] } : partState(rules);
   const securityPart = partState(secure);
@@ -317,6 +326,9 @@ function settingsRows(reads) {
     fix: changes.length ? { changes, ...(ownRulesets.length ? { own_rulesets: ownRulesets } : {}) } : null,
   };
 }
+
+// What the yes question and the turn-on's after-merge list say about filing the controller's tasks.
+const FILES_TASKS = 'files each weakness listed for your controller once as a task under the programme parent issue, linked as a sub-issue';
 
 // One row's state from its parts: { state, items }. The table cell stays short, each state with its
 // count in a fixed order; the items are the short list shown under the table, one line each, ending
@@ -355,13 +367,19 @@ function partState({ on, drift, free, waiting, controller = [], unread, where = 
 function fixResultLines(outcome) {
   if (!outcome || outcome.result === 'not-ready') return ['GitHub settings: not changed, because the programme file is not merged and read back here. Nothing was written.'];
   const changed = [...new Set(outcome.changed || [])];
+  const unconfirmed = [...new Set(outcome.unconfirmed || [])];
   const left = [...new Set([
     ...(outcome.controller || []).map(controllerLine),
     ...(outcome.files?.length ? [`Your controller commits ${listed(outcome.files)} through a pull request: Toolkit wrote ${outcome.files.length > 1 ? 'them' : 'it'} in this working tree.`] : []),
     ...(outcome.held || []).map(entry => `Waiting for you, ${entry.name}: ${entry.step}`),
-    ...(outcome.result !== 'done' ? [`Toolkit tries again: ${outcome.reason || 'GitHub could not be written'}. Say refresh governance.`] : []),
+    ...(outcome.result !== 'done' ? [`Not confirmed yet: ${outcome.reason || 'GitHub could not be written'}. Say refresh governance to try again, or toolkit governance to see what is left.`] : []),
   ])];
-  const lines = changed.length ? ['**Changed and read back:**', ...changed.map(item => `- ${item.charAt(0).toUpperCase()}${item.slice(1)}`)] : ['**Nothing was changed on GitHub.**'];
+  const bullet = item => `- ${item.charAt(0).toUpperCase()}${item.slice(1)}`;
+  const lines = [
+    ...(changed.length ? ['**Changed and read back:**', ...changed.map(bullet)] : []),
+    ...(unconfirmed.length ? [...(changed.length ? [''] : []), '**Written, not confirmed yet:**', ...unconfirmed.map(bullet)] : []),
+  ];
+  if (!lines.length) lines.push('**Nothing was changed on GitHub.**');
   if (outcome.unavailable?.length) lines.push('', `Not available on GitHub Free, so nothing was written for ${outcome.unavailable.length > 1 ? 'them' : 'it'}: ${listed(outcome.unavailable)}.`);
   if (left.length) lines.push('', '**Left to do:**', ...left.map(item => `- ${item}`));
   return lines;
@@ -537,4 +555,4 @@ function parseChange(text, { copies = false, rows = false, update = false, fix =
   throw new GuidedAnswerError(`This was not read as a change: "${String(text || '').trim()}". Say turn off governance, task auto-merge on or off, or change store${asked}.`);
 }
 
-module.exports = Object.freeze({ DOES, WHERE, branchRequiredChecks, summaryParts, finishRows, fixResultLines, mergedFiles, mergedOwnChecks, parseChange, programmeUpdate, programmeUpdateText, questionNumbers, renderSummary, renderTable, settingsRows, summaryRows, updateWords });
+module.exports = Object.freeze({ DOES, FILES_TASKS, WHERE, branchRequiredChecks, summaryParts, finishRows, fixResultLines, mergedFiles, mergedOwnChecks, parseChange, programmeUpdate, programmeUpdateText, questionNumbers, renderSummary, renderTable, settingsRows, summaryRows, updateWords });

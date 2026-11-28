@@ -593,16 +593,21 @@ test('a part with many findings keeps a short cell, and lists each finding under
   } };
   const security = { status: 'drift', fixes: {}, checks: { S4: { status: 'drift', details: ['secret scanning is off'] } } };
   const settings = summary.settingsRows({ rulesetResult: { status: 'missing' }, keepState: null, protectionResult: branch, securityResult: security });
-  // The workflow file the checks could not read is the controller's, said once (P3 and P4 both name it).
-  assert.equal(settings.protection, 'Drift: 1 item; Waiting for you: 4 items; For your controller: 2 items, listed below');
+  // The workflow file the checks could not read is the controller's, said once (P3 and P4 both name it);
+  // "Quote Basis click budget" waits for that fix, never a by-hand step (G2 round 1, L1).
+  assert.equal(settings.protection, 'Drift: 1 item; Waiting for you: 3 items; For your controller: 2 items, listed below');
   assert.equal(settings.security, 'Waiting for you: 1 item, listed below');
   const text = summary.renderSummary({ repository: SLUG, defaultBranch: 'main', store: null, parents: [], task: {}, requiredChecks: ['Quote Basis click budget'], settings, files: null, permissions: {}, app: null, copies: null, stale: null });
-  // A cell is only counts: each part a label and its count, never a clause.
-  for (const line of tableOf(text).filter(row => /\| (?:Branch protection|Security settings)/.test(row))) {
-    assert.match(line.split(' | ')[1], /^(?:(?:On|Drift|Waiting for you|For your controller|Not available on GitHub Free|Not checked here yet): \d+ items?(?:; |, listed below$))+$/, `a short cell: ${line}`);
+  // Every cell stays short; a settings cell, which can hold three counts, is only counts: each part a
+  // label and its count, never a clause.
+  for (const line of tableOf(text)) {
+    const state = line.split(' | ')[1];
+    if (/\| (?:Branch protection|Security settings)/.test(line)) assert.match(state, /^(?:(?:On|Drift|Waiting for you|For your controller|Not available on GitHub Free|Not checked here yet): \d+ items?(?:; |, listed below$))+$/, `a short cell: ${line}`);
+    else assert.ok(state.length <= 60, `a short cell: ${line}`);
   }
   const listed = text.slice(text.indexOf('**Branch protection and rulesets:**'), text.indexOf('To change something later'));
-  assert.equal(listed.split('\n').filter(line => line.startsWith('- ')).length, (1 + 4 + 2 + 1) + (1 + 1), 'every finding and each where line, one per line');
+  assert.equal(listed.split('\n').filter(line => line.startsWith('- ')).length, (1 + 3 + 2 + 1) + (1 + 1), 'every finding and each where line, one per line');
+  assert.doesNotMatch(listed, /change by hand: "Quote Basis click budget"/, 'an unproduced check is never a by-hand step');
   assert.equal(listed.split('it is outside the YAML subset').length - 1, 1, 'the unread workflow file is named once');
   assert.match(listed, /^- Your controller fixes this in a pull request: no readable workflow job is named "Quote Basis click budget"\.$/m);
   assert.ok(listed.includes(`- ${summary.WHERE.protection}\n`) && listed.includes(`- ${summary.WHERE.security}\n`), listed);
@@ -709,10 +714,10 @@ test('a repository\'s own ruleset that allows squash and rebase gets its exact c
 test('where Toolkit\'s ruleset is not offered, the yes to the own ruleset change never lists what it changes as by hand', async t => {
   const { ctx, own, github } = ownRulesetGitHub(t, { requiredChecks: ['ghost-check', 'plain-text', 'validate'] });
   const shown = await run(ctx, ['setup']);
-  assert.ok(shown.out.includes(`   - **A. Yes (my pick):** Toolkit ${OWN_WORDS}, then reads each one back. Nothing else changes.`), shown.out);
+  assert.ok(shown.out.includes(`   - **A. Yes (my pick):** Toolkit ${OWN_WORDS} and ${summary.FILES_TASKS}, then reads each one back. Nothing else changes.`), shown.out);
   const listed = shown.out.slice(shown.out.indexOf('**Branch protection and rulesets:**'));
   assert.match(listed, /^- Drift: main allows merge, squash, rebase \(rulesets\); only merge commits are allowed$/m, 'what the yes fixes is drift, not by hand');
-  assert.match(listed, /^- Waiting for you: default-branch protection: Toolkit's ruleset is not offered while no workflow job produces "ghost-check"$/m);
+  assert.match(listed, /^- Waiting for you: default-branch protection: waits for your controller's fix: Toolkit's ruleset is not offered while no workflow job produces "ghost-check", since requiring it would block every merge$/m);
   assert.doesNotMatch(listed, /change by hand: main|workflow \(drift, fix by hand\)|by hand: Toolkit's ruleset/, 'one plain thing per line');
   const yes = await reply(ctx, '1A');
   assert.equal(yes.code, 0, yes.err);
@@ -792,4 +797,89 @@ test('an update already open while Toolkit\'s refresh pull request adds a check 
   const shown = await run(ctx, ['setup']);
   assert.ok(shown.out.split('\n').includes(`**Programme file:** An update waits in https://github.com/${SLUG}/pull/30, but Toolkit's refresh pull request https://github.com/${SLUG}/pull/40 adds the personal-data check, which that update does not list. Merge the refresh pull request first, then close the update on GitHub and say toolkit governance: one update then covers it too. Merging the update now means a second one afterwards.`), shown.out);
   assert.doesNotMatch(shown.out, /Question: Bring the programme file/);
+});
+
+// G2 round 1 (g2-1242-g4fg) probes, kept as tests. Each is red at ed6874f for the finding it names.
+
+// M1 (probe A): GitHub accepts a write, but reading it back still shows drift. The result never says
+// nothing was changed: it names the write as not confirmed yet, and how to try again.
+test('a write GitHub accepted that does not read back is named as written, not confirmed, never "nothing was changed"', async t => {
+  // Toolkit's default-branch ruleset: accepted, but the read still shows drift.
+  const ctx = governedSince(t);
+  const github = fakeGitHub(ctx);
+  ctx.cli = { ...ctx.cli, protectionWriter: (slug, checks, existing) => { github.writes.push(['protection ruleset', slug, checks, existing]); return { ok: true, id: 99 }; } };
+  assert.equal((await run(ctx, ['setup'])).code, 0);
+  const yes = await reply(ctx, '1A');
+  assert.equal(yes.code, 2, yes.err);
+  assert.equal(github.writes.length, 1, 'the write was sent');
+  assert.doesNotMatch(yes.out, /Nothing was changed on GitHub/);
+  assert.ok(yes.out.startsWith('**Written, not confirmed yet:**\n- The "Toolkit: protected default branch" ruleset on the default branch: GitHub accepted it, but reading it back still shows drift\n'), yes.out);
+  assert.match(yes.out, /^- Not confirmed yet: default-branch protection did not read back after the write\. Say refresh governance to try again, or toolkit governance to see what is left\.$/m);
+  // The no-force-push ruleset: created, but not found when read back.
+  const lost = governedSince(t);
+  fakeGitHub(lost, { squash: false, noForcePush: false });
+  lost.cli = { ...lost.cli, rulesetCreator: () => ({ ok: true }) };
+  assert.equal((await run(lost, ['setup'])).code, 0);
+  const second = await reply(lost, '1A');
+  assert.doesNotMatch(second.out, /Nothing was changed on GitHub/);
+  assert.match(second.out, /^- The "Toolkit: no force pushes" ruleset: GitHub accepted it, but it was not found when read back$/m);
+});
+
+test('the repository\'s own ruleset written but not read back, and security settings partly refused, are never "nothing was changed"', async t => {
+  const { ctx } = ownRulesetGitHub(t, { requiredChecks: ['ghost-check', 'plain-text', 'validate'] });
+  ctx.cli = { ...ctx.cli, ownRulesetWriter: () => ({ ok: false, reason: 'not-read-back' }) };
+  assert.equal((await run(ctx, ['setup'])).code, 0);
+  const own = await reply(ctx, '1A');
+  assert.doesNotMatch(own.out, /Nothing was changed on GitHub/);
+  assert.match(own.out, /^- The repository's own ruleset "protect-main": GitHub accepted the change, but reading it back does not show it as shown$/m);
+  // Two free security settings off: GitHub turns one on and refuses the other.
+  const partly = governedSince(t);
+  const github = fakeGitHub(partly, { squash: false, alerts: 'disabled' });
+  const binding = { status: 'ok', text: fs.readFileSync(path.join(partly.repo, '.github', 'toolkit-programme.json'), 'utf8') };
+  github.updates = 'disabled';
+  partly.cli = { ...partly.cli,
+    securityReader: () => ({ ok: true, ...SETTINGS_ON, alerts: github.alerts, security_updates: github.updates, binding }),
+    securityWriter: (slug, plan) => {
+      github.writes.push(['security', slug, Object.keys(plan).filter(key => plan[key])]);
+      if (plan.alerts) github.alerts = 'enabled';
+      return Object.keys(plan).filter(key => plan[key]).map(setting => (setting === 'alerts' ? { setting, ok: true, reason: null } : { setting, ok: false, reason: 'gh-request-failed' }));
+    },
+  };
+  assert.equal((await run(partly, ['setup'])).code, 0);
+  const yes = await reply(partly, '1A');
+  assert.doesNotMatch(yes.out, /Nothing was changed on GitHub/);
+  assert.match(yes.out, /^\*\*Changed and read back:\*\*\n- Dependabot alerts, turned on$/m, 'the setting that read back on is named');
+});
+
+// M2 (probe B) and M3 (probe D): a Dependabot file the repository owns misses an ecosystem. It is the
+// controller's, filed as its task, never the owner's by hand; the question names the filing.
+test('a Dependabot file gap goes to the controller and is filed as its task, and the yes question says the yes files it', async t => {
+  const ctx = fixture(t, { quiet: true, requiredChecks: ['plain-text'], commitFiles: { '.github/workflows/plain-text.yml': PLAIN_TEXT, '.github/dependabot.yml': DEPENDABOT, 'package.json': '{"name":"probe","version":"1.0.0"}\n' } });
+  fakeGitHub(ctx);
+  const issues = [];
+  const { WeaknessTasks } = require(path.join(scripts, 'toolkit-governance-weakness.cjs'));
+  ctx.cli = { ...ctx.cli, weaknessTasks: new WeaknessTasks({ request: (method, endpoint, input) => {
+    if (method === 'GET') return { ok: true, value: issues.filter(issue => issue.state === 'open') };
+    if (endpoint === `repos/${SLUG}/issues`) { issues.push({ number: 42, id: 4200, state: 'open', ...input }); return { ok: true, value: { number: 42, id: 4200 } }; }
+    if (endpoint === `repos/${SLUG}/issues/1/sub_issues`) return { ok: true, value: {} };
+    return { ok: false, reason: 'gh-request-failed' };
+  } }) };
+  const shown = await run(ctx, ['setup']);
+  const gap = '.github/dependabot.yml has no "npm" entry for /';
+  assert.ok(shown.out.includes(`\n- Your controller fixes this in a pull request: ${gap}.\n`), shown.out);
+  assert.doesNotMatch(shown.out, /change by hand: \.github\/dependabot\.yml/);
+  assert.match(shown.out, new RegExp(`^ {3}- \\*\\*A\\. Yes \\(my pick\\):\\*\\* Toolkit .* and ${summary.FILES_TASKS}, then reads each one back\\. Nothing else changes\\.$`, 'm'), 'the question names the filing');
+  const yes = await reply(ctx, '1A');
+  assert.equal(yes.code, 0, yes.err);
+  assert.match(yes.out, new RegExp(`^- Your controller fixes this in a pull request: ${gap.replace(/[.]/g, '\\.')}\\. Filed as #42 under #1\\.$`, 'm'), yes.out);
+  assert.doesNotMatch(yes.out, /by hand/);
+  assert.deepEqual(issues.map(issue => issue.title), ['CI: Dependabot file .github/dependabot.yml misses a package ecosystem']);
+});
+
+test('the yes question names the filing only when there is a weakness for the controller', async t => {
+  const ctx = governedSince(t);
+  fakeGitHub(ctx);
+  const shown = await run(ctx, ['setup']);
+  assert.match(shown.out, /\*\*A\. Yes \(my pick\):\*\* Toolkit adds the "Toolkit: protected default branch" ruleset/);
+  assert.ok(!shown.out.includes(summary.FILES_TASKS), 'nothing to file, so the question does not say it files');
 });

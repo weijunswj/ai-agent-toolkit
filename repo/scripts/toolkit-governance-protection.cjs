@@ -638,7 +638,8 @@ function producerVerdict(requiredChecks, workflows, defaultBranch) {
   // Each detail line with what it is about ({ kind, check, file }), so a weakness can be filed for the
   // repository's controller (toolkit-governance-weakness.cjs) without reading the words back.
   const about = new Map();
-  const say = (list, detail, kind, check, file) => { list.push(detail); if (!about.has(detail)) about.set(detail, { kind, check, file }); };
+  // A line in an unverified list (or about an unreadable workflow) is one Toolkit could not confirm.
+  const say = (list, detail, kind, check, file) => { list.push(detail); if (!about.has(detail)) about.set(detail, { kind, check, file, unverified: list !== p3 && list !== p4 }); };
   const unreadable = [];
   for (const entry of workflows.filter(item => item.error)) say(unreadable, `${entry.file} could not be read`, 'workflow-unreadable', null, entry.file);
   for (const entry of workflows.filter(item => item.workflow && item.workflow.problems && item.workflow.problems.length)) say(unreadable, `${entry.file}: ${entry.workflow.problems.join('; ')}`, 'workflow-unreadable', null, entry.file);

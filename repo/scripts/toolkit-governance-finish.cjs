@@ -29,7 +29,7 @@ const SWEEP_SCRIPT = path.join(__dirname, 'toolkit-governance-first-sweep.cjs');
 const SWEEP_OWED_MS = 3 * 24 * 60 * 60 * 1000;
 const SWEEP_LAPSED = 'First personal data sweep: its result could not be read here within three days; on GitHub, open Actions and choose Personal data sweep to see its list.';
 // What the finish turns on, as the bank's end lines and the session line say it.
-const WHAT = 'default-branch protection (pull requests only, the required checks, merge commits only, nobody can bypass it), a ruleset that blocks force pushes, a ruleset that keeps the programme state branch where programme state lives there, the free dependency and security settings, and, where it adds the personal data guard, one report-only sweep of what is already there (files, commit messages, pull request text and comments), which changes and posts nothing (on a public repository anyone can read its list)';
+const WHAT = 'default-branch protection (pull requests only, the required checks, merge commits only, nobody can bypass it), a ruleset that blocks force pushes, a ruleset that keeps the programme state branch where programme state lives there, the free dependency and security settings, one task for the controller of the repository under the parent issue for each weakness it finds in the CI or files of the repository (filed once, as a sub-issue), and, where it adds the personal data guard, one report-only sweep of what is already there (files, commit messages, pull request text and comments), which changes and posts nothing (on a public repository anyone can read its list)';
 
 function fileOf(registryOptions = {}) { return path.join(userStateDirectory(registryOptions), BASENAME); }
 
@@ -80,6 +80,7 @@ function filedWords(task) {
   if (!task) return '';
   if (task.state === 'filed') return ` Filed as #${task.number} under #${task.parent}.`;
   if (task.state === 'open') return ` Already filed as #${task.number}, still open.`;
+  if (task.state === 'relinked') return ` Already filed as #${task.number}, still open, and now linked under #${task.parent}.`;
   if (task.state === 'unlinked') return ` Filed as #${task.number}, but it could not be linked under #${task.parent} (${task.why}); your controller links it.`;
   return ` Not filed as a task (${task.why}); your controller files it.`;
 }

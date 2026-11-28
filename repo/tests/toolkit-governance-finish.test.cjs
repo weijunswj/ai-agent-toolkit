@@ -173,8 +173,12 @@ test('protection held for a by-hand fix ends the finish with that step in the re
   assert.deepEqual(wrote, []);
   const entry = finishing.entryFor(ctx.registryOptions, state.repository_id);
   assert.equal(entry.status, 'done');
-  // Where on GitHub to change it, then the agent checks again: never a command for the owner.
-  assert.match(entry.line, /Waiting for you, default-branch protection: change by hand: .*validate.*\. Where on GitHub: the repository's Settings, then Rules, then Rulesets[^.]*\. Then say refresh governance, and your agent checks it again\./);
+  // Where on GitHub to change it, then the agent checks again: never a command for the owner. The
+  // required check no job produces waits for the controller's fix, with the warning kept, and is never
+  // a by-hand step (G2 round 1, L1).
+  assert.match(entry.line, /Waiting for you, default-branch protection: change by hand: main allows merge, squash, rebase[^.]*\. Where on GitHub: the repository's Settings, then Rules, then Rulesets[^.]*\. Then it waits until your controller's workflow fix above has landed, since requiring "validate" before a job reports it on every pull request would block every merge\. Then say refresh governance, and your agent checks it again\./);
+  assert.match(entry.line, /Your controller fixes this in a pull request: no workflow job is named "validate"\./);
+  assert.doesNotMatch(entry.line, /change by hand:[^.]*"validate"/);
   assert.doesNotMatch(entry.line, /migrate|own terminal/);
 });
 

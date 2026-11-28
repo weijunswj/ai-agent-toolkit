@@ -94,3 +94,39 @@ test('the GitHub route maps a refused write to forbidden and a turned-off issues
   assert.deepEqual(ghRequest('GET', 'repos/a/b/issues', null, { spawn: answer(1, 'gh: API rate limit exceeded (HTTP 403)') }), { ok: false, reason: 'gh-request-failed' });
   assert.deepEqual(ghRequest('GET', 'repos/a/b/issues', null, { spawn: answer(0, '', '[{"number":1}]') }), { ok: true, value: [{ number: 1 }] });
 });
+
+// G2 round 1, L4: a task filed before whose link under the parent failed is linked on the next run;
+// one the controller moved under another parent stays there.
+test('an open task with no parent is linked under the parent on the next run; one under another parent is left alone', () => {
+  const github = fakeGitHub({ issues: [{ number: 50, id: 9050, state: 'open', body: `<!-- toolkit-weakness:${keyOf(SKIPPABLE)} -->` }] });
+  const parents = new Map([[50, null]]);
+  const request = (method, endpoint, input) => {
+    const match = /\/issues\/(\d+)\/parent$/.exec(endpoint);
+    if (method === 'GET' && match) return parents.get(Number(match[1])) ? { ok: true, value: { number: parents.get(Number(match[1])) } } : { ok: false, reason: 'not-visible' };
+    return github.request(method, endpoint, input);
+  };
+  const [relinked] = new WeaknessTasks({ request }).file(REPO, 1, [SKIPPABLE]);
+  assert.deepEqual([relinked.state, relinked.number], ['relinked', 50]);
+  assert.deepEqual(github.links, [[1, 9050]]);
+  assert.equal(filedWords(relinked), ' Already filed as #50, still open, and now linked under #1.');
+  parents.set(50, 7);
+  const [moved] = new WeaknessTasks({ request }).file(REPO, 1, [SKIPPABLE]);
+  assert.equal(moved.state, 'open');
+  assert.equal(github.links.length, 1, 'never moved from the parent the controller chose');
+});
+
+// G2 round 1, L3: a finding Toolkit could not confirm is filed as one to check, never stated as fact;
+// one weakness said twice (two missing ecosystems in one Dependabot file) is one task naming both.
+test('an unconfirmed finding is filed as one to check, and one file\'s two gaps are one task naming both', () => {
+  const unread = taskFor({ kind: 'no-producer', check: 'Quote Basis click budget', file: null, detail: 'no readable workflow job is named "Quote Basis click budget"', unverified: true });
+  assert.match(unread.title, /cannot be confirmed to report and fail as it should$/);
+  assert.doesNotMatch(unread.title, /has no job that produces it/);
+  assert.match(unread.body, /\*\*The fix:\*\* Check the finding; if it holds: Add a job/);
+  const github = fakeGitHub();
+  const gap = ecosystem => ({ kind: 'dependabot-ecosystem', check: null, file: '.github/dependabot.yml', detail: `.github/dependabot.yml has no "${ecosystem}" entry for /`, unverified: false });
+  const results = new WeaknessTasks({ request: github.request }).file(REPO, 1, [gap('npm'), gap('pip')]);
+  assert.deepEqual(results.map(entry => [entry.state, entry.number]), [['filed', 100], ['filed', 100]]);
+  assert.equal(github.issues.length, 1);
+  assert.equal(github.issues[0].title, 'CI: Dependabot file .github/dependabot.yml misses a package ecosystem');
+  assert.ok(github.issues[0].body.includes('**Found:** .github/dependabot.yml has no "npm" entry for /; .github/dependabot.yml has no "pip" entry for /.'), github.issues[0].body);
+});

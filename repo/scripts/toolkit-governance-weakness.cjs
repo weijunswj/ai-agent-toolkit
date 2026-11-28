@@ -56,8 +56,33 @@ const WORDS = Object.freeze({
     why: 'Toolkit cannot read this workflow, so it cannot confirm the required checks run and fail as they should.',
     fix: 'Keep the workflow in plain YAML Toolkit can read (no anchors or block values where it reads triggers, needs and conditions).',
   },
+  'dependabot-ecosystem': {
+    subject: 'Dependabot file',
+    title: 'misses a package ecosystem',
+    why: 'Dependabot neither updates nor flags the dependencies it is not told about, so known vulnerable versions can stay.',
+    fix: 'Add an updates entry for each ecosystem and folder named, in a pull request.',
+  },
+  'auto-merge-workflow': {
+    subject: 'Workflow',
+    title: 'is not Toolkit\'s dependency auto-merge workflow',
+    why: 'The programme file asks for patch and minor dependency updates to merge on their own, and Toolkit cannot confirm this file only merges them after the required checks pass.',
+    fix: 'Move the file aside in a pull request, then say refresh governance so Toolkit writes its own copy (Toolkit never edits a file it did not write).',
+  },
 });
 const wordsOf = kind => WORDS[kind] || WORDS['job-unclear'];
+
+// A finding Toolkit could not confirm (a workflow it could not read in full) is said as one to check,
+// never as fact.
+function wordsFor(finding) {
+  const words = wordsOf(finding.kind);
+  if (!finding.unverified) return words;
+  return {
+    ...words,
+    title: 'cannot be confirmed to report and fail as it should',
+    why: 'Toolkit could not confirm this from the workflow as written, so a pull request may merge without this check doing its job.',
+    fix: `Check the finding; if it holds: ${words.fix} Otherwise keep the job's name, trigger, needs and condition in plain YAML so Toolkit can confirm it.`,
+  };
+}
 
 // Text from the repository's own files, made safe for an issue: one line, no mention that notifies.
 const plain = (text, max = 200) => String(text ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/@/g, '(at)').trim().slice(0, max);
@@ -69,16 +94,18 @@ function keyOf(finding) {
 }
 const markOf = key => `<!-- toolkit-weakness:${key} -->`;
 
-function taskFor(finding) {
-  const words = wordsOf(finding.kind);
-  const what = finding.check ? `Required check "${plain(finding.check, 100)}"` : `Workflow ${plain(finding.file, 100)}`;
+// The task for one weakness; `details` are every line found for its key (one check's weakness can be
+// said more than once, such as two missing Dependabot ecosystems).
+function taskFor(finding, details = [finding.detail]) {
+  const words = wordsFor(finding);
+  const what = finding.check ? `Required check "${plain(finding.check, 100)}"` : `${words.subject || 'Workflow'} ${plain(finding.file, 100)}`;
   const title = `CI: ${what} ${words.title}${finding.check && finding.file ? ` (${plain(finding.file, 100)})` : ''}`;
   const body = [
-    'Toolkit\'s governance refresh found this weakness in the repository\'s own CI. It is the controller\'s to fix in a pull request.',
+    'Toolkit\'s governance refresh found this weakness in the repository\'s own CI or files. It is the controller\'s to fix in a pull request.',
     '',
     `**File:** ${finding.file ? `\`${plain(finding.file, 150)}\`` : 'none found'}`,
-    `**Job (required check):** ${finding.check ? `\`${plain(finding.check, 150)}\`` : 'the workflow as a whole'}`,
-    `**Found:** ${plain(finding.detail, 600)}.`,
+    `**Job (required check):** ${finding.check ? `\`${plain(finding.check, 150)}\`` : words.subject === 'Dependabot file' ? 'none (a configuration file)' : 'the workflow as a whole'}`,
+    `**Found:** ${[...new Set(details)].map(detail => plain(detail, 600)).join('; ').slice(0, 2000)}.`,
     `**Why it matters:** ${words.why}`,
     `**The fix:** ${words.fix}`,
     '',
@@ -141,16 +168,28 @@ class WeaknessTasks {
       for (const issue of read.value) {
         if (!issue || issue.pull_request || !Number.isSafeInteger(issue.number)) continue;
         const mark = /<!-- toolkit-weakness:([0-9a-f]{12}) -->/.exec(String(issue.body || ''));
-        if (mark && !found.has(mark[1])) found.set(mark[1], issue.number);
+        if (mark && !found.has(mark[1])) found.set(mark[1], { number: issue.number, id: issue.id });
       }
       if (read.value.length < 100) return { found };
     }
     return { reason: 'list-incomplete' };
   }
 
+  // A task filed before and still open: named again, and linked under the parent when it has no parent
+  // at all (an earlier link failed). One under another parent stays there: the controller moved it.
+  #relink(repository, parent, task) {
+    const open = { state: 'open', number: task.number };
+    if (!Number.isSafeInteger(task.id)) return open;
+    const current = this.#request('GET', `repos/${repository}/issues/${task.number}/parent`);
+    if (current.ok || current.reason !== 'not-visible') return open;
+    const linked = this.#request('POST', `repos/${repository}/issues/${parent}/sub_issues`, { sub_issue_id: task.id });
+    return linked.ok ? { state: 'relinked', number: task.number } : { state: 'unlinked', number: task.number, why: whyOf(linked.reason) };
+  }
+
   // Each finding ({ kind, check, file, detail }) once: { finding, state, number?, parent, why? } with
-  // state 'filed' (new child under the parent), 'open' (filed before, still open), 'unlinked' (filed,
-  // but not linked under the parent) or 'not-filed'. Nothing is written when the open list cannot be read.
+  // state 'filed' (new child under the parent), 'open' (filed before, still open), 'relinked' (open,
+  // and now linked under the parent), 'unlinked' (filed, but not linked under the parent) or
+  // 'not-filed'. Nothing is written when the open list cannot be read.
   // Findings with the same key (one check's weakness said twice) share one task.
   file(repository, parent, findings) {
     const all = Array.isArray(findings) ? findings : [];
@@ -160,11 +199,12 @@ class WeaknessTasks {
     const open = this.#open(repository);
     if (open.reason) return each(() => ({ state: 'not-filed', why: whyOf(open.reason) }));
     const outcomes = new Map();
+    const detailsOf = key => all.filter(item => keyOf(item) === key).map(item => item.detail);
     for (const finding of all) {
       const key = keyOf(finding);
       if (outcomes.has(key)) continue;
-      if (open.found.has(key)) { outcomes.set(key, { state: 'open', number: open.found.get(key) }); continue; }
-      const created = this.#request('POST', `repos/${repository}/issues`, taskFor(finding));
+      if (open.found.has(key)) { outcomes.set(key, this.#relink(repository, parent, open.found.get(key))); continue; }
+      const created = this.#request('POST', `repos/${repository}/issues`, taskFor(finding, detailsOf(key)));
       if (!created.ok || !Number.isSafeInteger(created.value?.number) || !Number.isSafeInteger(created.value?.id)) {
         outcomes.set(key, { state: 'not-filed', why: whyOf(created.ok ? 'gh-output-invalid' : created.reason) });
         continue;
