@@ -716,6 +716,7 @@ class ToolkitGovernanceCli {
     try {
       reads = conformance.settingsReads(state, { ...this.#registryOptions, rulesetReader: this.#rulesetReader || undefined, protectionReader: readProtection, securityReader: this.#securityReader || undefined });
       reads.keepState = merged.state ? require('./toolkit-governance-ruleset.cjs').keepStateRuleset(state.root, rulesetReader) : null;
+      reads.branchRead = reads.protectionResult?.reason === 'binding-has-no-required-checks' && state.repository ? readProtection(state.repository) : null;
     } catch { return { rows: null, unread: 'the read failed' }; }
     if (!reads.findings.some(item => item.severity === 'unverified')) {
       try { require('./toolkit-governance-parts.cjs').record(this.#registryOptions, state.repository_id, { settings: reads.findings }); } catch { /* not saved: the background check catches up */ }

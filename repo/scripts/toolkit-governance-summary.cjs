@@ -204,7 +204,8 @@ const unreadWhy = reason => UNREAD_WHY[reason] || String(reason || 'no answer');
 
 // The rows from the live reads (`reads`: conformance.settingsReads's rulesetResult, protectionResult
 // and securityResult, and keepState, the programme state ruleset's verdict where the merged programme
-// file keeps state, else null): each part On, drifted (what differs), Not available on GitHub Free,
+// file keeps state, else null; branchRead, the default branch's protection read, where the programme
+// file lists no required checks, else null): each part On, drifted (what differs), Not available on GitHub Free,
 // Waiting for you (a change only the owner can make) or Not checked here yet (GitHub could not be read,
 // with why). `fix` lists what one yes changes, the same writes a turn-on's post-merge finish makes
 // (toolkit-governance-migration.cjs finish), or is null when nothing drifted that Toolkit fixes.
@@ -232,7 +233,15 @@ function settingsRows(reads) {
   else if (branch.reason === 'binding-has-no-required-checks') {
     // As the finish says it: where GitHub cannot enforce rulesets at all, it is named with them.
     if (rules.free.length && !rules.on.length) rules.free.push(name);
-    else rules.waiting.push(`${name}: the programme file lists no required checks yet, so there is nothing for it to require`);
+    else {
+      // The merge settings are still read (`branchRead`, the default branch's protection read), so
+      // squash or rebase merges show here before Toolkit's ruleset can be offered.
+      const merge = reads.branchRead?.ok === true ? Object.entries(protection.settingsVerdict([], reads.branchRead))
+        .filter(([id, check]) => ['P5', 'P6'].includes(id) && check.status === 'drift').flatMap(([, check]) => check.details) : [];
+      rules.waiting.push(merge.length
+        ? `${name}: ${merge.join('; ')}. Toolkit's ruleset fixes this once the programme file lists required checks (the programme file update adds them); then refresh governance offers it`
+        : `${name}: the programme file lists no required checks yet, so there is nothing for it to require`);
+    }
   } else if (branch.reason === 'identity-unreadable') rules.unread.push({ name, why: unreadWhy(branch.reason) });
   else if (branch.status === 'conformant') rules.on.push(name);
   else {

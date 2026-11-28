@@ -436,8 +436,8 @@ const DEPENDABOT = 'version: 2\nupdates:\n  - package-ecosystem: "github-actions
 const SETTINGS_ON = Object.freeze({ visibility: 'public', allow_auto_merge: true, delete_branch_on_merge: 'enabled', alerts: 'enabled', security_updates: 'enabled', secret_scanning: 'enabled', push_protection: 'enabled', code_scanning: 'enabled', private_reporting: 'enabled', advanced_codeql: null });
 
 // One GitHub repository the readers and writers share, so a write shows in the next read.
-function fakeGitHub(ctx, { squash = true, alerts = 'enabled', unreadable = null } = {}) {
-  const github = { merge: { allow_merge_commit: true, allow_squash_merge: squash, allow_rebase_merge: squash }, own: null, rulesets: [NO_FORCE_PUSH], alerts, writes: [] };
+function fakeGitHub(ctx, { squash = true, alerts = 'enabled', unreadable = null, noForcePush = true } = {}) {
+  const github = { merge: { allow_merge_commit: true, allow_squash_merge: squash, allow_rebase_merge: squash }, own: null, rulesets: noForcePush ? [NO_FORCE_PUSH] : [], alerts, writes: [] };
   const binding = { status: 'ok', text: fs.readFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), 'utf8') };
   // protect-main: pull requests and the check, pinned and up to date; it says nothing on merge methods.
   const rules = () => [
@@ -535,6 +535,21 @@ test('security drift Toolkit turns on is offered with protection drift in one ye
   assert.throws(() => summary.parseChange('yes', { update: true, fix: true }), /answer question 1 or 2 with A or B, one at a time \(for example 2A\)/);
   assert.throws(() => summary.parseChange('2A', { update: true }), /answer question 1 with A or B\./);
   assert.equal(summary.questionNumbers({ update: { offer: {} }, settings: { fix: { changes: ['x'] } } }).fix, 2);
+});
+
+// SQAG as GitHub showed it on 28 Nov: a programme file from an older Toolkit with no required checks,
+// no all-branch force-push ruleset, and squash and rebase allowed. Red on main: neither row was read.
+test('with no required checks in the programme file, the merge-method drift still shows and waits for the programme file update; the missing ruleset is question 2', async t => {
+  const ctx = fixture(t, { quiet: true, minToolkit: '3.137.0', requiredChecks: [], commitFiles: { '.github/workflows/plain-text.yml': PLAIN_TEXT, '.github/dependabot.yml': DEPENDABOT } });
+  const github = fakeGitHub(ctx, { noForcePush: false });
+  ctx.cli = { ...ctx.cli, switchTransport: { openProgrammeUpdate: () => null } };
+  const shown = await run(ctx, ['setup']);
+  assert.equal(shown.code, 0, shown.err);
+  assert.equal(rowOf(shown.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | Drift: no ruleset blocks force pushes. Waiting for you: default-branch protection: main allows merge, squash, rebase (repository settings); only merge commits are allowed. Toolkit\'s ruleset fixes this once the programme file lists required checks (the programme file update adds them); then refresh governance offers it | Pull requests only, required checks and no force pushes on the default branch |');
+  assert.match(shown.out, /^\*\*1\. Question: Bring the programme file up to date\?\*\*$/m);
+  assert.match(shown.out, /^\*\*2\. Question: Fix the drifted GitHub settings\?\*\*\n {3}- \*\*A\. Yes \(my pick\):\*\* Toolkit adds the "Toolkit: no force pushes" ruleset \(every branch, no bypass\), then reads each one back\. Nothing else changes\.$/m);
+  assert.ok(shown.out.split('\n').includes('**GitHub settings:** They have drifted from what governance needs, as the table shows. One yes fixes them the way a turn-on sets them up. Answer question 2 below.'));
+  assert.deepEqual(github.writes, []);
 });
 
 test('drift Toolkit\'s ruleset cannot fix waits for the owner by hand, and is never offered', () => {
