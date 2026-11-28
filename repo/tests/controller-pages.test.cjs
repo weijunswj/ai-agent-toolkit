@@ -234,6 +234,8 @@ test('the owner-post rule has one home: the principles page, read before every o
     "This binds the controller's own posts to the owner, relays included",
     // A one-line status cannot lead with three lines, so only asks, plans and explanations do.
     'Asks, plans and explanations lead with problem, fix and skip',
+    // A Toolkit pull request was once one bullet in a long status and the owner missed it (owner record 1397).
+    "A pull request changing Toolkit's own files in a governed repository (a refresh too) that the controller opens, holds or lands gets its own bold line ending the post, never just a bullet: which, what it brings, what next (lands on its own once green, notice after; held until the owner resumes; or needs their merge).",
   ]) assert.ok(line.includes(phrase), phrase);
   // How a question is asked is the harness's own method (global rules), not a rule on this page (INT-TK421-1322).
   assert.doesNotMatch(line, /\bcards?\b|closing message/i);

@@ -153,6 +153,16 @@ test('commit line reader: exactly the refresh\'s two lines name the Toolkit comm
 });
 
 test('closure matrix: a proved refresh lands pinned with a notice; everything else waits, holds or keeps the typed merge', t => {
+  // Every route that finds the open refresh pull request gives the bold line that ends the controller's
+  // message to the owner: which pull request, what it brings and what happens next (owner record 1397:
+  // a refresh named only in a bullet of a long status was missed).
+  const NEXT = {
+    owner: /it needs your merge, since [^*]+/,
+    hold: /the controller checks it again at a later turn/,
+    attention: /validate is not green, so the controller is finding out why/,
+    wait: /it lands on its own once validate is green, with a notice after/,
+  };
+  const ownerLine = route => new RegExp(`^\\*\\*Toolkit refresh pull request ${SLUG}#7: brings its Toolkit copies( \\([^)]+\\))? up to Toolkit main; ${NEXT[route].source}\\.\\*\\*$`);
   const ctx = context(t);
   const head = ctx.refreshHead();
   const rows = [
@@ -183,11 +193,12 @@ test('closure matrix: a proved refresh lands pinned with a notice; everything el
     const result = land(ctx, at, options);
     assert.equal(result.route, route, `row ${row} (${what}): ${result.line}`);
     assert.match(result.line, line, `row ${row} (${what})`);
+    if (route !== 'land') assert.match(result.owner_line, ownerLine(route), `row ${row} (${what}): ${result.owner_line}`);
     if (route === 'land') {
       // Pinned to the proved head, with the controller's own checks named, and one notice with its undo.
       assert.equal(result.merge, `gh pr merge 7 --merge --match-head-commit ${at}`);
       assert.match(result.line, /Unless the owner said hold 7 or another merge is running here/, `rows 12 and 13 stay the controller's: ${result.line}`);
-      assert.match(result.notice, new RegExp(`^Landed ${SLUG}#7: its Toolkit copies \\(.*\\) now match Toolkit main at [0-9a-f]{7}, under this repository's task auto-merge\\. To undo it, revert that merge in a pull request; to hold this repository on one Toolkit commit, set its TOOLKIT_REF variable; to stop automatic landings, merge an Off switch \\(refresh governance\\)\\.$`));
+      assert.match(result.owner_line, new RegExp(`^\\*\\*Landed ${SLUG}#7: its Toolkit copies \\(.*\\) now match Toolkit main at [0-9a-f]{7}, under this repository's task auto-merge\\. To undo it, revert that merge in a pull request; to hold this repository on one Toolkit commit, set its TOOLKIT_REF variable; to stop automatic landings, merge an Off switch \\(refresh governance\\)\\.\\*\\*$`));
     } else assert.equal(result.merge, undefined, `row ${row}: no merge command`);
   }
   // Row 11: the head moved after the proof. The merge named the proved head, so GitHub refuses it; the
@@ -232,6 +243,8 @@ test('closure matrix: a proved refresh lands pinned with a notice; everything el
     const off = land(ctx, head);
     assert.equal(off.route, 'owner', off.line);
     assert.match(off.line, /Task auto-merge is off for owner\/a/);
+    assert.match(off.owner_line, ownerLine('owner'));
+    assert.match(off.owner_line, /since task auto-merge is off here\.\*\*$/);
   }
   // G2 round 1, L2: a binding that lists no required check never lands on its own.
   ctx.merged(bindingFor({ required_checks: [] }));
@@ -244,17 +257,23 @@ test('closure matrix: a proved refresh lands pinned with a notice; everything el
   assert.equal(land(ctx, head).route, 'hold');
   ctx.merged();
   // No open refresh pull request; and the land check only ever reads GitHub.
-  assert.equal(land(ctx, head, { open: false }).route, 'none');
+  const none = land(ctx, head, { open: false });
+  assert.equal(none.route, 'none');
+  assert.equal(none.owner_line, undefined, 'no pull request, no owner line');
   const reads = github(ctx, head);
   land(ctx, head, { github: reads });
   assert.ok(reads.calls.length > 0 && reads.calls.every(call => call.method === 'GET'), 'reads only');
-  // The command line: --land-refresh prints the route's line and the notice, exit 0 only for land.
+  // The command line: --land-refresh prints the route's line and the owner's bold line (after the merge
+  // for land), exit 0 only for land.
   const printed = [];
   const out = { write: text => printed.push(text) };
   const landing = { registryOptions: ctx.registryOptions, github: github(ctx, head), proof: () => ctx.proof(), fetch: () => true };
   assert.equal(workflows.main(['--repo', ctx.repo, '--land-refresh'], { out, err: out, refresh: () => {}, landing }), 0, printed.join(''));
-  assert.match(printed.join(''), new RegExp(`gh pr merge 7 --merge --match-head-commit ${head}\\nAfter the merge, tell the owner once: Landed ${SLUG}#7: `));
+  assert.match(printed.join(''), new RegExp(`gh pr merge 7 --merge --match-head-commit ${head}\\nAfter the merge, end your message to the owner with this line, on its own: \\*\\*Landed ${SLUG}#7: `));
+  printed.length = 0;
   assert.equal(workflows.main(['--repo', ctx.repo, '--land-refresh'], { out, err: out, refresh: () => {}, landing: { ...landing, github: github(ctx, head, { checks: [['validate', 'queued', null]] }) } }), 1);
+  const waiting = printed.join('').trim().split('\n');
+  assert.match(waiting.at(-1), new RegExp(`^End your message to the owner with this line, on its own: ${ownerLine('wait').source.slice(1)}`), waiting.join('\n'));
   // Row 20: the Toolkit's own repository.
   assert.equal(new RefreshLanding({ root: ROOT, registryOptions: ctx.registryOptions, github: () => assert.fail('no read'), fetch: () => true }).decide().route, 'none');
 });

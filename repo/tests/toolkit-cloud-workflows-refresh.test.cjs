@@ -235,6 +235,8 @@ test('refresh PR: one pull request with only Toolkit-made files, read back and n
   const first = runRefresh(dir, github);
   assert.equal(first.code, 0, first.line);
   assert.match(first.line, /^Opened refresh pull request https:\/\/github\.com\/acme\/app\/pull\/1 \(4 files: /);
+  // Opening it is news for the owner: the line sends the controller to the bold line that ends its message.
+  assert.match(first.line, / Run --land-refresh either way: it prints the bold line that ends your message to the owner\.$/);
   assert.equal(github.pulls.length, 1);
   const pr = github.pulls[0];
   assert.equal(pr.head, BRANCH);
@@ -502,6 +504,12 @@ test('refresh PR: current copies need no pull request; the command line wires --
   assert.equal(command.status, 0, command.stderr);
   assert.equal(command.stdout, 'No refresh pull request: its governance is off, and only governed repositories carry Toolkit copies.\n');
   assert.equal(command.stderr, '');
+  // The same for --land-refresh: its land check and copy proof require the script back, which threw
+  // "not extensible" before it decided anything when run as a command.
+  const landing = spawnSync(process.execPath, [path.join(ROOT, 'repo/scripts/toolkit-cloud-workflows.cjs'), '--repo', plain, '--land-refresh'], { cwd: plain, encoding: 'utf8', windowsHide: true });
+  assert.equal(landing.stderr, '');
+  assert.equal(landing.status, 1, landing.stdout);
+  assert.equal(landing.stdout, 'This repository is not governed, so it carries no Toolkit copies to land.\n');
 });
 
 // Red on the parent: a refresh added only the sweep and its gate.

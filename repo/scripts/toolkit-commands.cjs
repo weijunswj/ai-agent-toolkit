@@ -117,7 +117,8 @@ function takeoverContext({ folder = process.cwd(), environment = process.env, ho
       + `If ${name} is not the repository of the folder this chat is open in, nothing is started: run this again in that folder. First say in one line: Taking over as controller for ${name}. `
       + `Then read ${TAKEOVER_PLAYBOOK} in full and follow it from its start for ${name}, its state rules and this harness's extras included. Its takeover command's dry run comes first, and its claim (\`--apply --controller\`) only as its step 7 says; show a hold or a refusal as printed. `
       + 'This line holds no facts: take each one from GitHub, the evidence store and that command, never from memory, this line or another chat. '
-      + 'End with one short status: **What runs**, **What is next** and **What waits on you**, one line each, "nothing" where there is nothing.';
+      + 'End with one short status: **What runs**, **What is next** and **What waits on you**, one line each, "nothing" where there is nothing. '
+      + "Then, for each Toolkit pull request this takeover opened, holds or landed (a refresh, or any that changes Toolkit's own files here), one bold line of its own at the very end: which pull request, what it brings and what happens next (`--land-refresh` prints a refresh's line).";
   }
   if (governance.state === 'UNAVAILABLE') {
     return `Nothing is started. Run exactly \`node "${managedScript('toolkit-governance.cjs')}" status --json\` in this folder once, then this command once more. `

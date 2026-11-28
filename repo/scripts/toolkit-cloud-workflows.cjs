@@ -416,4 +416,7 @@ function main(argv = process.argv.slice(2), { out = process.stdout, err = proces
 
 module.exports = Object.freeze({ installerAt, isToolkitClone, sourceRoot, TOOLKIT_REPOSITORY, toolkitHead, isToolkitCheckout, TOOLKIT_PATH, DEFAULT_CLOUD_WORKFLOWS, DEFAULT_FILES, RETIRED_COPIES, RETIRED_LIST, MARKER, InstallError, leftOutNotes, refreshable, writableRows, copyCandidates, copyIdAt, markedCopies, retiredFiles, apply, bodyHash, ciWorkflowName, copyState, main, parseArgs, plan, render, toolkitCommit });
 
-if (require.main === module) process.exitCode = main();
+// Run as a command, main starts once this module has finished loading: the land check and the copy
+// proof it runs require this file back, and requiring a module that is still loading, with frozen
+// exports, throws ("not extensible") before --land-refresh decides anything.
+if (require.main === module) setImmediate(() => { process.exitCode = main(); });

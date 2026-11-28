@@ -83,7 +83,7 @@ test('the session line names stale cloud workflow copies and the refresh command
   // Older pin, checkout on main and containing it: the note, the update step and the refresh command.
   const stale = line(older);
   assert.match(stale, STALE);
-  assert.ok(stale.includes(`${WITHOUT_ASKING} \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${older.repo} --refresh-pr\` from it; it opens or updates one pull request, which the controller lands once green where task auto-merge is on (\`--land-refresh\` says when), else the owner merges it`), stale);
+  assert.ok(stale.includes(`${WITHOUT_ASKING} \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${older.repo} --refresh-pr\` from it; it opens or updates one pull request, which the controller lands once green where task auto-merge is on (\`--land-refresh\` says when and prints the bold line that ends the owner's message), else the owner merges it`), stale);
   assert.doesNotMatch(stale, /Toolkit checkout behind/);
   // Copies with today's layout are current whichever commit rendered them: no line.
   for (const at of [toolkit.A, toolkit.B]) assert.doesNotMatch(line(governedRepo(t, at, at, false, copied)), /Stale Toolkit|Toolkit checkout behind/);
@@ -107,6 +107,7 @@ test('the session line names stale cloud workflow copies and the refresh command
   const shallow = line(older);
   assert.match(shallow, new RegExp(`⚠️ Toolkit checkout shallow: ${FILES} are made by a Toolkit commit that this computer's Toolkit checkout \\(${toolkit.B.slice(0, 7)}\\) cannot reach`), shallow);
   assert.ok(shallow.includes(`Controller: this session, without asking, run \`git fetch --unshallow origin\` in the Toolkit checkout, then run \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${older.repo} --refresh-pr\` from it`), shallow);
+  assert.ok(shallow.includes("(`--land-refresh` says when and prints the bold line that ends the owner's message)"), shallow);
   assert.doesNotMatch(shallow, /latest main|Toolkit checkout behind|Stale Toolkit/);
   // Shallow and off main: the checkout is behind whatever its history holds.
   toolkit.at(toolkit.B, toolkit.A);
@@ -139,7 +140,7 @@ test('the session line names every copied file and the vendored plain-text check
   fs.writeFileSync(at('.github/scripts/plain-text-check.cjs'), plainText.vendoredText('#!/usr/bin/env node\n// an older check\n'));
   const files = ['.github/workflows/personal-data-guard.yml', '.github/workflows/personal-data-sweep.yml', '.github/scripts/personal-data-guard.cjs', '.github/personal-data-guard.json', '.github/workflows/dependency-auto-merge.yml', '.github/scripts/plain-text-check.cjs'];
   const text = line();
-  assert.ok(text.includes(`⚠️ Stale Toolkit copies: a refresh would change ${files[0]} (edited by hand), ${files[1]} (missing), ${files[2]} (missing), ${files[3]} (missing), ${files[4]} (older copy), ${files[5]} (older copy). ${WITHOUT_ASKING} \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${repo.repo} --refresh-pr\` from it; it opens or updates one pull request, which the controller lands once green where task auto-merge is on (\`--land-refresh\` says when), else the owner merges it.`), text);
+  assert.ok(text.includes(`⚠️ Stale Toolkit copies: a refresh would change ${files[0]} (edited by hand), ${files[1]} (missing), ${files[2]} (missing), ${files[3]} (missing), ${files[4]} (older copy), ${files[5]} (older copy). ${WITHOUT_ASKING} \`node repo/scripts/toolkit-cloud-workflows.cjs --repo ${repo.repo} --refresh-pr\` from it; it opens or updates one pull request, which the controller lands once green where task auto-merge is on (\`--land-refresh\` says when and prints the bold line that ends the owner's message), else the owner merges it.`), text);
   // The same files the refresh itself would change, and no others.
   const refresh = require('../scripts/toolkit-cloud-workflows-refresh.cjs');
   assert.deepEqual(refresh.pending({ target: repo.repo, root: toolkit.root, commit: toolkit.B }).rows.map(row => row.file), files);

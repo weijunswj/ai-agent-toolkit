@@ -79,6 +79,8 @@ test('a governed folder: the line names its repository, the appointment, the pla
         "Its takeover command's dry run comes first, and its claim (`--apply --controller`) only as its step 7 says; show a hold or a refusal as printed",
         'This line holds no facts: take each one from GitHub, the evidence store and that command, never from memory, this line or another chat',
         'End with one short status: **What runs**, **What is next** and **What waits on you**, one line each',
+        // A Toolkit pull request the takeover opened, holds or landed gets its own bold last line, never a bullet in the status.
+        "Then, for each Toolkit pull request this takeover opened, holds or landed (a refresh, or any that changes Toolkit's own files here), one bold line of its own at the very end: which pull request, what it brings and what happens next (`--land-refresh` prints a refresh's line).",
         `If ${slug} is not the repository of the folder this chat is open in, nothing is started: run this again in that folder`]) assert.ok(text.includes(part), part);
     }
     // It carries no facts of its own: no epoch, holder, record number, commit or task.

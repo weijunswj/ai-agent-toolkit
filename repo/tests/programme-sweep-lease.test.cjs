@@ -694,7 +694,7 @@ test('cloud sweep: CLOUD_LAYOUT_STALE is raised while the copies are stale and r
   assert.match(state.FINDING_CODES.CLOUD_LAYOUT_STALE.next_action, /This turn, without asking, [^.]*toolkit-cloud-workflows\.cjs --repo <any checkout of this repository> --refresh-pr/);
   // A proved refresh lands on its own under task auto-merge; only an unproved one, or one where the
   // switch is off, goes to the owner (G2 round 1, M2: the line sent every refresh to the owner).
-  assert.match(state.FINDING_CODES.CLOUD_LAYOUT_STALE.next_action, /Where task auto-merge is on, the pull request it opens or updates lands on its own: once its checks are green, `--land-refresh` proves every file and names the pinned merge to run and the notice to post after; otherwise, or for an unproved one, the owner merges it/);
+  assert.match(state.FINDING_CODES.CLOUD_LAYOUT_STALE.next_action, /Where task auto-merge is on, the pull request it opens or updates lands on its own: once its checks are green, `--land-refresh` proves every file and names the pinned merge to run; otherwise, or for an unproved one, the owner merges it\. Either way `--land-refresh` prints the bold line that ends your message to the owner/);
   assert.doesNotMatch(state.FINDING_CODES.CLOUD_LAYOUT_STALE.next_action, /the owner merges the pull request it opens or updates/);
   stale = false;
   f.advance(HOUR);

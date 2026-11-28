@@ -283,7 +283,7 @@
     {
       "file": "repo/CONTROLLER.md",
       "rule": "- [Design principles](controller/principles.md)",
-      "rule_sha": "e5094df79c06",
+      "rule_sha": "b4444c38bc16",
       "covers": "The pages check fails when this page is missing or its hash is stale.",
       "enforced_by": [
         {
@@ -422,10 +422,10 @@
     {
       "file": "repo/controller/principles.md",
       "rule": "**Plain owner posts:**",
-      "rule_sha": "dc3719f897f2",
+      "rule_sha": "dc8cb8d228ad",
       "instruction_only": {
         "basis": "judgement",
-        "why": "What the owner needs to read, and the wording of each post, is a judgement."
+        "why": "What the owner needs to read, and the wording of each post, is a judgement. For a Toolkit refresh pull request, `toolkit-cloud-workflows.cjs --land-refresh` prints the bold line that ends the post (toolkit-copies-carry.test.cjs)."
       }
     },
     {
