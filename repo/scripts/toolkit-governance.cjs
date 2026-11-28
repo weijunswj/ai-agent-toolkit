@@ -170,7 +170,8 @@ class ToolkitGovernanceCli {
     this.#securityWriter = securityWriter;
     this.#securityFileWriter = securityFileWriter;
     this.#firstSweep = firstSweep;
-    // Files the CI weaknesses a settings fix finds as the controller's tasks; none where GitHub is not written.
+    // Files the CI weaknesses the summary shows, and a settings fix or finish finds, as the controller's
+    // tasks; none where GitHub is not written (offline and test runs).
     this.#weaknessTasks = weaknessTasks || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new (require('./toolkit-governance-weakness.cjs').WeaknessTasks)());
     this.#hookReader = hookReader || (() => hookCapability.hookCapability());
     this.#appReader = appReader;
@@ -647,6 +648,18 @@ class ToolkitGovernanceCli {
       const facts = { ...this.#summaryFacts({ state, specs, merged, read, switches, permissions, app, storeCheck, copies }), doneWhen };
       let held = false;
       try { const result = require('./toolkit-governance-ready.cjs').readiness(state, this.#registryOptions); held = result.applies && !result.ready; } catch { held = false; }
+      // The summary's text, made once, when a run first shows it to the owner: it files each weakness
+      // it lists for the repository's controller as a child task (owner decision INT-TK421-1399), once,
+      // and a task still open is named again. A run that shows no summary (a --json read, an answer
+      // that shows nothing) never makes it, so it files nothing.
+      let text = null;
+      const shown = () => {
+        if (text !== null) return text;
+        const weaknesses = state.root ? facts.settings?.controller || [] : [];
+        const filed = weaknesses.length ? this.#maintenance({ write: () => true }, null).fileWeaknesses({ root: state.root, slug: state.repository }, weaknesses) : [];
+        text = summary.renderSummary({ ...facts, settings: summary.withTasks(facts.settings, filed) }, { held });
+        return text;
+      };
       const cleanable = Boolean(copies && copies.ok && copiesRow(copies)?.files > 0);
       const asked = summary.questionNumbers(facts);
       const fix = facts.settings?.fix || null;
@@ -655,7 +668,7 @@ class ToolkitGovernanceCli {
         const reread = this.#settingsRows(state, merged, read, this.#protectionReader || protection.ghProtectionReader);
         return summary.renderTable({ ...facts, settings: reread.rows, unread: reread.unread });
       };
-      return { kind: 'summary', text: summary.renderSummary(facts, { held }), parts: summary.summaryParts(facts), agents: governanceBank.agentsSummary(), update: facts.update, fix, table, parse: reply => summary.parseChange(reply, { copies: cleanable, rows: Boolean(doneWhen?.pages?.length), update: Boolean(asked.update), fix: Boolean(asked.fix) }) };
+      return { kind: 'summary', get text() { return shown(); }, parts: summary.summaryParts(facts), agents: governanceBank.agentsSummary(), update: facts.update, fix, table, parse: reply => summary.parseChange(reply, { copies: cleanable, rows: Boolean(doneWhen?.pages?.length), update: Boolean(asked.update), fix: Boolean(asked.fix) }) };
     }
     // The search's own reason is for the logs, not the owner: nothing can be set up until it works.
     if (adoption && adoption.blocked) return { kind: 'line', code: 1, lines: ['GitHub could not be read just now, so Toolkit cannot find or suggest the evidence store and parent issue yet, and the setup questions are not shown. Nothing changed. Type toolkit governance again in a moment.'] };
