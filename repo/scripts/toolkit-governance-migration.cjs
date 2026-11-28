@@ -106,6 +106,27 @@ function workflowFindings(result) {
   return [...found.values()];
 }
 
+// What is left of the security checks after a finish ({ S1..S8 } from dependencySecurity): { steps }
+// the owner changes by hand and { waits } (dependency auto-merge waiting on protection), or { unread }
+// when a check could not be read. `fileDetails` are the repository-file findings, which go to the
+// controller and are never a step. S7 waits on protection when every line it has, apart from those
+// files, is the unprotected default branch.
+// The failure this prevents: a workflow at Toolkit's auto-merge path that was not Toolkit's, beside the
+// unprotected branch, sent the protection line to the owner by hand while protection only waited for
+// the controller's fix (governance review, 28 November 2026).
+function securityLeft(checks, { fileDetails, waitsOnProtection, protectionHeld, wait }) {
+  const ownLines = check => check.details.filter(detail => !fileDetails.has(detail));
+  const onlyProtection = check => ownLines(check).length > 0 && ownLines(check).every(detail => detail.startsWith('the default branch is not protected the way auto-merge needs'));
+  const steps = [], waits = [];
+  for (const [id, check] of Object.entries(checks || {})) {
+    if (id === 'S7' && waitsOnProtection && !protectionHeld && check.status === 'drift' && onlyProtection(check)) waits.push(wait);
+    else if (check.status === 'drift' || (check.status === 'unverified' && check.by_hand === true)) steps.push(...ownLines(check));
+    else if (check.status === 'unverified' && id === 'S7' && waitsOnProtection) (protectionHeld ? steps : waits).push(wait);
+    else if (check.status === 'unverified') return { unread: true };
+  }
+  return { steps, waits };
+}
+
 // What a protection candidate needs changed, for the run's own log: the settings that drift, then the
 // workflow problems the ruleset does not fix.
 function protectionNotes(result) {
@@ -239,8 +260,11 @@ class GovernanceMaintenance {
   // filed whether or not any setting changed.
   fileWeaknesses(row, findings) {
     if (!findings.length) return [];
-    let parent = null;
-    try { parent = governance.mergedBinding(row.root, this.#registryOptions)?.parents?.[0]?.issue ?? null; } catch { parent = null; }
+    // A merged programme file that cannot be read (mergedBinding gives null) is said as that, never as
+    // one that names no parent issue (governance review, 28 November 2026).
+    const binding = governance.mergedBinding(row.root, this.#registryOptions);
+    if (!binding) return findings.map(finding => ({ note: finding.detail, task: { state: 'not-filed', parent: null, why: 'the programme file could not be read' } }));
+    const parent = binding.parents?.[0]?.issue ?? null;
     let tasks;
     try { tasks = this.#weaknessTasks ? this.#weaknessTasks.file(row.slug, parent, findings) : null; } catch { tasks = null; }
     const why = this.#weaknessTasks ? 'the GitHub request failed' : 'this run does not write to GitHub';
@@ -303,7 +327,9 @@ class GovernanceMaintenance {
     const protectionLeft = controller.length > 0;
     const files = security.repositoryFileFindings(result);
     const fileDetails = new Set(files.map(finding => finding.detail));
-    controller.push(...files);
+    // Only a security read that succeeded lists them in the summary, so only then does the yes file them:
+    // the question names every effect (governance review, 28 November 2026).
+    if (result.fixes) controller.push(...files);
     // Settings GitHub refused as not available here (plan or policy) are not failures and never retried.
     const unavailable = new Set(securities.flatMap(entry => entry.unavailable || []));
     const refused = securities.flatMap(entry => (entry.result === 'failed' ? (entry.settings || []).filter(item => !item.ok && item.reason && !unavailable.has(item.setting)).map(item => item.reason) : []));
@@ -317,16 +343,11 @@ class GovernanceMaintenance {
     const waitsOnProtection = (protectionHeld || protectionLeft) && ['default-branch', 'not-merged'].includes(result.policy_source)
       && typeof result.settings?.allow_auto_merge === 'boolean';
     const wait = protectionHeld ? 'dependency auto-merge waits until default-branch protection is set (its step is above)' : 'dependency auto-merge waits until your controller\'s workflow fix above has landed';
-    const onlyProtection = check => check.details.length > 0 && check.details.every(detail => detail.startsWith('the default branch is not protected the way auto-merge needs'));
-    const steps = [], waits = [];
-    for (const [id, check] of Object.entries(result.checks || {})) {
-      if (id === 'S7' && waitsOnProtection && !protectionHeld && check.status === 'drift' && onlyProtection(check)) waits.push(wait);
-      else if (check.status === 'drift' || (check.status === 'unverified' && check.by_hand === true)) steps.push(...check.details.filter(detail => !fileDetails.has(detail)));
-      else if (check.status === 'unverified' && id === 'S7' && waitsOnProtection) (protectionHeld ? steps : waits).push(wait);
-      else if (check.status === 'unverified') { retry.push('the security settings could not be read back'); return; }
-    }
+    const left = securityLeft(result.checks, { fileDetails, waitsOnProtection, protectionHeld, wait });
+    if (left.unread) { retry.push('the security settings could not be read back'); return; }
+    const { steps, waits } = left;
     if (!steps.length && !waits.length) {
-      if (!files.length) retry.push('the security settings could not be read back');
+      if (!files.length || !result.fixes) retry.push('the security settings could not be read back');
       return;
     }
     held.push({ name: 'some dependency and security settings', step: [steps.length ? `change by hand: ${steps.join('; ')}.` : '', waits.length ? `${waits.join('; ')}.` : ''].filter(Boolean).join(' ') });
@@ -596,4 +617,4 @@ class GovernanceMaintenance {
 
 
 
-module.exports = Object.freeze({ GovernanceMaintenance, appendRunRecord, protectionOffer, workflowNotes, workflowFindings, SettingsOperationHistory, RECORD_BASENAME });
+module.exports = Object.freeze({ GovernanceMaintenance, securityLeft, appendRunRecord, protectionOffer, workflowNotes, workflowFindings, SettingsOperationHistory, RECORD_BASENAME });

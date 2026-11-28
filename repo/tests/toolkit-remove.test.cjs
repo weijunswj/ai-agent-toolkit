@@ -448,7 +448,7 @@ test('full removal: settings, helper files and skill copies go after the OK; the
   assert.doesNotMatch(screen, /my-reviewer|my-skill/);
   // Long lists fold into a count; --full unfolds them, and the code stays the same.
   assert.match(screen, /- \*\*Skill copies:\*\* \d+ skill folders Toolkit copied in ~\/\.claude\/skills \(full list on request\)/);
-  assert.match(screen, /- \*\*Toolkit folder:\*\* ~\/\.ai-agent-toolkit: the Toolkit checkout, its records and locks, and \d+ older backup files of Toolkit's own \(\d+ items, full list on request\); it goes last, once no Toolkit plugin is installed/);
+  assert.match(screen, /- \*\*Toolkit folder:\*\* ~\/\.ai-agent-toolkit: the Toolkit checkout, its records and locks, and \d+ older backup files of Toolkit's own \(\d+ items, full list on request\); it goes last, once no Toolkit plugin or Toolkit permission line is left/);
   assert.match(screen, /- \*\*Your key list:\*\* ~\/\.ai-agent-toolkit\/env: the keys themselves stay in the credential store/);
   assert.match(screen, /- \*\*Recovery records:\*\* ~\/\.ai-agent-toolkit\/recovery-identities: the evidence of outside resources checked before a live change/);
   assert.match(screen, /- \*\*Not Toolkit's:\*\* ~\/\.ai-agent-toolkit\/notes\n/);
@@ -456,8 +456,8 @@ test('full removal: settings, helper files and skill copies go after the OK; the
   assert.match(agent, /The full lists, when the owner asks: run plan --app all --full\./);
   const full = removal.describePlan(plan, { full: true }).join('\n');
   assert.match(full, /- \*\*Skill copies:\*\*\n  - ~\/\.claude\/skills\//);
-  assert.match(full, /  - ~\/\.ai-agent-toolkit\/agent-control \(\d+ older backup files?\)\n/);
-  assert.match(full, /  - ~\/\.ai-agent-toolkit\/backups \(1 older backup file\)\n/);
+  assert.match(full, /  - ~\/\.ai-agent-toolkit\/agent-control \(\d+ older backup files? of Toolkit's own\)\n/);
+  assert.match(full, /  - ~\/\.ai-agent-toolkit\/backups \(1 older backup file of Toolkit's own\)\n/);
   assert.match(full, /  - ~\/\.ai-agent-toolkit\/antigravity-refresh\n/);
   for (const name of ['remote-check.json', 'agent-rules-notices.json', 'hook-skips.json', 'update.readers', 'update.lock', 'update.lock.recovery', 'update.tree-moving', 'source', 'current', 'user-state',
     'update.lock.recovery.claim-0123456789abcdef', 'update.lock.displaced.01234567-89ab-cdef-0123-456789abcdef', '.staging-01234567-89ab-cdef-0123-456789abcdef',
@@ -507,7 +507,11 @@ test('full removal: settings, helper files and skill copies go after the OK; the
   assert.deepEqual(fs.readdirSync(path.join(h.folder, 'backups', 'remove-toolkit')), gathered);
   assert.equal(fs.readFileSync(path.join(h.folder, 'env', 'manifest.json'), 'utf8'), 'x');
   assert.equal(fs.readFileSync(path.join(h.folder, 'recovery-identities', 'r.json'), 'utf8'), 'x');
-  assert.match(removal.describeResult(done).join('\n'), /- \*\*New session:\*\* start a new session in each app/);
+  const last = removal.describeResult(done).join('\n');
+  assert.match(last, /- \*\*New session:\*\* start a new session in each app/);
+  // The closing line for older backups says whose they are, as the plan does (G2 of PR 1552, delta L1).
+  const backupsGone = done.parts.find(part => part.key === 'toolkit_folder').results.find(item => item.what === '~/.ai-agent-toolkit/backups');
+  assert.match(backupsGone.reason, /^\d+ older backup files? of Toolkit's own$/);
   assert.equal(h.make().plan().nothing, true);
 });
 
@@ -608,7 +612,7 @@ test('the Toolkit folder: the folded line names only what goes', t => {
   for (const file of ['backups/global-rules/2026-01-01T00-00-00-000Z/AGENTS.md', 'env/manifest.json']) { fs.mkdirSync(path.dirname(path.join(folder, file)), { recursive: true }); fs.writeFileSync(path.join(folder, file), 'x'); }
   const plan = new removal.ToolkitRemoval({ home, parts: [new parts.ToolkitFolderPart({ home, plugins: () => ({}) })], plugins: () => ({}) }).plan();
   const line = removal.describePlan(plan).find(entry => entry.startsWith('- **Toolkit folder:**'));
-  assert.equal(line, "- **Toolkit folder:** ~/.ai-agent-toolkit: 1 older backup file of Toolkit's own; it goes last, once no Toolkit plugin is installed");
+  assert.equal(line, "- **Toolkit folder:** ~/.ai-agent-toolkit: 1 older backup file of Toolkit's own; it goes last, once no Toolkit plugin or Toolkit permission line is left");
 });
 
 // G2 round 1 L3: a one-app removal while another app keeps Toolkit gathers its own backup too, so a
@@ -725,7 +729,7 @@ test('removal from Codex only, with no other app keeping Toolkit: the shared par
   assert.deepEqual(plan.kept_for, []);
   assert.deepEqual(rules.asked, [['codex', 'antigravity']]);
   const text = removal.describePlan(plan).join('\n');
-  assert.match(text, /- \*\*Toolkit folder:\*\* ~\/\.ai-agent-toolkit: [^\n]*it goes last, once no Toolkit plugin is installed/);
+  assert.match(text, /- \*\*Toolkit folder:\*\* ~\/\.ai-agent-toolkit: [^\n]*it goes last, once no Toolkit plugin or Toolkit permission line is left/);
   assert.match(text, /\*\*From:\*\* Codex only; no other app has the Toolkit plugin, so the shared parts below go too\./);
   assert.doesNotMatch(text, /\.claude\/agents|Claude Code subagent limit|\.claude\/skills/);
 });

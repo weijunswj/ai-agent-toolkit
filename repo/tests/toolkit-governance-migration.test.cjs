@@ -144,3 +144,19 @@ test('the one Enter covers only the changes that need something', async t => {
   assert.doesNotMatch(withState.asked[0], /protected default branch/);
   assert.deepEqual(withState.github.writes, ['no-force-push', 'keep-state']);
 });
+
+// G2 of PR 1582 round 2, L9: when dependency auto-merge (S7) has both a workflow at Toolkit's path
+// that is not Toolkit's (the controller's file finding) and the unprotected default branch, and
+// protection waits only for the controller's workflow fix, the protection line waits too: it is never
+// handed to the owner to change by hand.
+test('S7 with a foreign workflow and unprotected branch waits for the controller, never by hand', () => {
+  const { securityLeft } = require('../scripts/toolkit-governance-migration.cjs');
+  const foreign = '.github/workflows/dependabot-auto-merge.yml is not Toolkit\'s dependency auto-merge workflow';
+  const unprotected = 'the default branch is not protected the way auto-merge needs';
+  const wait = 'dependency auto-merge waits until your controller\'s workflow fix above has landed';
+  const checks = { S7: { status: 'drift', details: [foreign, unprotected] } };
+  assert.deepEqual(securityLeft(checks, { fileDetails: new Set([foreign]), waitsOnProtection: true, protectionHeld: false, wait }), { steps: [], waits: [wait] });
+  // Guard rows: protection held for the owner keeps its by-hand step; an unread check is a retry.
+  assert.deepEqual(securityLeft(checks, { fileDetails: new Set([foreign]), waitsOnProtection: true, protectionHeld: true, wait }), { steps: [unprotected], waits: [] });
+  assert.deepEqual(securityLeft({ S1: { status: 'unverified', details: ['alerts could not be read'] } }, { fileDetails: new Set(), waitsOnProtection: false, protectionHeld: false, wait }), { unread: true });
+});

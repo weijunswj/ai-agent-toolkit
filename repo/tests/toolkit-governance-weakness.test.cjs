@@ -130,3 +130,25 @@ test('an unconfirmed finding is filed as one to check, and one file\'s two gaps 
   assert.equal(github.issues[0].title, 'CI: Dependabot file .github/dependabot.yml misses a package ecosystem');
   assert.ok(github.issues[0].body.includes('**Found:** .github/dependabot.yml has no "npm" entry for /; .github/dependabot.yml has no "pip" entry for /.'), github.issues[0].body);
 });
+
+// G2 of PR 1583, L1: a task closed while its weakness is still found is filed again on the next
+// showing, so the task says to stay open until the fix lands, and no longer invites merging it into
+// another task (closing it then only files it again).
+test('the task says to keep it open until the fix lands, since a closed task is filed again', () => {
+  const { body } = taskFor(SKIPPABLE);
+  assert.match(body, /Keep this task open until the fix is merged: while refresh governance still finds this weakness, a closed task is filed again\./);
+  assert.doesNotMatch(body, /merge into an open task/);
+});
+
+// G2 of PR 1583, L4: a programme file that cannot be read is said as that, never as "names no parent
+// issue", and nothing is asked of GitHub.
+test('a programme file that cannot be read gives its own reason, and nothing is filed', () => {
+  const { GovernanceMaintenance } = require('../scripts/toolkit-governance-migration.cjs');
+  const github = fakeGitHub();
+  const unreadable = new Proxy({}, { get() { throw new Error('the programme file cache could not be read'); } });
+  const maintenance = new GovernanceMaintenance({ stdout: { write() {} }, registryOptions: unreadable, weaknessTasks: new WeaknessTasks({ request: github.request }) });
+  const [entry] = maintenance.fileWeaknesses({ root: process.cwd(), slug: REPO }, [SKIPPABLE]);
+  assert.deepEqual(entry.task, { state: 'not-filed', parent: null, why: 'the programme file could not be read' });
+  assert.equal(filedWords(entry.task), ' Not filed as a task (the programme file could not be read); your controller files it.');
+  assert.deepEqual(github.calls, [], 'nothing asked of GitHub');
+});

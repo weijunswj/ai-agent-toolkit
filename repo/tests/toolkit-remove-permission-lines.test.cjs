@@ -57,6 +57,10 @@ test('the Toolkit folder stays while Toolkit lines are left, and goes once they 
   assert.match(closing, /- \*\*Toolkit folder:\*\* ~\/\.ai-agent-toolkit: Toolkit's permission lines are still in your settings/);
   assert.match(closing, /- \*\*Still to do:\*\* the Toolkit folder stays for the reason under Kept\./);
   assert.doesNotMatch(closing, /Nothing of Toolkit's was left|plugin is still installed/);
+  // The agent's own step names the owner's permission command, not a plugin (G2 merge check of PR 1552, L2).
+  const [, steps] = describeResult(make().apply(make().plan().code)).join('\n').split(require('../scripts/toolkit-remove.cjs').AGENT_LINE);
+  assert.match(steps, /- Once the owner has run their toolkit permissions --remove command and says `remove toolkit` again, run: node "[^"]*toolkit-remove\.cjs" plan --app all/);
+  assert.doesNotMatch(steps, /plugin is uninstalled/);
   fs.writeFileSync(pc.settings, JSON.stringify({ permissions: { allow: ['Bash(npm test)'] } }));
   assert.deepEqual(lines.plan(), [], 'nothing to list once the owner ran the command');
   const gone = folder.apply(folder.plan());

@@ -153,7 +153,7 @@ function defineClaudeSetup({ CLAUDE_HOOK_TRUST_ACTION, SUBAGENT_DEPTH_FOR_TOPOLO
     },
     'agents-md': {
       short: 'Read AGENTS.md (in all local repos) too', benefit: "makes Claude Code read the repository's AGENTS.md",
-      controls: 'Project instructions set to "claude-md-and-agents-md" (in pluginConfigs), so Claude Code reads AGENTS.md as well as CLAUDE.md, also in a repository with its own CLAUDE.md. Claude Code 2.1.285 or later reads it under cc-plugin-agents-md@builtin or agents-md@builtin, and 2.1.277 to 2.1.284 only under agents-md@builtin; setup writes cc-plugin-agents-md@builtin on 2.1.285 or later, agents-md@builtin on 2.1.277 to 2.1.284 or when it cannot tell the version, and nothing on an older version.',
+      controls: '"instructionFiles": "claude-md-and-agents-md" at pluginConfigs > cc-plugin-agents-md@builtin or agents-md@builtin > options in settings.json, so Claude Code reads AGENTS.md as well as CLAUDE.md, also in a repository with its own CLAUDE.md. Claude Code 2.1.285 or later reads it under cc-plugin-agents-md@builtin or agents-md@builtin, and 2.1.277 to 2.1.284 only under agents-md@builtin; setup writes cc-plugin-agents-md@builtin on 2.1.285 or later, agents-md@builtin on 2.1.277 to 2.1.284 or when it cannot tell the version, and nothing on an older version.',
     },
   });
   const settingEffect = (entry) => CLAUDE_SETTING_EFFECTS[entry.id] || { short: entry.label || entry.id, benefit: `sets ${entry.label || entry.id}`, controls: entry.label || entry.id };
