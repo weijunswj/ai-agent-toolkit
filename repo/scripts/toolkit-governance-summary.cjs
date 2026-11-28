@@ -157,9 +157,11 @@ function presenceRow(entries, files, { defaultBranch = null } = {}) {
   return { state: [on.length ? `On: ${listed(on)}` : '', missing.length ? `Missing: ${listed(missing)}` : ''].filter(Boolean).join('. '), missing };
 }
 
-// Branch protection and rulesets, and the security settings, from the post-merge finish's record
-// (toolkit-governance-finish.cjs), else the background check's drift, else not checked.
-function finishRows(finish, drift) {
+// Branch protection and rulesets, and the security settings, where GitHub was not read for this
+// summary (an offline run, or a merged programme file read that is not fresh): from the post-merge
+// finish's record (toolkit-governance-finish.cjs), else the background check's drift, else not
+// checked, saying why (`unread`).
+function finishRows(finish, drift, unread = 'GitHub was not read') {
   const on = finish?.on || [], unavailable = finish?.unavailable || [], held = finish?.held || [];
   const isRule = name => /protection|ruleset/.test(name);
   const isSecurity = name => /security/.test(name);
@@ -172,17 +174,159 @@ function finishRows(finish, drift) {
     free = rulesOff.length > 0 && !rulesOn.length && !rulesHeld.length;
     protection = free ? 'Not available on GitHub Free (private)'
       : [rulesOn.length ? `On: ${listed(rulesOn)}` : '', rulesOff.length ? `Not available on GitHub Free: ${listed(rulesOff)}` : '', rulesHeld.length ? `Waiting for you: ${listed(rulesHeld)}` : ''].filter(Boolean).join('. ');
-  } else protection = rulesDrift.length ? `Drift found (${rulesDrift.length}); say toolkit governance migrate` : 'Not checked here yet';
+  } else protection = rulesDrift.length ? `Drift found (${rulesDrift.length}); say toolkit governance migrate` : `Not checked here yet: ${unread}`;
   if (finish && (securityOn.length || securityHeld.length)) {
     security = [securityOn.length ? `On: ${listed(securityOn)}` : '', securityHeld.length ? `Waiting for you: ${listed(securityHeld)}` : ''].filter(Boolean).join('. ');
-  } else security = securityDrift.length ? `Drift found (${securityDrift.length}); the agent runs toolkit governance security` : 'Not checked here yet';
-  return { protection, free, security };
+  } else security = securityDrift.length ? `Drift found (${securityDrift.length}); the agent runs toolkit governance security` : `Not checked here yet: ${unread}`;
+  return { protection, free, security, fix: null };
+}
+
+// ---- the GitHub settings, read for the summary ------------------------------------------------
+// The failure this prevents: in a repository governed before this Toolkit, the protection and security
+// rows came only from a turn-on's finish record, so they said "Not checked here yet" for ever and
+// refresh governance never offered to fix drift on GitHub (squash and rebase merges allowed beside an
+// active ruleset).
+
+// Why GitHub could not be read, in plain words, by the readers' reason codes.
+const UNREAD_WHY = Object.freeze({
+  'gh-unavailable': 'the GitHub CLI could not run',
+  forbidden: 'GitHub refused this computer\'s sign-in, which needs admin rights there',
+  'not-visible': 'GitHub does not show it to this computer\'s sign-in',
+  'repository-not-visible': 'GitHub does not show it to this computer\'s sign-in',
+  'classic-protection-not-visible': 'classic branch protection is shown to repository admins only',
+  'gh-request-failed': 'the GitHub request failed',
+  'gh-output-invalid': 'GitHub gave an answer Toolkit could not read',
+  'reader-failed': 'the read failed',
+  'identity-unreadable': 'this repository\'s identity could not be read',
+  'visibility-unreadable': 'GitHub did not say whether the repository is public',
+});
+const unreadWhy = reason => UNREAD_WHY[reason] || String(reason || 'no answer');
+
+// The rows from the live reads (`reads`: conformance.settingsReads's rulesetResult, protectionResult
+// and securityResult, and keepState, the programme state ruleset's verdict where the merged programme
+// file keeps state, else null; branchRead, the default branch's protection read, where the programme
+// file lists no required checks, else null): each part On, drifted (what differs), Not available on GitHub Free,
+// Waiting for you (a change only the owner can make) or Not checked here yet (GitHub could not be read,
+// with why). `fix` lists what one yes changes, the same writes a turn-on's post-merge finish makes
+// (toolkit-governance-migration.cjs finish), or is null when nothing drifted that Toolkit fixes.
+function settingsRows(reads) {
+  const { protectionOffer, protectionNotes } = require('./toolkit-governance-migration.cjs');
+  const rulesets = require('./toolkit-governance-ruleset.cjs');
+  const protection = require('./toolkit-governance-protection.cjs');
+  const security = require('./toolkit-governance-security.cjs');
+  const changes = [];
+  const rules = { on: [], drift: [], free: [], waiting: [], unread: [] };
+  const rulesetPart = (result, { on, missing, change }) => {
+    if (!result || result.status === 'not-applicable') return;
+    if (result.status === 'present') rules.on.push(on);
+    else if (result.status === 'not-enforceable') rules.free.push(on);
+    else if (result.status === 'missing') { rules.drift.push(missing); changes.push(change); }
+    else rules.unread.push({ name: on, why: unreadWhy(result.reason) });
+  };
+  rulesetPart(reads.rulesetResult, { on: 'the no-force-push ruleset', missing: 'no ruleset blocks force pushes', change: `adds the "${rulesets.RULESET_NAME}" ruleset (every branch, no bypass)` });
+  rulesetPart(reads.keepState, { on: 'the ruleset that keeps the programme state branch', missing: 'no ruleset keeps the programme state branch', change: `adds the "${rulesets.KEEP_STATE_RULESET_NAME}" ruleset (that branch only, no deletion, no bypass)` });
+  const branch = reads.protectionResult;
+  const name = 'default-branch protection';
+  if (!branch) rules.unread.push({ name, why: 'the programme file\'s required checks could not be read' });
+  else if (branch.status === 'not-applicable') { /* not a github.com repository: nothing to show */ }
+  else if (branch.status === 'not-enforceable') rules.free.push(name);
+  else if (branch.reason === 'binding-has-no-required-checks') {
+    // As the finish says it: where GitHub cannot enforce rulesets at all, it is named with them.
+    if (rules.free.length && !rules.on.length) rules.free.push(name);
+    else {
+      // The merge settings are still read (`branchRead`, the default branch's protection read), so
+      // squash or rebase merges show here before Toolkit's ruleset can be offered.
+      const merge = reads.branchRead?.ok === true ? Object.entries(protection.settingsVerdict([], reads.branchRead))
+        .filter(([id, check]) => ['P5', 'P6'].includes(id) && check.status === 'drift').flatMap(([, check]) => check.details) : [];
+      rules.waiting.push(merge.length
+        ? `${name}: ${merge.join('; ')}. Toolkit's ruleset fixes this once the programme file lists required checks (the programme file update adds them); then refresh governance offers it`
+        : `${name}: the programme file lists no required checks yet, so there is nothing for it to require`);
+    }
+  } else if (branch.reason === 'identity-unreadable') rules.unread.push({ name, why: unreadWhy(branch.reason) });
+  else if (branch.status === 'conformant') rules.on.push(name);
+  else {
+    const unreadCheck = protection.SETTINGS_CHECKS.map(id => branch.checks[id]).find(check => check && check.status === 'unverified');
+    const offer = protectionOffer(branch);
+    const settingsDrift = protection.SETTINGS_CHECKS.flatMap(id => (branch.checks[id]?.status === 'drift' ? branch.checks[id].details : []));
+    const workflowNotes = ['P3', 'P4'].flatMap(id => (['drift', 'unverified'].includes(branch.checks[id]?.status) ? branch.checks[id].details : []));
+    if (unreadCheck) rules.unread.push({ name, why: unreadWhy(unreadCheck.details[0]) });
+    else if (offer.offered) {
+      rules.drift.push(...settingsDrift);
+      changes.push(`${branch.toolkit_ruleset ? 'updates' : 'adds'} the "${protection.RULESET_NAME}" ruleset on the default branch (pull requests only, the programme file's required checks pinned to GitHub Actions, branches up to date before merging, merge commits only, nobody can bypass it)`);
+      if (workflowNotes.length) rules.waiting.push(`check the workflows by hand: ${workflowNotes.join('; ')}`);
+    } else {
+      const notes = branch.status === 'drift' ? protectionNotes(branch) : workflowNotes;
+      const why = [
+        offer.fixes && offer.unproduced.length ? `Toolkit's ruleset is not offered while no workflow job produces ${offer.unproduced.map(check => `"${check}"`).join(', ')}` : '',
+        offer.fixes && offer.silent.length ? `Toolkit's ruleset is not offered while ${offer.silent.map(check => `"${check}"`).join(', ')} does not report on every pull request` : '',
+      ].filter(Boolean);
+      rules.waiting.push(`${name}: ${branch.status === 'drift' ? 'change' : 'check'} by hand: ${[...notes, ...why].join('; ') || 'it is not confirmed'}`);
+    }
+  }
+  const secure = { on: [], drift: [], free: [], waiting: [], unread: [] };
+  const result = reads.securityResult;
+  const settingsName = 'the dependency and security settings';
+  if (!result) secure.unread.push({ name: settingsName, why: 'the programme file is not in this working tree' });
+  else if (result.status === 'not-applicable') { /* not a github.com repository */ }
+  else if (!result.fixes) secure.unread.push({ name: settingsName, why: unreadWhy(result.unread || result.reason) });
+  else if (result.status === 'conformant') secure.on.push('the free dependency and security settings');
+  else {
+    const byHand = security.byHandNotes(result);
+    for (const check of Object.values(result.checks || {})) {
+      if (check.status === 'drift') secure.drift.push(...check.details.filter(detail => !byHand.includes(detail)));
+      else if (check.status === 'not-on-plan') secure.free.push(...check.details);
+      else if (check.status === 'unverified' && check.by_hand === true) byHand.push(...check.details);
+      else if (check.status === 'unverified') secure.unread.push({ name: check.details.join('; '), why: null });
+    }
+    if (byHand.length) secure.waiting.push(`change by hand: ${byHand.join('; ')}`);
+    const turnOn = Object.entries(result.fixes).filter(([, wanted]) => wanted).map(([setting]) => security.SETTING_LABELS[setting] || setting);
+    if (turnOn.length) changes.push(`turns on ${listed(turnOn)}`);
+    const files = [result.files?.dependabot ? security.DEPENDABOT_REL : null, result.files?.workflow ? security.WORKFLOW_REL : null].filter(Boolean);
+    if (files.length) changes.push(`writes ${listed(files)} into this working tree, for you to commit through a pull request`);
+    if (!secure.drift.length && !secure.waiting.length && !secure.unread.length) secure.on.push('the free dependency and security settings');
+  }
+  const free = rules.free.length > 0 && !rules.on.length && !rules.drift.length && !rules.waiting.length && !rules.unread.length;
+  return {
+    protection: free ? 'Not available on GitHub Free (private)' : partState(rules),
+    free,
+    security: partState(secure),
+    fix: changes.length ? { changes } : null,
+  };
+}
+
+// One row's state from its parts, in a fixed order. Every part unread for the same reason is said once.
+function partState({ on, drift, free, waiting, unread }) {
+  const whys = [...new Set(unread.map(item => item.why))];
+  const unreadText = unread.length && whys.length === 1 && whys[0] && !on.length && !drift.length && !free.length && !waiting.length
+    ? `Not checked here yet: GitHub could not be read (${whys[0]})`
+    : unread.length ? `Not checked here yet: ${unread.map(item => (item.why ? `${item.name} (${item.why})` : item.name)).join('; ')}` : '';
+  return [
+    on.length ? `On: ${listed(on)}` : '',
+    drift.length ? `Drift: ${drift.join('; ')}` : '',
+    free.length ? `Not available on GitHub Free: ${free.join('; ')}` : '',
+    waiting.length ? `Waiting for you: ${waiting.join('; ')}` : '',
+    unreadText,
+  ].filter(Boolean).join('. ') || 'Nothing to check';
+}
+
+// What the owner's yes did (GovernanceMaintenance.finish's outcome), in plain lines.
+function fixResultLines(outcome) {
+  if (!outcome || outcome.result === 'not-ready') return ['GitHub settings: not changed, because the programme file is not merged and read back here. Nothing was written.'];
+  const lines = [];
+  if (outcome.on?.length) lines.push(`On and read back: ${listed(outcome.on)}.`);
+  if (outcome.unavailable?.length) lines.push(`Not available on GitHub Free, so nothing was written for ${outcome.unavailable.length > 1 ? 'them' : 'it'}: ${listed(outcome.unavailable)}.`);
+  for (const entry of outcome.held || []) lines.push(`Waiting for you, ${entry.name}: ${entry.step}`);
+  if (outcome.files?.length) lines.push(`It also wrote ${listed(outcome.files)} in this working tree; commit ${outcome.files.length > 1 ? 'them' : 'it'} through a pull request.`);
+  if (outcome.result !== 'done') lines.push(`Not all fixed yet (${outcome.reason || 'GitHub could not be written'}). Say toolkit governance to see what is left.`);
+  return lines;
 }
 
 // The rows and steps for one governed repository. `facts`:
 //   repository, defaultBranch, store { repository, state } (state from the store check, or null),
 //   parents [issue numbers], task { auto_merge, merge_train }, requiredChecks [names],
-//   finish (the finish record's on/unavailable/held, or null), drift (settings drift ids, or null),
+//   settings (settingsRows from this summary's live GitHub reads, or null where GitHub was not read),
+//   unread (why GitHub was not read then), finish (the finish record's on/unavailable/held, or null),
+//   drift (settings drift ids, or null),
 //   files (Set of .github paths at the merged commit, or null),
 //   permissions ({ checked, app, wanted, missing, stale, other, update }), app ({ variable, secret }
 //   presence, or null), appCommand (the App setup line), copies ({ files } or null), stale (why the
@@ -205,9 +349,11 @@ function summaryRows(facts) {
   const update = facts.update;
   if (update?.open) steps.push({ part: 'Programme file', text: `An update waits in ${update.open.url}: merge it, then say toolkit governance.` });
   else if (update?.offer) steps.push({ part: 'Programme file', text: `It is behind this Toolkit: one pull request ${updateWords(update.offer)}.${update.offer.branchUnread ? " The default branch's required checks could not be read, so only Toolkit's own are added." : ''} Answer question 1 below.` });
-  const finish = finishRows(facts.finish, facts.drift);
+  const finish = facts.settings || finishRows(facts.finish, facts.drift, facts.unread || undefined);
   rows.push(['Branch protection and rulesets', finish.protection, finish.free ? DOES['protection-free'] : DOES.protection]);
   rows.push(['Security settings', finish.security, DOES.security]);
+  // Settings drift Toolkit fixes: asked after the programme file update, when that is asked too.
+  if (finish.fix) steps.push({ part: 'GitHub settings', text: `They have drifted from what governance needs, as the table shows. One yes fixes them the way a turn-on sets them up. Answer question ${questionNumbers(facts).fix} below.` });
   const workflows = presenceRow(WORKFLOW_FILES, facts.files, { defaultBranch: facts.defaultBranch });
   rows.push(['Cloud workflows', workflows.state || 'None', DOES.workflows]);
   const guards = presenceRow(GUARD_FILES, facts.files);
@@ -249,6 +395,13 @@ function summaryRows(facts) {
   return { rows, steps };
 }
 
+// The questions the summary asks, numbered in order: the programme file update, then the settings fix.
+function questionNumbers(facts) {
+  const update = Boolean(facts.update?.offer && !facts.update.open);
+  const fix = Boolean(facts.settings?.fix);
+  return { update: update ? 1 : null, fix: fix ? (update ? 2 : 1) : null };
+}
+
 // The owner-facing summary. `held` is whether governance actions are held until setup is complete
 // (toolkit-governance-ready.cjs: the merged programme file asks for the hold and a part is gone).
 function renderSummary(facts, { held = false } = {}) {
@@ -267,20 +420,28 @@ function renderSummary(facts, { held = false } = {}) {
     '',
     ...(facts.stale ? [`GitHub could not be read just now (${facts.stale}), so the programme file values are the ones this computer last read.`, ''] : []),
     'To change something later, say: turn off governance, task auto-merge on or off, or change store.',
-    ...(facts.update?.offer && !facts.update.open ? [
+    ...(questionNumbers(facts).update ? [
       '',
-      '**1. Question: Bring the programme file up to date?**',
+      `**${questionNumbers(facts).update}. Question: Bring the programme file up to date?**`,
       `   - **A. Yes (my pick):** One pull request ${updateWords(facts.update.offer)}. Nothing else changes, and it applies only after you merge it.`,
+      '   - **B. No:** Nothing is written, and Toolkit asks again next time.',
+    ] : []),
+    ...(questionNumbers(facts).fix ? [
+      '',
+      `**${questionNumbers(facts).fix}. Question: Fix the drifted GitHub settings?**`,
+      `   - **A. Yes (my pick):** Toolkit ${listed(facts.settings.fix.changes)}, then reads each one back. Nothing else changes.`,
       '   - **B. No:** Nothing is written, and Toolkit asks again next time.',
     ] : []),
   ].join('\n');
 }
 
 // A change the owner asked for in words after the summary: { governance: 'off' } | { taskAutoMerge }
-// | { changeStore: true } | { cleanCopies: true } | { convertRows: true } | { update: 'yes' | 'no' }, or a
-// GuidedAnswerError. `copies`, `rows` and `update` say whether the summary offers the cleanup, the DONE
-// WHEN backfill and the programme file update.
-function parseChange(text, { copies = false, rows = false, update = false } = {}) {
+// | { changeStore: true } | { cleanCopies: true } | { convertRows: true } | { update: 'yes' | 'no' }
+// | { fix: 'yes' | 'no' }, or a GuidedAnswerError. `copies`, `rows`, `update` and `fix` say whether the
+// summary offers the cleanup, the DONE WHEN backfill, the programme file update and the settings fix.
+// Their questions are numbered as questionNumbers numbers them; with two open, an answer names its
+// number, one at a time.
+function parseChange(text, { copies = false, rows = false, update = false, fix = false } = {}) {
   const { GuidedAnswerError } = require('./toolkit-governance-guided.cjs');
   const lower = String(text || '').trim().replace(/[.!]+$/, '').toLowerCase().replace(/\s+/g, ' ');
   if (/^(?:turn (?:it )?off governance|turn governance off|governance off)$/.test(lower)) return { governance: 'off' };
@@ -289,9 +450,15 @@ function parseChange(text, { copies = false, rows = false, update = false } = {}
   if (/^change (?:the )?store$/.test(lower)) return { changeStore: true };
   if (copies && /^clean ?up (?:the )?(?:instruction )?copies$/.test(lower)) return { cleanCopies: true };
   if (rows && /^convert (?:the )?done[ -]?when rows$/.test(lower)) return { convertRows: true };
-  if (update && /^(?:(?:1 ?)?a(?:\W+yes)?|yes|(?:update|bring) (?:the )?programme file(?: up to date)?)$/.test(lower)) return { update: 'yes' };
-  if (update && /^(?:(?:1 ?)?b(?:\W+no)?|no)$/.test(lower)) return { update: 'no' };
-  throw new GuidedAnswerError(`This was not read as a change: "${String(text || '').trim()}". Say turn off governance, task auto-merge on or off, or change store${update ? ', or answer question 1 with A or B' : ''}.`);
+  const questions = [update ? 'update' : null, fix ? 'fix' : null].filter(Boolean);
+  const numbered = /^(\d) ?(?:(a)(?:\W+yes)?|b(?:\W+no)?)$/.exec(lower);
+  if (numbered && questions[Number(numbered[1]) - 1]) return { [questions[Number(numbered[1]) - 1]]: numbered[2] ? 'yes' : 'no' };
+  const bare = /^(?:(a)(?:\W+yes)?|(yes)|b(?:\W+no)?|no)$/.exec(lower);
+  if (bare && questions.length === 1) return { [questions[0]]: bare[1] || bare[2] ? 'yes' : 'no' };
+  if (update && /^(?:update|bring) (?:the )?programme file(?: up to date)?$/.test(lower)) return { update: 'yes' };
+  if (fix && /^fix (?:the )?(?:drifted )?(?:github )?settings$/.test(lower)) return { fix: 'yes' };
+  const asked = questions.length === 2 ? ', or answer question 1 or 2 with A or B, one at a time (for example 2A)' : questions.length ? ', or answer question 1 with A or B' : '';
+  throw new GuidedAnswerError(`This was not read as a change: "${String(text || '').trim()}". Say turn off governance, task auto-merge on or off, or change store${asked}.`);
 }
 
-module.exports = Object.freeze({ DOES, branchRequiredChecks, finishRows, mergedFiles, mergedOwnChecks, parseChange, programmeUpdate, programmeUpdateText, renderSummary, summaryRows, updateWords });
+module.exports = Object.freeze({ DOES, branchRequiredChecks, finishRows, fixResultLines, mergedFiles, mergedOwnChecks, parseChange, programmeUpdate, programmeUpdateText, questionNumbers, renderSummary, settingsRows, summaryRows, updateWords });
