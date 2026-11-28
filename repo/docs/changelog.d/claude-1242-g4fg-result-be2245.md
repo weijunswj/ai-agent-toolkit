@@ -1,0 +1,5 @@
+### Changed
+
+- **Short result after a governance settings yes:** after the owner answers yes to fixing drifted GitHub settings, refresh governance now shows what changed (each item once, read back), then what is left with who acts, then the summary table read again. The raw step log stays in the private run record and is never shown, so no line repeats.
+- **Workflow fixes go to the controller:** a problem in the repository's own workflow files, such as a required job that waits for others without `if: always()`, is now handed to the repository's controller as one line ("Your controller fixes this in a pull request") in the summary, the result after a yes and the post-merge finish, instead of "change by hand" for the owner. "By hand" stays for GitHub settings only the owner can change, with where to click. Security files Toolkit wrote into the working tree are also the controller's to commit.
+- **Dependency auto-merge waits for the controller's fix:** where default-branch protection is only waiting for that workflow fix, dependency auto-merge waits with it instead of being retried every session.

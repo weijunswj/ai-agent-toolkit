@@ -399,17 +399,15 @@ class ToolkitGovernanceCli {
   }
 
   async #finishLocked(json, state) {
-    let said = '';
-    const out = { write: text => { said += text; return true; } };
-    const outcome = await this.#maintenance(out, this.#firstSweep || (this.#registryOptions.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new FirstInstallSweep())).finish(state.root || this.#cwd, { sweep: finishing.entryFor(this.#registryOptions, state.repository_id)?.first_sweep === true });
-    const lines = said.split('\n').map(line => line.trim()).filter(Boolean);
+    // The step log goes only to the run's private record: the result line is what the owner reads.
+    const outcome = await this.#maintenance({ write: () => true }, this.#firstSweep || (this.#registryOptions.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new FirstInstallSweep())).finish(state.root || this.#cwd, { sweep: finishing.entryFor(this.#registryOptions, state.repository_id)?.first_sweep === true });
     if (outcome.result === 'not-ready') {
       finishing.touch(this.#registryOptions, state.repository_id);
       this.#print(json, { result: 'not-ready' }, ['Not finished yet: the turn-on pull request is not merged and read back here. Nothing was changed; the next session tries again.']);
       return 0;
     }
     const recorded = finishing.record(this.#registryOptions, state.repository_id, outcome);
-    this.#print(json, { result: outcome.result, on: outcome.on, unavailable: outcome.unavailable, held: outcome.held }, [...lines, recorded?.line || '', ...(recorded?.notes || [])]);
+    this.#print(json, { result: outcome.result, on: outcome.on, unavailable: outcome.unavailable, held: outcome.held, controller: outcome.controller }, [recorded?.line || '', ...(recorded?.notes || [])]);
     return outcome.result === 'done' ? 0 : 2;
   }
 
@@ -650,7 +648,12 @@ class ToolkitGovernanceCli {
       const cleanable = Boolean(copies && copies.ok && copiesRow(copies)?.files > 0);
       const asked = summary.questionNumbers(facts);
       const fix = facts.settings?.fix || null;
-      return { kind: 'summary', text: summary.renderSummary(facts, { held }), parts: summary.summaryParts(facts), agents: governanceBank.agentsSummary(), update: facts.update, fix, parse: reply => summary.parseChange(reply, { copies: cleanable, rows: Boolean(doneWhen?.pages?.length), update: Boolean(asked.update), fix: Boolean(asked.fix) }) };
+      // The table as it stands after a yes: the GitHub settings read again, the other rows as shown.
+      const table = () => {
+        const reread = this.#settingsRows(state, merged, read, this.#protectionReader || protection.ghProtectionReader);
+        return summary.renderTable({ ...facts, settings: reread.rows, unread: reread.unread });
+      };
+      return { kind: 'summary', text: summary.renderSummary(facts, { held }), parts: summary.summaryParts(facts), agents: governanceBank.agentsSummary(), update: facts.update, fix, table, parse: reply => summary.parseChange(reply, { copies: cleanable, rows: Boolean(doneWhen?.pages?.length), update: Boolean(asked.update), fix: Boolean(asked.fix) }) };
     }
     // The search's own reason is for the logs, not the owner: nothing can be set up until it works.
     if (adoption && adoption.blocked) return { kind: 'line', code: 1, lines: ['GitHub could not be read just now, so Toolkit cannot find or suggest the evidence store and parent issue yet, and the setup questions are not shown. Nothing changed. Type toolkit governance again in a moment.'] };
@@ -770,17 +773,22 @@ class ToolkitGovernanceCli {
   // The owner's yes to the settings fix: the post-merge finish's own writes (rulesets, default-branch
   // protection, the free dependency and security settings), each read back, with no first personal
   // data sweep. The answer only reaches here when what the summary showed is unchanged, so it covers
-  // exactly the changes it listed.
-  async #fixSettings(state, fix) {
+  // exactly the changes it listed. The owner sees the short result (what changed, then what is left
+  // and who acts), then the summary's table read again; the step log goes only to the run's private
+  // record (toolkit-governance-migration.cjs).
+  async #fixSettings(state, fix, table = null) {
     if (!fix) {
       this.#print(false, {}, ['The GitHub settings no longer differ from what governance needs. Nothing was written.']);
       return 0;
     }
-    let said = '';
     // The repository's own ruleset changes go only as shown: the yes reached here only because what
     // was shown is unchanged (owner decision INT-TK421-1398).
-    const outcome = await this.#maintenance({ write: text => { said += text; return true; } }, null).finish(state.root || this.#cwd, { sweep: false, ownRulesets: fix.own_rulesets || [] });
-    this.#print(false, {}, [...said.split('\n').map(line => line.trim()).filter(Boolean), ...summary.fixResultLines(outcome)]);
+    const outcome = await this.#maintenance({ write: () => true }, null).finish(state.root || this.#cwd, { sweep: false, ownRulesets: fix.own_rulesets || [] });
+    let after = null;
+    if (outcome.result !== 'not-ready' && table) {
+      try { after = table(); } catch { after = ['The summary table could not be read again just now; say toolkit governance to see it.']; }
+    }
+    this.#print(false, {}, [...summary.fixResultLines(outcome), ...(after ? ['', ...after] : [])]);
     return outcome.result === 'done' ? 0 : 2;
   }
 
@@ -821,7 +829,7 @@ class ToolkitGovernanceCli {
 
   // The answer applied: the guided setup's turn-on, off or later, or a change after setup.
   #applyView(view, state, task, chosen, found) {
-    if (view.kind === 'summary') return this.#applyChange(state, task, chosen, view.update, view.fix);
+    if (view.kind === 'summary') return this.#applyChange(state, task, chosen, view.update, view.fix, view.table);
     return this.#applyBank(state, chosen, found);
   }
 
@@ -904,13 +912,13 @@ class ToolkitGovernanceCli {
 
   // A change the owner asked for after setup, in words (toolkit-governance-summary.cjs parseChange): at
   // most one pull request, which applies only after the owner merges it.
-  #applyChange(state, task, chosen, update = null, fix = null) {
+  #applyChange(state, task, chosen, update = null, fix = null, table = null) {
     if (chosen.governance === 'off') return this.#prepareOff();
     if (chosen.fix === 'no') {
       this.#print(false, {}, ['GitHub settings: not changed. Nothing was written; Toolkit asks again next time.']);
       return 0;
     }
-    if (chosen.fix === 'yes') return this.#fixSettings(state, fix);
+    if (chosen.fix === 'yes') return this.#fixSettings(state, fix, table);
     if (chosen.update === 'no') {
       this.#print(false, {}, ['Programme file: not updated. Nothing was written; Toolkit asks again next time.']);
       return 0;

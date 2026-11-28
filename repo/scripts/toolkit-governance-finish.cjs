@@ -74,15 +74,19 @@ function listed(items) { return items.length > 1 ? `${items.slice(0, -1).join(',
 // 'done' is final and shown once by the next session, then dropped; 'failed' (something to retry)
 // stays pending. `files` are security files the finish wrote into this working tree, which still
 // need a pull request.
+// `controller` are problems in the repository's own workflow files, for its controller to fix in a
+// pull request, never a by-hand step for the owner.
 function resultLine(outcome) {
   const on = outcome.on || [], unavailable = outcome.unavailable || [], held = outcome.held || [], files = outcome.files || [];
+  const controller = [...new Set(outcome.controller || [])];
   const parts = [outcome.result === 'done'
-    ? `Toolkit: governance setup finished here${held.length ? ', apart from what waits for you below' : ''}.`
+    ? `Toolkit: governance setup finished here${held.length || controller.length || files.length ? ', apart from what is left below' : ''}.`
     : `Toolkit: governance setup could not finish here yet (${outcome.reason || 'GitHub could not be written'}); it is tried again in a later session.`];
   if (on.length) parts.push(`On and read back: ${listed(on)}.`);
   if (unavailable.length) parts.push(`Not set: GitHub cannot enforce ${listed(unavailable)} on a private repository on GitHub Free, so nothing was written for ${unavailable.length > 1 ? 'them' : 'it'}; the local guards stay the fallback.`);
+  parts.push(...controller.map(require('./toolkit-governance-summary.cjs').controllerLine));
+  if (files.length) parts.push(`Your controller commits ${files.join(', ')} through a pull request: Toolkit wrote ${files.length > 1 ? 'them' : 'it'} in this working tree.`);
   for (const entry of held) parts.push(`Waiting for you, ${entry.name}: ${entry.step}`);
-  if (files.length) parts.push(`It also wrote ${files.join(', ')} in this working tree; commit ${files.length > 1 ? 'them' : 'it'} through a pull request.`);
   return parts.join(' ');
 }
 

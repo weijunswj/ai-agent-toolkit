@@ -488,7 +488,9 @@ test('an already-governed repository with squash and rebase allowed beside an ac
   const yes = await reply(ctx, '1A');
   assert.equal(yes.code, 0, yes.err);
   assert.deepEqual(github.writes, [['protection ruleset', SLUG, ['plain-text'], null]], 'only Toolkit\'s own ruleset is written, as the finish writes it');
-  assert.match(yes.out, /^On and read back: the no-force-push ruleset, default-branch protection and the free dependency and security settings\.$/m);
+  assert.ok(yes.out.startsWith('**Changed and read back:**\n- The "Toolkit: protected default branch" ruleset on the default branch, added\n\n| Part | State | What it does |\n'), yes.out);
+  assert.equal(rowOf(yes.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | On | Pull requests only, required checks and no force pushes on the default branch |', 'the table read again after the write');
+  assert.doesNotMatch(yes.out, /Left to do/, 'nothing is left');
   const after = await run(ctx, ['setup']);
   assert.equal(rowOf(after.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | On | Pull requests only, required checks and no force pushes on the default branch |');
   assert.equal(after.out.split('\n')[0], '**Governance: on and ready.**');
@@ -572,7 +574,7 @@ test('drift Toolkit\'s ruleset cannot fix waits for the owner by hand, and is ne
   // Settings in step, but a workflow the check cannot confirm: checked by hand, never offered.
   const unsure = { status: 'unverified', reason: null, toolkit_ruleset: null, checks: { ...branch.checks, P1: { status: 'ok', details: [], missing: [], extra: [] }, P4: { status: 'unverified', details: ['"plain-text" job has a needs list'] } } };
   const checked = summary.settingsRows({ rulesetResult: { status: 'present' }, keepState: null, protectionResult: unsure, securityResult: { status: 'conformant', fixes: {}, checks: {} } });
-  assert.deepEqual([checked.protection, checked.details.protection, checked.fix], ['On: 1 item; Waiting for you: 1 item, listed below', ['On: the no-force-push ruleset', 'Waiting for you: check the workflow by hand: "plain-text" job has a needs list'], null]);
+  assert.deepEqual([checked.protection, checked.details.protection, checked.fix], ['On: 1 item; For your controller: 1 item, listed below', ['On: the no-force-push ruleset', 'Your controller fixes this in a pull request: "plain-text" job has a needs list.'], null]);
   // GitHub Free (private): every part not enforceable.
   const free = summary.settingsRows({ rulesetResult: { status: 'not-enforceable' }, keepState: null, protectionResult: { status: 'not-enforceable', checks: {} }, securityResult: { status: 'conformant', fixes: {}, checks: {} } });
   assert.deepEqual([free.protection, free.free], ['Not available on GitHub Free (private)', true]);
@@ -591,12 +593,18 @@ test('a part with many findings keeps a short cell, and lists each finding under
   } };
   const security = { status: 'drift', fixes: {}, checks: { S4: { status: 'drift', details: ['secret scanning is off'] } } };
   const settings = summary.settingsRows({ rulesetResult: { status: 'missing' }, keepState: null, protectionResult: branch, securityResult: security });
-  assert.equal(settings.protection, 'Drift: 1 item; Waiting for you: 7 items, listed below');
+  // The workflow file the checks could not read is the controller's, said once (P3 and P4 both name it).
+  assert.equal(settings.protection, 'Drift: 1 item; Waiting for you: 4 items; For your controller: 2 items, listed below');
   assert.equal(settings.security, 'Waiting for you: 1 item, listed below');
   const text = summary.renderSummary({ repository: SLUG, defaultBranch: 'main', store: null, parents: [], task: {}, requiredChecks: ['Quote Basis click budget'], settings, files: null, permissions: {}, app: null, copies: null, stale: null });
-  for (const line of tableOf(text)) assert.ok(line.split(' | ')[1].length <= 60, `a short cell: ${line}`);
+  // A cell is only counts: each part a label and its count, never a clause.
+  for (const line of tableOf(text).filter(row => /\| (?:Branch protection|Security settings)/.test(row))) {
+    assert.match(line.split(' | ')[1], /^(?:(?:On|Drift|Waiting for you|For your controller|Not available on GitHub Free|Not checked here yet): \d+ items?(?:; |, listed below$))+$/, `a short cell: ${line}`);
+  }
   const listed = text.slice(text.indexOf('**Branch protection and rulesets:**'), text.indexOf('To change something later'));
-  assert.equal(listed.split('\n').filter(line => line.startsWith('- ')).length, (1 + 7 + 1) + (1 + 1), 'every finding and each where line, one per line');
+  assert.equal(listed.split('\n').filter(line => line.startsWith('- ')).length, (1 + 4 + 2 + 1) + (1 + 1), 'every finding and each where line, one per line');
+  assert.equal(listed.split('it is outside the YAML subset').length - 1, 1, 'the unread workflow file is named once');
+  assert.match(listed, /^- Your controller fixes this in a pull request: no readable workflow job is named "Quote Basis click budget"\.$/m);
   assert.ok(listed.includes(`- ${summary.WHERE.protection}\n`) && listed.includes(`- ${summary.WHERE.security}\n`), listed);
   assert.match(listed, /^- Waiting for you: default-branch protection, change by hand: main does not require branches to be up to date before merging$/m);
   assert.doesNotMatch(text, /migrate|own terminal|```|node /, 'no command for the owner to run');
@@ -641,11 +649,13 @@ const OWN_SQAG_RULES = () => [
 ];
 // One GitHub repository with the repository's own ruleset "protect-main" (on the default branch), read
 // and written through Toolkit's own ruleset writer, and Toolkit's ruleset once written.
-function ownRulesetGitHub(t, { requiredChecks }) {
-  const ctx = fixture(t, { quiet: true, requiredChecks, commitFiles: { '.github/workflows/plain-text.yml': PLAIN_TEXT, '.github/workflows/ci.yml': CI, '.github/dependabot.yml': DEPENDABOT } });
+// `ci` is the repository's own workflow file; `noForcePush` false starts with no no-force-push
+// ruleset, which the yes then adds.
+function ownRulesetGitHub(t, { requiredChecks, ci = CI, noForcePush = true }) {
+  const ctx = fixture(t, { quiet: true, requiredChecks, commitFiles: { '.github/workflows/plain-text.yml': PLAIN_TEXT, '.github/workflows/ci.yml': ci, '.github/dependabot.yml': DEPENDABOT } });
   const binding = { status: 'ok', text: fs.readFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), 'utf8') };
   const own = { id: 7, name: 'protect-main', target: 'branch', source_type: 'Repository', enforcement: 'active', bypass_actors: [], conditions: { ref_name: { include: ['~DEFAULT_BRANCH'], exclude: [] } }, rules: OWN_SQAG_RULES() };
-  const github = { toolkit: null, writes: [] };
+  const github = { toolkit: null, writes: [], noForcePush };
   const spawn = (command, args, options) => {
     if (args.includes('PUT')) { github.writes.push(['own ruleset', args[3], JSON.parse(options.input)]); own.rules = JSON.parse(options.input).rules; }
     return { status: 0, stdout: JSON.stringify(own) };
@@ -653,13 +663,13 @@ function ownRulesetGitHub(t, { requiredChecks }) {
   const { ghOwnRulesetWriter } = require(path.join(scripts, 'toolkit-governance-protection.cjs'));
   ctx.cli = {
     ...QUIET,
-    rulesetReader: () => ({ ok: true, rulesets: [NO_FORCE_PUSH] }),
+    rulesetReader: () => ({ ok: true, rulesets: github.noForcePush ? [NO_FORCE_PUSH] : [] }),
     protectionReader: () => ({ ok: true, default_branch: 'main', repository: { allow_merge_commit: true, allow_squash_merge: true, allow_rebase_merge: true },
       rules: [...own.rules.map(rule => ({ ...rule, ruleset_id: 7 })), ...(github.toolkit ? github.toolkit.rules.map(rule => ({ ...rule, ruleset_id: 99 })) : [])],
       classic: null, toolkit_ruleset: github.toolkit ? { id: 99 } : null,
-      rulesets: [{ id: 5, name: NO_FORCE_PUSH.name, source_type: 'Repository' }, { id: 7, name: 'protect-main', source_type: 'Repository', branches: { include: ['~DEFAULT_BRANCH'], exclude: [] } }, ...(github.toolkit ? [{ id: 99, name: protectionRulesetBody([]).name, source_type: 'Repository' }] : [])] }),
+      rulesets: [...(github.noForcePush ? [{ id: 5, name: NO_FORCE_PUSH.name, source_type: 'Repository' }] : []), { id: 7, name: 'protect-main', source_type: 'Repository', branches: { include: ['~DEFAULT_BRANCH'], exclude: [] } }, ...(github.toolkit ? [{ id: 99, name: protectionRulesetBody([]).name, source_type: 'Repository' }] : [])] }),
     securityReader: () => ({ ok: true, ...SETTINGS_ON, binding }),
-    rulesetCreator: () => { throw new Error('not expected'); },
+    rulesetCreator: () => { if (github.noForcePush) throw new Error('not expected'); github.writes.push(['no-force-push ruleset']); github.noForcePush = true; return { ok: true }; },
     protectionWriter: (slug, checks, existing) => { github.writes.push(['toolkit ruleset', checks, existing]); github.toolkit = protectionRulesetBody(checks); return { ok: true, id: 99 }; },
     ownRulesetWriter: (slug, entry) => ghOwnRulesetWriter(slug, entry, { spawn }),
     securityWriter: () => { throw new Error('not expected'); },
@@ -685,8 +695,8 @@ test('a repository\'s own ruleset that allows squash and rebase gets its exact c
   assert.deepEqual(own.rules[0].parameters.allowed_merge_methods, ['merge']);
   assert.equal(own.rules[1].parameters.strict_required_status_checks_policy, true);
   assert.deepEqual(own.rules[1].parameters.required_status_checks, [{ context: 'validate', integration_id: 15368 }], 'its required checks stay as they were');
-  assert.match(yes.out, /^- toolkit-test-fixture\/card: the repository's own ruleset "protect-main" changed and read back\.$/m);
-  assert.match(yes.out, /^On and read back: [^\n]*the repository's own ruleset "protect-main"/m);
+  assert.match(yes.out, /^\*\*Changed and read back:\*\*\n- The repository's own ruleset "protect-main", changed\n- The "Toolkit: protected default branch" ruleset on the default branch, added\n\n\| Part \|/m);
+  assert.doesNotMatch(yes.out, /^- toolkit-test-fixture\/card:/m, 'no step log');
   assert.doesNotMatch(yes.out, /by hand/, 'nothing the yes changed is left to change by hand');
   const after = await run(ctx, ['setup']);
   assert.equal(rowOf(after.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | On | Pull requests only, required checks and no force pushes on the default branch |');
@@ -711,6 +721,53 @@ test('where Toolkit\'s ruleset is not offered, the yes to the own ruleset change
   assert.doesNotMatch(yes.out, /Toolkit edits only its own ruleset|change by hand:?\s*(?:\n\s*- )?main (?:allows|does not require)/, 'never told to change by hand what the yes changed');
   assert.doesNotMatch(yes.out, /main allows merge, squash, rebase|main does not require branches/, 'the changed settings are not listed as left');
   assert.match(yes.out, /ghost-check/, 'what is truly left is still named');
+});
+
+// G-4f and G-4g, the SQAG final run (28 November 2026): the yes changed SQAG's own ruleset and added
+// Toolkit's two rulesets, and its required job "Quote Basis click budget" waits for other jobs without
+// `if: always()`. The result was about 20 raw lines with that CI line three times, told to the owner as
+// "change by hand". Now: what changed, each once and read back; the CI line once, for the controller;
+// then the table; no step log. Red on main: the raw log lines and the by-hand CI line.
+const CI_SKIPPABLE = 'name: CI\non: [pull_request]\njobs:\n  secret-scan:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n  validate:\n    needs: [secret-scan]\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n';
+const CI_LINE = '"validate" (.github/workflows/ci.yml) waits for secret-scan without `if: always()`, so a failed one skips it and a skipped job reports success';
+test('the summary hands a skippable required CI job to the repository\'s controller, never to the owner by hand', async t => {
+  const { ctx } = ownRulesetGitHub(t, { requiredChecks: ['plain-text', 'validate'], ci: CI_SKIPPABLE, noForcePush: false });
+  const shown = await run(ctx, ['setup']);
+  assert.equal(shown.code, 0, shown.err);
+  const listed = shown.out.slice(shown.out.indexOf('**Branch protection and rulesets:**'));
+  assert.ok(listed.includes(`\n- Your controller fixes this in a pull request: ${CI_LINE}.\n`), listed);
+  assert.equal(rowOf(shown.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | Drift: 4 items; For your controller: 1 item, listed below | Pull requests only, required checks and no force pushes on the default branch |');
+  assert.doesNotMatch(shown.out, /check the workflow by hand/, 'a workflow file is the controller\'s, not the owner\'s');
+});
+
+test('after the yes, the SQAG shape shows each change once, hands the CI job to the controller once, then the table, with no step log', async t => {
+  const { ctx, github } = ownRulesetGitHub(t, { requiredChecks: ['plain-text', 'validate'], ci: CI_SKIPPABLE, noForcePush: false });
+  assert.equal((await run(ctx, ['setup'])).code, 0);
+  const yes = await reply(ctx, '1A');
+  assert.equal(yes.code, 0, yes.err);
+  assert.deepEqual(github.writes.map(entry => entry[0]), ['no-force-push ruleset', 'own ruleset', 'toolkit ruleset']);
+  const out = yes.out.slice(0, yes.out.indexOf('\nAgents:'));
+  const lines = out.split('\n');
+  const at = text => lines.indexOf(text);
+  // What changed, each once, read back.
+  assert.deepEqual(lines.slice(at('**Changed and read back:**'), at('**Changed and read back:**') + 4), [
+    '**Changed and read back:**',
+    '- The "Toolkit: no force pushes" ruleset, added',
+    '- The repository\'s own ruleset "protect-main", changed',
+    '- The "Toolkit: protected default branch" ruleset on the default branch, added',
+  ], out);
+  // What is left, with who acts: the CI job once, for the controller, naming its file and job.
+  assert.deepEqual(lines.slice(at('**Left to do:**'), at('**Left to do:**') + 2), ['**Left to do:**', `- Your controller fixes this in a pull request: ${CI_LINE}.`], out);
+  assert.equal(out.split('secret-scan without').length - 1, 1, 'the CI line is said once');
+  assert.doesNotMatch(out, /by hand|Waiting for you/, 'nothing is left to the owner by hand');
+  // Then the table, read again after the writes, with no pointer to items it does not list.
+  assert.ok(at('**Changed and read back:**') < at('**Left to do:**') && at('**Left to do:**') < at('| Part | State | What it does |'), out);
+  assert.equal(rowOf(out, 'Branch protection and rulesets'), '| Branch protection and rulesets | On: 1 item; For your controller: 1 item | Pull requests only, required checks and no force pushes on the default branch |');
+  assert.doesNotMatch(out, /listed below/);
+  // No step log, and no line said twice.
+  assert.doesNotMatch(out, /^- toolkit-test-fixture\/card:|These governed GitHub repositories|ruleset covers the default branch|change by hand:/m, 'the raw log stays out');
+  const said = lines.filter(line => line.trim() && !/^\|---/.test(line));
+  assert.deepEqual(said, [...new Set(said)], 'no line repeats');
 });
 
 // G-4e edge (G2 round 1, L5): an update opened before the refresh added a check says so, and how to
