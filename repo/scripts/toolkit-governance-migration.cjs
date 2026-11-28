@@ -168,7 +168,9 @@ class GovernanceMaintenance {
     const answered = entries => [...new Set(entries.filter(entry => entry.result === 'failed' && entry.reason).map(entry => entry.reason))];
     const because = reasons => (reasons.length ? ` (GitHub answered: ${reasons.join(', ')})` : '');
     const forbidden = reasons => reasons.length > 0 && reasons.every(reason => reason === 'forbidden');
-    const admin = `GitHub refused the write for the account Toolkit used (forbidden): run \`${governance.governanceCommand('migrate')}\` in your own terminal from an account with admin rights on the repository.`;
+    // What only the owner can change is said as GitHub settings steps, never a command to run: the
+    // agent runs Toolkit's own check again when the owner says refresh governance.
+    const admin = `GitHub refused the write for the account this computer's GitHub sign-in uses (forbidden): that account needs admin rights on ${slug}. On GitHub, an admin of the repository gives it the Admin role under Settings, then Collaborators and teams (Collaborators on a personal account); then say refresh governance and answer yes again.`;
     const rulesetEnd = (name, read, entries) => {
       if (read.status === 'present') on.push(name);
       else if (read.status === 'not-enforceable') unavailable.push(name);
@@ -238,15 +240,15 @@ class GovernanceMaintenance {
     const read = this.#protectionFor(row);
     if (!read) { retry.push('the binding\'s required checks could not be read'); return; }
     const { result } = read;
-    const then = `then run \`${governance.governanceCommand('migrate')}\` in your own terminal`;
     if (result.status === 'conformant') on.push(name);
     else if (result.status === 'not-enforceable' || (rulesetsUnavailable && result.reason === 'binding-has-no-required-checks')) unavailable.push(name);
     else if (result.reason === 'binding-has-no-required-checks') {
-      held.push({ name, step: `the programme file lists no required checks yet, so there is nothing for it to require. Say toolkit governance: its summary offers one pull request that adds the checks the default branch already requires and Toolkit's own. Merge it, ${then} to add the protection.` });
+      held.push({ name, step: 'the programme file lists no required checks yet, so there is nothing for it to require. Say refresh governance: it offers one pull request that adds the checks the default branch already requires and Toolkit\'s own. Once that is merged, refresh governance offers to add the protection.' });
     } else if (protection.SETTINGS_CHECKS.some(id => result.checks[id]?.status === 'unverified')) retry.push(`${name} could not be read back`);
     else {
       const notes = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'].flatMap(id => (result.checks[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details : []));
-      held.push({ name, step: `change by hand: ${notes.join('; ') || 'reading it back still shows drift'}; ${then} to check it again.` });
+      const where = protection.SETTINGS_CHECKS.some(id => result.checks[id]?.status === 'drift') ? ` ${require('./toolkit-governance-summary.cjs').WHERE.protection}.` : '';
+      held.push({ name, step: `change by hand: ${notes.join('; ') || 'reading it back still shows drift'}.${where} Then say refresh governance, and your agent checks it again.` });
     }
   }
 
@@ -377,8 +379,8 @@ class GovernanceMaintenance {
       const { fixes, offered, unproduced, silent } = protectionOffer(result);
       if (offered) candidates.push({ row, ...read });
       else {
-        if (fixes && unproduced.length) this.#say(`${row.slug}: Toolkit ruleset not offered: no workflow job produces ${unproduced.map(check => `"${check}"`).join(', ')}, so requiring it would block every merge. Add the job, then run migrate again.`);
-        if (fixes && silent.length) this.#say(`${row.slug}: Toolkit ruleset not offered: ${silent.map(check => `"${check}"`).join(', ')} does not report on every pull request to the default branch, so requiring it would block those merges. Fix its workflow trigger, then run migrate again.`);
+        if (fixes && unproduced.length) this.#say(`${row.slug}: Toolkit ruleset not offered: no workflow job produces ${unproduced.map(check => `"${check}"`).join(', ')}, so requiring it would block every merge. Add the job, then say refresh governance to check again.`);
+        if (fixes && silent.length) this.#say(`${row.slug}: Toolkit ruleset not offered: ${silent.map(check => `"${check}"`).join(', ')} does not report on every pull request to the default branch, so requiring it would block those merges. Fix its workflow trigger, then say refresh governance to check again.`);
         this.#byHand(row, result);
       }
     }

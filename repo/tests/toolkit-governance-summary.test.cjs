@@ -128,7 +128,8 @@ test('a governed repository shows its steps left, Toolkit permissions first with
   agentsLast(shown.out);
   const epoch = new gate.SessionEpochs({ registryOptions: ctx.registryOptions }).get(SESSION);
   const pending = new BankTickets({ registryOptions: ctx.registryOptions }).pendingFor(SESSION, epoch);
-  assert.deepEqual(Object.keys(pending).sort(), ['at', 'bank_reference', 'epoch', 'repository_id', 'repository_mark', 'root'], 'a change in words can answer it');
+  assert.deepEqual(Object.keys(pending).sort(), ['at', 'bank_reference', 'epoch', 'repository_id', 'repository_mark', 'root', 'shown_parts'], 'a change in words can answer it');
+  assert.ok(Object.values(pending.shown_parts).every(value => /^[0-9a-f]{12}$/.test(value)), 'what was shown is kept as short hashes, never as text');
 });
 
 test('with every part in place the summary says on and ready, with no command and no step', async t => {
@@ -345,7 +346,8 @@ test('a reply after what was shown changed is not used, and the summary as it st
   ctx.cli = { ...QUIET, permissionsChecker: () => ({ checked: true, host: 'claude', missing: 3, stale: 0, update: 'node fixture-apply.cjs --apply' }) };
   const changed = await reply(ctx, 'turn off governance');
   assert.equal(changed.code, 0, changed.err);
-  assert.match(changed.out, /^What Toolkit showed has changed since, so the answer was not used and nothing was written\. Here it is as it stands now:$/m);
+  // The reason names what changed (owner UAT, 28 Nov: a dropped "2A" said only that something had).
+  assert.match(changed.out, /^What Toolkit showed has changed since, so the answer was not used and nothing was written\. What changed: Toolkit permissions \(Claude Code, this computer\)\. Here it is as it stands now:$/m);
   assert.match(changed.out, /^\*\*Governance: on, not ready: 1 step left\.\*\*$/m);
   assert.ok(tickets(ctx).pendingFor(SESSION, epochOf(ctx)), 'the owner\'s next reply answers the summary as it is now');
 });
@@ -470,8 +472,10 @@ test('an already-governed repository with squash and rebase allowed beside an ac
   const github = fakeGitHub(ctx);
   const shown = await run(ctx, ['setup']);
   assert.equal(shown.code, 0, shown.err);
-  assert.equal(rowOf(shown.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | On: the no-force-push ruleset. Drift: main allows merge, squash, rebase (repository settings); only merge commits are allowed | Pull requests only, required checks and no force pushes on the default branch |');
-  assert.equal(rowOf(shown.out, 'Security settings'), '| Security settings | On: the free dependency and security settings | Flags and updates vulnerable dependencies |');
+  assert.equal(rowOf(shown.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | On: 1 item; Drift: 1 item, listed below | Pull requests only, required checks and no force pushes on the default branch |');
+  assert.ok(shown.out.includes('\n**Branch protection and rulesets:**\n- On: the no-force-push ruleset\n- Drift: main allows merge, squash, rebase (repository settings); only merge commits are allowed\n'), shown.out);
+  assert.equal(rowOf(shown.out, 'Security settings'), '| Security settings | On | Flags and updates vulnerable dependencies |');
+  assert.doesNotMatch(shown.out, /\*\*Security settings:\*\*/, 'nothing to list for a part that is all on');
   assert.equal(shown.out.split('\n')[0], '**Governance: on, not ready: 1 step left.**');
   assert.ok(shown.out.split('\n').includes('**GitHub settings:** They have drifted from what governance needs, as the table shows. One yes fixes them the way a turn-on sets them up. Answer question 1 below.'));
   assert.match(shown.out, /^\*\*1\. Question: Fix the drifted GitHub settings\?\*\*\n {3}- \*\*A\. Yes \(my pick\):\*\* Toolkit adds the "Toolkit: protected default branch" ruleset on the default branch \(pull requests only, the programme file's required checks pinned to GitHub Actions, branches up to date before merging, merge commits only, nobody can bypass it\), then reads each one back\. Nothing else changes\.\n {3}- \*\*B\. No:\*\* Nothing is written, and Toolkit asks again next time\.$/m);
@@ -486,7 +490,7 @@ test('an already-governed repository with squash and rebase allowed beside an ac
   assert.deepEqual(github.writes, [['protection ruleset', SLUG, ['plain-text'], null]], 'only Toolkit\'s own ruleset is written, as the finish writes it');
   assert.match(yes.out, /^On and read back: the no-force-push ruleset, default-branch protection and the free dependency and security settings\.$/m);
   const after = await run(ctx, ['setup']);
-  assert.equal(rowOf(after.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | On: the no-force-push ruleset and default-branch protection | Pull requests only, required checks and no force pushes on the default branch |');
+  assert.equal(rowOf(after.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | On | Pull requests only, required checks and no force pushes on the default branch |');
   assert.equal(after.out.split('\n')[0], '**Governance: on and ready.**');
   assert.doesNotMatch(after.out, /Question:/);
 });
@@ -496,8 +500,8 @@ test('a fully conformant governed repository shows On for protection and securit
   const github = fakeGitHub(ctx, { squash: false });
   const shown = await run(ctx, ['setup']);
   assert.equal(shown.code, 0, shown.err);
-  assert.equal(rowOf(shown.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | On: the no-force-push ruleset and default-branch protection | Pull requests only, required checks and no force pushes on the default branch |');
-  assert.equal(rowOf(shown.out, 'Security settings'), '| Security settings | On: the free dependency and security settings | Flags and updates vulnerable dependencies |');
+  assert.equal(rowOf(shown.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | On | Pull requests only, required checks and no force pushes on the default branch |');
+  assert.equal(rowOf(shown.out, 'Security settings'), '| Security settings | On | Flags and updates vulnerable dependencies |');
   assert.equal(shown.out.split('\n')[0], '**Governance: on and ready.**');
   assert.doesNotMatch(shown.out, /Question:|GitHub settings/);
   // The full read is saved for the session-start line, so drift saved earlier ends.
@@ -525,7 +529,8 @@ test('security drift Toolkit turns on is offered with protection drift in one ye
   const ctx = governedSince(t);
   fakeGitHub(ctx, { alerts: 'disabled' });
   const shown = await run(ctx, ['setup']);
-  assert.equal(rowOf(shown.out, 'Security settings'), '| Security settings | Drift: Dependabot alerts is off | Flags and updates vulnerable dependencies |');
+  assert.equal(rowOf(shown.out, 'Security settings'), '| Security settings | Drift: 1 item, listed below | Flags and updates vulnerable dependencies |');
+  assert.ok(shown.out.includes('\n**Security settings:**\n- Drift: Dependabot alerts is off\n'), shown.out);
   assert.match(shown.out, /^ {3}- \*\*A\. Yes \(my pick\):\*\* Toolkit adds the "Toolkit: protected default branch" ruleset [^\n]+ and turns on Dependabot alerts, then reads each one back\. Nothing else changes\.$/m);
   // Both questions open: a bare answer is refused, a numbered one picks its question.
   assert.deepEqual(summary.parseChange('2A', { update: true, fix: true }), { fix: 'yes' });
@@ -545,7 +550,8 @@ test('with no required checks in the programme file, the merge-method drift stil
   ctx.cli = { ...ctx.cli, switchTransport: { openProgrammeUpdate: () => null } };
   const shown = await run(ctx, ['setup']);
   assert.equal(shown.code, 0, shown.err);
-  assert.equal(rowOf(shown.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | Drift: no ruleset blocks force pushes. Waiting for you: default-branch protection: main allows merge, squash, rebase (repository settings); only merge commits are allowed. Toolkit\'s ruleset fixes this once the programme file lists required checks (the programme file update adds them); then refresh governance offers it | Pull requests only, required checks and no force pushes on the default branch |');
+  assert.equal(rowOf(shown.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | Drift: 1 item; Waiting for you: 1 item, listed below | Pull requests only, required checks and no force pushes on the default branch |');
+  assert.ok(shown.out.includes('\n**Branch protection and rulesets:**\n- Drift: no ruleset blocks force pushes\n- Waiting for you: default-branch protection: main allows merge, squash, rebase (repository settings); only merge commits are allowed. Toolkit\'s ruleset fixes this once the programme file lists required checks (the programme file update adds them); then refresh governance offers it\n'), shown.out);
   assert.match(shown.out, /^\*\*1\. Question: Bring the programme file up to date\?\*\*$/m);
   assert.match(shown.out, /^\*\*2\. Question: Fix the drifted GitHub settings\?\*\*\n {3}- \*\*A\. Yes \(my pick\):\*\* Toolkit adds the "Toolkit: no force pushes" ruleset \(every branch, no bypass\), then reads each one back\. Nothing else changes\.$/m);
   assert.ok(shown.out.split('\n').includes('**GitHub settings:** They have drifted from what governance needs, as the table shows. One yes fixes them the way a turn-on sets them up. Answer question 2 below.'));
@@ -558,13 +564,69 @@ test('drift Toolkit\'s ruleset cannot fix waits for the owner by hand, and is ne
     P2: { status: 'ok', details: [] }, P3: { status: 'ok', details: [], missing: [] }, P4: { status: 'ok', details: [] }, P5: { status: 'ok', details: [] }, P6: { status: 'ok', details: [] },
   } };
   const rows = summary.settingsRows({ rulesetResult: { status: 'present' }, keepState: null, protectionResult: branch, securityResult: { status: 'conformant', fixes: {}, checks: {} } });
-  assert.equal(rows.protection, 'On: the no-force-push ruleset. Waiting for you: default-branch protection: change by hand: "lint" is required but not in the binding');
+  assert.equal(rows.protection, 'On: 1 item; Waiting for you: 1 item, listed below');
+  // What only the owner can change says where on GitHub, never a command.
+  assert.deepEqual(rows.details.protection, ['On: the no-force-push ruleset', 'Waiting for you: default-branch protection, change by hand: "lint" is required but not in the binding', summary.WHERE.protection]);
+  assert.match(summary.WHERE.protection, /^Where on GitHub: the repository's Settings, then Rules, then Rulesets/);
   assert.equal(rows.fix, null);
   // Settings in step, but a workflow the check cannot confirm: checked by hand, never offered.
   const unsure = { status: 'unverified', reason: null, toolkit_ruleset: null, checks: { ...branch.checks, P1: { status: 'ok', details: [], missing: [], extra: [] }, P4: { status: 'unverified', details: ['"plain-text" job has a needs list'] } } };
   const checked = summary.settingsRows({ rulesetResult: { status: 'present' }, keepState: null, protectionResult: unsure, securityResult: { status: 'conformant', fixes: {}, checks: {} } });
-  assert.deepEqual([checked.protection, checked.fix], ['On: the no-force-push ruleset. Waiting for you: default-branch protection: check by hand: "plain-text" job has a needs list', null]);
+  assert.deepEqual([checked.protection, checked.details.protection, checked.fix], ['On: 1 item; Waiting for you: 1 item, listed below', ['On: the no-force-push ruleset', 'Waiting for you: default-branch protection, check by hand: "plain-text" job has a needs list'], null]);
   // GitHub Free (private): every part not enforceable.
   const free = summary.settingsRows({ rulesetResult: { status: 'not-enforceable' }, keepState: null, protectionResult: { status: 'not-enforceable', checks: {} }, securityResult: { status: 'conformant', fixes: {}, checks: {} } });
   assert.deepEqual([free.protection, free.free], ['Not available on GitHub Free (private)', true]);
+});
+
+// SQAG's protection cell held about 12 clauses (owner UAT, 28 Nov): each cell is a state with its
+// count, and the clauses are a short list under the table, with where on GitHub to change them.
+test('a part with many findings keeps a short cell, and lists each finding under the table with where to change it, never a command', () => {
+  const branch = { status: 'drift', reason: null, toolkit_ruleset: null, checks: {
+    P1: { status: 'drift', details: ['"Quote Basis click budget" is in the binding but not required'], missing: ['Quote Basis click budget'], extra: [] },
+    P2: { status: 'ok', details: [] },
+    P3: { status: 'unverified', details: ['no readable workflow job is named "Quote Basis click budget"', '.github/workflows/ci.yml: it is outside the YAML subset this check follows'], missing: ['Quote Basis click budget'] },
+    P4: { status: 'unverified', details: ['.github/workflows/ci.yml: it is outside the YAML subset this check follows'] },
+    P5: { status: 'drift', details: ['main allows merge, squash, rebase (rulesets); only merge commits are allowed'] },
+    P6: { status: 'drift', details: ['main does not require branches to be up to date before merging'] },
+  } };
+  const security = { status: 'drift', fixes: {}, checks: { S4: { status: 'drift', details: ['secret scanning is off'] } } };
+  const settings = summary.settingsRows({ rulesetResult: { status: 'missing' }, keepState: null, protectionResult: branch, securityResult: security });
+  assert.equal(settings.protection, 'Drift: 1 item; Waiting for you: 7 items, listed below');
+  assert.equal(settings.security, 'Waiting for you: 1 item, listed below');
+  const text = summary.renderSummary({ repository: SLUG, defaultBranch: 'main', store: null, parents: [], task: {}, requiredChecks: ['Quote Basis click budget'], settings, files: null, permissions: {}, app: null, copies: null, stale: null });
+  for (const line of tableOf(text)) assert.ok(line.split(' | ')[1].length <= 60, `a short cell: ${line}`);
+  const listed = text.slice(text.indexOf('**Branch protection and rulesets:**'), text.indexOf('To change something later'));
+  assert.equal(listed.split('\n').filter(line => line.startsWith('- ')).length, (1 + 7 + 1) + (1 + 1), 'every finding and each where line, one per line');
+  assert.ok(listed.includes(`- ${summary.WHERE.protection}\n`) && listed.includes(`- ${summary.WHERE.security}\n`), listed);
+  assert.match(listed, /^- Waiting for you: default-branch protection, change by hand: main does not require branches to be up to date before merging$/m);
+  assert.doesNotMatch(text, /migrate|own terminal|```|node /, 'no command for the owner to run');
+});
+
+// SQAG, 28 Nov: the programme file update merged (min_toolkit and checks), then a second one came for
+// personal-data once Toolkit's refresh pull request landed its guard. One refresh offers one.
+const PERSONAL_DATA = 'name: personal-data\non: [pull_request]\njobs:\n  personal-data:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n';
+test('while Toolkit\'s refresh pull request adds a check of its own, the programme file update waits for it, then one pull request covers that check too', async t => {
+  const refreshUrl = `https://github.com/${SLUG}/pull/40`;
+  const pending = fixture(t, { quiet: true, minToolkit: '3.137.0', requiredChecks: [], commitFiles: { '.github/workflows/plain-text.yml': PLAIN_TEXT } });
+  const published = [];
+  pending.cli = { ...QUIET, protectionReader: protectedBy(RULESET_CHECK), switchTransport: {
+    openProgrammeUpdate: () => null,
+    openRefresh: () => ({ number: 40, url: refreshUrl, checks: ['personal-data', 'plain-text'] }),
+    publishProgrammeUpdate: (...args) => { published.push(args); return { number: 41, url: `https://github.com/${SLUG}/pull/41`, head: 'b'.repeat(40) }; },
+  } };
+  const waiting = await run(pending, ['setup']);
+  assert.equal(waiting.code, 0, waiting.err);
+  assert.ok(waiting.out.split('\n').includes(`**Programme file:** It is behind this Toolkit, and Toolkit's refresh pull request ${refreshUrl} adds the personal-data check. Once it has merged, say toolkit governance: one pull request then brings the programme file up to date, with that check included.`), waiting.out);
+  assert.doesNotMatch(waiting.out, /Question: Bring the programme file/, 'no binding pull request is offered while the refresh is pending');
+  assert.deepEqual(published, []);
+  // After the refresh lands: its guard is on the default branch, so the one update lists its check.
+  const landed = fixture(t, { quiet: true, minToolkit: '3.137.0', requiredChecks: [], commitFiles: { '.github/workflows/plain-text.yml': PLAIN_TEXT, '.github/workflows/personal-data-guard.yml': PERSONAL_DATA } });
+  landed.cli = { ...pending.cli, switchTransport: { ...pending.cli.switchTransport, openRefresh: () => null } };
+  const offered = await run(landed, ['setup']);
+  assert.match(offered.out, /^\*\*1\. Question: Bring the programme file up to date\?\*\*$/m);
+  assert.ok(offered.out.includes(`adds ${RULESET_CHECK}, personal-data and plain-text to the required checks`), offered.out);
+  // A refresh that adds only a check the update already lists holds nothing.
+  const same = fixture(t, { quiet: true, minToolkit: '3.137.0', requiredChecks: [], commitFiles: { '.github/workflows/plain-text.yml': PLAIN_TEXT } });
+  same.cli = { ...pending.cli, switchTransport: { ...pending.cli.switchTransport, openRefresh: () => ({ number: 40, url: refreshUrl, checks: ['plain-text'] }) } };
+  assert.match((await run(same, ['setup'])).out, /^\*\*1\. Question: Bring the programme file up to date\?\*\*$/m);
 });

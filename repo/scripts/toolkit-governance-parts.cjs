@@ -62,7 +62,7 @@ const SETTINGS = Object.freeze({
   SECURITY_AUTO_MERGE: ['Dependabot auto-merge is not fully set up', 'security'],
 });
 const SETTINGS_STEP = Object.freeze({
-  migrate: '`toolkit governance migrate` gives the owner one command for their own terminal, where one Enter applies the rules',
+  migrate: 'refresh governance shows the drift and asks one question, and the owner\'s yes there fixes it (the agent runs it, and the owner runs no command)',
   security: 'the agent runs `toolkit governance security` (it names anything it cannot change itself, such as a missing Dependabot entry for a pull request)',
 });
 

@@ -252,6 +252,26 @@ const agentsSummary = () => `Agents: this line is for you alone. Show the owner 
 
 function hash(ticket) { return crypto.createHash('sha256').update(String(ticket)).digest('hex'); }
 
+// What the owner was shown, part by part: [[part name, what it showed]] as { part name: short hash }.
+// The failure this prevents: an answer dropped because what Toolkit showed had changed said only that
+// something changed, never what (owner UAT in SQAG, 28 November 2026).
+const PART_HASH = /^[0-9a-f]{12}$/;
+const MAX_PARTS = 40;
+function shownParts(entries) {
+  const out = {};
+  for (const [name, value] of entries.slice(0, MAX_PARTS)) out[String(name).slice(0, 120)] = crypto.createHash('sha256').update(JSON.stringify(value ?? null)).digest('hex').slice(0, 12);
+  return out;
+}
+function validParts(parts) {
+  return Boolean(parts) && typeof parts === 'object' && !Array.isArray(parts) && Object.keys(parts).length <= MAX_PARTS && Object.values(parts).every(value => typeof value === 'string' && PART_HASH.test(value));
+}
+// The part names whose content differs between what was shown and what stands now, in the order
+// shown now, then the ones that are gone; [] when the note has no parts (an older Toolkit wrote it).
+function changedParts(before, now) {
+  if (!validParts(before) || !validParts(now)) return [];
+  return [...Object.keys(now).filter(name => before[name] !== now[name]), ...Object.keys(before).filter(name => !Object.hasOwn(now, name))];
+}
+
 class BankTickets {
   #file; #now;
 
@@ -298,12 +318,13 @@ class BankTickets {
 
   // Notes that this run of the session was shown these questions (or the summary). A newer note
   // replaces an older one and drops any live ticket of the session, so a ticket always answers what
-  // was shown last. `used` notes that an answer to it was already used.
-  shown(sessionId, { epoch, repositoryMark = null, repositoryId, root, bankReference: reference, used = false }) {
+  // was shown last. `used` notes that an answer to it was already used. `parts` ({ part name: short
+  // hash }, see shownParts) lets a reply to something that changed since name what changed.
+  shown(sessionId, { epoch, repositoryMark = null, repositoryId, root, bankReference: reference, used = false, parts = null }) {
     if (typeof sessionId !== 'string' || sessionId === '' || !EPOCH.test(String(epoch))) return false;
     const data = this.#read();
     data.shown[sessionId] = {
-      epoch, repository_mark: repositoryMark, repository_id: repositoryId, root, bank_reference: reference, ...(used ? { used: true } : {}), at: this.#now().toISOString(),
+      epoch, repository_mark: repositoryMark, repository_id: repositoryId, root, bank_reference: reference, ...(validParts(parts) ? { shown_parts: parts } : {}), ...(used ? { used: true } : {}), at: this.#now().toISOString(),
     };
     delete data.tickets[sessionId];
     this.#save(data);
@@ -350,7 +371,7 @@ class BankTickets {
     if (!this.#fresh(entry) || entry.epoch !== epoch) return null;
     const ticket = crypto.randomBytes(16).toString('hex');
     delete data.shown[sessionId];
-    data.tickets[sessionId] = { hash: hash(ticket), epoch, repository_mark: entry.repository_mark ?? null, repository_id: entry.repository_id, root: entry.root, bank_reference: entry.bank_reference, ...(entry.used === true ? { used: true } : {}), at: this.#now().toISOString() };
+    data.tickets[sessionId] = { hash: hash(ticket), epoch, repository_mark: entry.repository_mark ?? null, repository_id: entry.repository_id, root: entry.root, bank_reference: entry.bank_reference, ...(validParts(entry.shown_parts) ? { shown_parts: entry.shown_parts } : {}), ...(entry.used === true ? { used: true } : {}), at: this.#now().toISOString() };
     this.#save(data);
     return ticket;
   }
@@ -359,9 +380,9 @@ class BankTickets {
   // again for the same run, repository mark and repository, so the owner's next own reply answers them
   // the same way, with a new one-use ticket, and they are not shown again. `bankReference` names what
   // that reply now answers. `used` is true once an answer was used, and stays true for the replies after it.
-  rearm(sessionId, entry, { bankReference: reference, used = false }) {
+  rearm(sessionId, entry, { bankReference: reference, used = false, parts = null }) {
     if (!entry || typeof entry !== 'object') return false;
-    return this.shown(sessionId, { epoch: entry.epoch, repositoryMark: entry.repository_mark ?? null, repositoryId: entry.repository_id, root: entry.root, bankReference: reference, used: used || entry.used === true });
+    return this.shown(sessionId, { epoch: entry.epoch, repositoryMark: entry.repository_mark ?? null, repositoryId: entry.repository_id, root: entry.root, bankReference: reference, used: used || entry.used === true, parts });
   }
 
   // Ends the shown note without a ticket (the reply could not count).
@@ -432,6 +453,6 @@ function bankTicketCommand(text, sessionId, tickets) {
 }
 
 module.exports = Object.freeze({
-  APP_NAMES, BANK_HOST, TICKETS_BASENAME, BankTickets, governanceBankSpecs, bankReference,
+  APP_NAMES, BANK_HOST, TICKETS_BASENAME, BankTickets, governanceBankSpecs, bankReference, shownParts, changedParts,
   agentsAfterAnswer, agentsAfterTurnOn, agentsGuided, agentsSummary, bankTicketContext, bankTicketCommand,
 });

@@ -265,8 +265,9 @@ function aggregateProblem(job, workflowContext) {
 //     mapping, explicit key or reserved character) and holds no `: ` or ` #` (a quote inside a
 //     plain value must never stop a comment from starting), a quoted scalar closed on the same
 //     line with no escape or doubled quote (so it reads as its plain text), a one-line flow list
-//     of such scalars, or, only for `run`, `if`, `shell` and `continue-on-error`, a block scalar
-//     header (`|`, `>`, optionally `-` or `+`);
+//     of such scalars, or a block scalar header (`|`, `>`, optionally `-` or `+`) for `run`, `if`,
+//     `shell` and `continue-on-error` (read as text) or for a key whose value the reader never reads
+//     (see readsValue: a service's `options`, a step's `with`), whose text is then skipped;
 //   - every key sits at the indent of the mapping it belongs to, and every list item at the
 //     indent of its list;
 //   - a value never continues on the next line: after `key: value` the next line is not deeper,
@@ -281,6 +282,24 @@ const YAML_NULL = /^(?:~|null|Null|NULL)$/;
 // a job name written this way is not the name GitHub shows (`1.10` is 1.1, `True` is true).
 const YAML_NOT_TEXT = /^(?:true|True|TRUE|false|False|FALSE|[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+|[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$/;
 const BLOCK_KEYS = Object.freeze(['run', 'if', 'shell', 'continue-on-error']);
+// The job and step fields readWorkflow reads (by value, by children or by presence).
+const READ_JOB_FIELDS = Object.freeze(['name', 'needs', 'strategy', 'if', 'steps', 'uses', 'continue-on-error', 'defaults', 'env']);
+const READ_STEP_FIELDS = Object.freeze(['run', 'env', 'if', 'continue-on-error', 'shell', 'working-directory', 'uses']);
+
+// Whether readWorkflow reads the value at `path` (keys from the root; null marks a list item). A block
+// scalar anywhere it reads stays outside the subset (other than BLOCK_KEYS), so block text is never
+// read as structure, a name or a filter; one where it never reads (a service's `options`, a step's
+// `with`, `runs-on`, `permissions`) is skipped. Block text sits deeper than its key, so the
+// reader, which reads only the direct children of what it reads, never meets it.
+function readsValue(path) {
+  const [top, , field, , stepField] = path;
+  if (['on', 'defaults', 'env'].includes(top)) return true;
+  if (top !== 'jobs') return false;
+  if (path.length <= 2) return true;
+  if (!READ_JOB_FIELDS.includes(field)) return false;
+  if (field !== 'steps' || path.length < 5) return true;
+  return READ_STEP_FIELDS.includes(stepField);
+}
 
 function plainValueProblem(value) {
   if (/^[|>][+-]?$/.test(value)) return null;
@@ -314,9 +333,10 @@ function strictSubsetProblem(source) {
   let blankIndent = 0; // the deepest whitespace-only line before that first content line
   let rootOpened = false; // a new root mapping may open only before the first key
   let expectDeeper = null; // the content indent after `key:`, until the next line
+  let expectPath = null; // the path of that `key:`
   let noDeeper = null; // the content indent after a scalar value
   let seenContent = false;
-  const containers = []; // [{ type: 'map' | 'list', indent, keys }]
+  const containers = []; // [{ type: 'map' | 'list', indent, keys, path }]
   for (let index = 0; index < raw.length; index += 1) {
     const line = raw[index];
     const number = index + 1;
@@ -346,7 +366,9 @@ function strictSubsetProblem(source) {
     if (/^(?:---|\.\.\.)(?: |$)/.test(trimmed) || trimmed.startsWith('%')) return `line ${number} starts another document or a directive`;
     if (noDeeper !== null && indent > noDeeper) return `line ${number} continues the value above it`;
     const pending = expectDeeper;
+    const pendingPath = expectPath;
     expectDeeper = null;
+    expectPath = null;
     noDeeper = null;
     let body = stripComment(line).trimEnd().slice(indent);
     if (body === '-') return `line ${number} is a list item with no value`;
@@ -359,7 +381,7 @@ function strictSubsetProblem(source) {
       const top = containers.at(-1);
       if (!(top && top.type === 'list' && top.indent === indent)) {
         if (pending === null || indent < pending) return `line ${number} is a list item at an indent that belongs to no list`;
-        containers.push({ type: 'list', indent });
+        containers.push({ type: 'list', indent, path: pendingPath });
       }
     }
     const contentIndent = item ? indent + 2 : indent;
@@ -374,24 +396,31 @@ function strictSubsetProblem(source) {
     }
     const key = keyMatch[1] || keyMatch[2] || keyMatch[3];
     const value = keyMatch[4] === undefined ? '' : keyMatch[4].trim();
-    if (item) containers.push({ type: 'map', indent: contentIndent, keys: new Set([key]) });
-    else {
+    let path;
+    if (item) {
+      const list = containers.at(-1);
+      containers.push({ type: 'map', indent: contentIndent, keys: new Set([key]), path: [...list.path, null] });
+      path = [...list.path, null, key];
+    } else {
       while (containers.length && (containers.at(-1).indent > indent || (containers.at(-1).type === 'list' && containers.at(-1).indent >= indent))) containers.pop();
       const top = containers.at(-1);
       if (top && top.type === 'map' && top.indent === indent) {
         if (top.keys.has(key)) return `line ${number} repeats the key "${key}"`;
         top.keys.add(key);
+        path = [...top.path, key];
       } else if ((pending !== null && indent > pending) || (containers.length === 0 && !rootOpened)) {
+        const parent = pending !== null && indent > pending ? pendingPath : [];
         rootOpened = true;
-        containers.push({ type: 'map', indent, keys: new Set([key]) });
+        containers.push({ type: 'map', indent, keys: new Set([key]), path: parent });
+        path = [...parent, key];
       }
       else return `line ${number} has a key at an indent that belongs to no mapping`;
     }
-    if (value === '') { expectDeeper = contentIndent; continue; }
+    if (value === '') { expectDeeper = contentIndent; expectPath = path; continue; }
     const problem = plainValueProblem(value);
     if (problem) return `line ${number} has ${problem}`;
     if (/^[|>][+-]?$/.test(value)) {
-      if (!BLOCK_KEYS.includes(key)) return `line ${number} gives "${key}" a block scalar, which this check reads only for ${BLOCK_KEYS.join(', ')}`;
+      if (!BLOCK_KEYS.includes(key) && readsValue(path)) return `line ${number} gives "${key}" a block scalar where this check reads its value, which it reads as a block only for ${BLOCK_KEYS.join(', ')}`;
       block = contentIndent;
       blockContent = null;
       blankIndent = 0;

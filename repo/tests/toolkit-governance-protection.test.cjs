@@ -490,8 +490,9 @@ test('P-19: the shared hostile inputs are unverified, except the shapes the read
   const acceptsShape = shape => shape.place === 'name' ? protection.producerVerdict([shape.github], [{ file: 'ci.yml', workflow: protection.readWorkflow(pair(shape)) }], 'main').P3.status === 'ok' : accepts(place(shape));
   hostile.expectDefaultDeny(assert, (text, shape) => acceptsShape(shape), hostile.cases(['line-breaks', 'continued-lines', 'quoting', 'yaml-structure', 'indents', 'invisible', 'check-names'], ['yaml']), {
     // Decoded exactly as YAML decodes them: a CRLF line end, a quoted key with no escapes, a
-    // consistent odd indent and one leading byte order mark.
-    allow: ['crlf-line-end', 'quoted-on-key', 'odd-indent', 'bom-at-start'],
+    // consistent odd indent and one leading byte order mark. A `>-` or `|-` block under a step's
+    // `id`, which the reader never reads, is skipped as the text YAML reads it as.
+    allow: ['crlf-line-end', 'quoted-on-key', 'odd-indent', 'bom-at-start', 'block-scalar->-', 'block-scalar-|-'],
   });
   // The base workflow with every line-break shape, a byte order mark and tab indents.
   const forms = Object.fromEntries(hostile.variants(AGGREGATE).map(item => [item.id, accepts(item.text)]));
@@ -761,4 +762,90 @@ test('P-17: the workflows are read at the merged default-branch commit, not the 
   protection.defaultBranchProtection(root, { requiredChecks: ['plain-text'], reader: own, commit: merged, runGit: (args, options) => { calls.push([args, options.cwd]); return { status: 0, stdout: Buffer.from('') }; } });
   assert.deepEqual(calls, [[['-c', 'core.quotePath=false', 'ls-tree', '-l', '-z', merged, '--', '.github/workflows/'], root]]);
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'scripts', 'toolkit-governance-protection.cjs'), 'utf8'), /require\('\.\/toolkit-governance-binding\.cjs'\)\.defaultRunGit/, 'the default runner is the binding reader\'s');
+});
+
+// A real CI file (SQAG, 28 November 2026) gives a service's `options` a folded block scalar: the
+// whole file used to be unverified, so its required check had no producer and Toolkit's ruleset was
+// never offered. Block text under a key the reader never reads is skipped; where it reads, it is not.
+const SERVICE_OPTIONS = [
+  'name: CI',
+  'on:',
+  '  pull_request:',
+  '  push:',
+  '    branches:',
+  '      - main',
+  'permissions:',
+  '  contents: read',
+  'jobs:',
+  '  secret-scan:',
+  '    name: Secret scan',
+  '    runs-on: ubuntu-24.04',
+  '    steps:',
+  '      - name: Scan',
+  '        run: |',
+  '          python scripts/scan.py',
+  '  quote-basis-click-budget:',
+  '    name: Quote Basis click budget',
+  '    runs-on: ubuntu-24.04',
+  '    needs:',
+  '      - secret-scan',
+  '    timeout-minutes: 20',
+  '    env:',
+  '      CI: "true"',
+  '    steps:',
+  '      - name: Check out repository',
+  '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
+  '        with:',
+  '          ref: ${{ github.event.pull_request.head.sha || github.sha }}',
+  '      - name: Script',
+  '        uses: actions/github-script@v7',
+  '        with:',
+  '          script: |',
+  '            name: not a key',
+  '      - name: Budget',
+  '        run: |',
+  '          npm run test:budget',
+  '  validate:',
+  '    name: Validate app',
+  '    runs-on: ubuntu-24.04',
+  '    services:',
+  '      postgres:',
+  '        image: postgres:17',
+  '        env:',
+  '          POSTGRES_DB: postgres',
+  '        ports:',
+  '          - 5432:5432',
+  '        options: >-',
+  '          --health-cmd "pg_isready -U cloud_admin -d postgres"',
+  '          --health-interval 10s',
+  '    steps:',
+  '      - name: Test',
+  '        run: npm test',
+  '',
+].join('\n');
+
+test('P-20: a block scalar under a key the reader never reads is skipped, so the producer is found and the ruleset offered', (t) => {
+  const { protectionOffer } = require(path.join(scripts, 'toolkit-governance-migration.cjs'));
+  const workflow = protection.readWorkflow(SERVICE_OPTIONS);
+  assert.deepEqual(workflow.problems, []);
+  assert.deepEqual(workflow.jobs.map(job => job.name), ['Secret scan', 'Quote Basis click budget', 'Validate app']);
+  const root = repo(t, { 'ci.yml': SERVICE_OPTIONS });
+  const requiredChecks = ['Quote Basis click budget'];
+  // Squash and rebase allowed: Toolkit's ruleset fixes that, and is offered now the producer is found.
+  const reader = github({ checks: [{ context: 'Quote Basis click budget', integration_id: 15368 }], methods: ['merge', 'squash', 'rebase'] });
+  const result = protection.defaultBranchProtection(root, { requiredChecks, reader, commit: headOf(root) });
+  assert.equal(result.checks.P3.status, 'ok', result.checks.P3.details.join('\n'));
+  assert.deepEqual(result.checks.P3.missing, []);
+  assert.deepEqual(result.checks.P4.never_reports, []);
+  const offer = protectionOffer(result);
+  assert.equal(offer.offered, true, JSON.stringify(offer));
+  // Where the reader reads a value, a block scalar is still outside the subset: never read as structure.
+  for (const [name, text] of Object.entries({
+    'job written as a block': ['on: [pull_request]', 'jobs:', '  fake: |', '    name: Quote Basis click budget', ''].join('\n'),
+    'event written as a block': ['on:', '  pull_request: |', '    paths: [docs]', 'jobs:', '  a:', '    runs-on: x', ''].join('\n'),
+    'env value as a block': ['on: [pull_request]', 'env:', '  NODE_OPTIONS: >-', '    --require x', 'jobs:', '  a:', '    runs-on: x', ''].join('\n'),
+    'matrix as a block': ['on: [pull_request]', 'jobs:', '  a:', '    strategy:', '      matrix: |', '        x: [1]', '    runs-on: x', ''].join('\n'),
+    'step env value as a block': ['on: [pull_request]', 'jobs:', '  a:', '    runs-on: x', '    steps:', '      - env:', '          TEST_LEGS: |', '            x', '        run: x', ''].join('\n'),
+    'needs as a block': ['on: [pull_request]', 'jobs:', '  a:', '    needs: >-', '      b', '    runs-on: x', ''].join('\n'),
+  })) assert.match(protection.readWorkflow(text).problems.join('\n'), /a block scalar where this check reads its value/, name);
 });

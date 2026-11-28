@@ -258,13 +258,15 @@ test('P-11 settings drift from the daily read gives one line with what drifted a
     finding('PROTECTION_PRODUCER'), finding('RULESET_BYPASS_ALLOWED', 'info'), finding('SECURITY_CODE_SCANNING_UNVERIFIED', 'unverified')] });
   const lines = fx.lines();
   assert.equal(lines.length, 1);
-  assert.equal(lines[0], "Toolkit governance: acme/app's settings have drifted from what governance needs: no ruleset blocks force pushes; merge methods other than merge commits are allowed; Dependabot alerts are off. In your first reply, tell the user once, in one line, what drifted and that one yes from them fixes it: `toolkit governance migrate` gives the owner one command for their own terminal, where one Enter applies the rules; and the agent runs `toolkit governance security` (it names anything it cannot change itself, such as a missing Dependabot entry for a pull request). Never change these settings without that yes; nothing waits on it.");
+  assert.equal(lines[0], "Toolkit governance: acme/app's settings have drifted from what governance needs: no ruleset blocks force pushes; merge methods other than merge commits are allowed; Dependabot alerts are off. In your first reply, tell the user once, in one line, what drifted and that one yes from them fixes it: refresh governance shows the drift and asks one question, and the owner's yes there fixes it (the agent runs it, and the owner runs no command); and the agent runs `toolkit governance security` (it names anything it cannot change itself, such as a missing Dependabot entry for a pull request). Never change these settings without that yes; nothing waits on it.");
   // Only the saved ids, nothing else from the findings.
   const entry = JSON.parse(fs.readFileSync(path.join(fx.registryOptions.stateDirectory, parts.BASENAME), 'utf8')).repositories['repo-id-1'];
   assert.deepEqual(entry.settings, { drift: ['RULESET_NO_FORCE_PUSH_MISSING', 'PROTECTION_MERGE_METHODS', 'SECURITY_DEPENDABOT_ALERTS'], unread: true });
   // One kind of step only.
   fx.save({ settings: [finding('PROTECTION_CHECKS_MISMATCH')] });
-  assert.match(fx.lines()[0], /: the required checks differ from the programme file\. [^]*fixes it: `toolkit governance migrate` [^;]*\. Never change/);
+  // Never a command for the owner's own terminal (SQAG, 28 Nov): refresh governance asks, the agent runs it.
+  assert.match(fx.lines()[0], /: the required checks differ from the programme file\. [^]*fixes it: refresh governance shows the drift [^;]*\. Never change/);
+  assert.doesNotMatch(fx.lines()[0], /migrate|own terminal/);
   // Drift is read again after an hour, so a fix made on GitHub ends the line.
   assert.equal(fx.started.length, 0);
   fx.lines(1);

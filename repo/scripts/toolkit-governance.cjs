@@ -565,6 +565,7 @@ class ToolkitGovernanceCli {
     const reference = view.update?.offer || view.fix
       ? require('./toolkit-question-bank.cjs').bankReferenceFromIdentity(crypto.createHash('sha256').update(JSON.stringify([shownReference, view.update?.offer || null, view.update?.open?.url || null, view.fix || null])).digest('hex'))
       : shownReference;
+    const parts = governanceBank.shownParts(view.parts || []);
     if (answers === null) {
       if (json) { this.#print(true, { state: state.state, bank_reference: reference, questions: specs }, []); return BANK_SHOWN; }
       if (view.kind === 'line') { this.#print(false, {}, [...view.lines, '', BANK_UNREAD_AGENTS]); return view.code; }
@@ -589,7 +590,7 @@ class ToolkitGovernanceCli {
           return this.#applyView(view, state, task, chosen, found);
         }
       }
-      return this.#showBank(view, state, reference);
+      return this.#showBank(view, state, reference, parts);
     }
     if (this.#cloud()) throw new GovernanceCliError(`${CLOUD_BANK} Nothing was written.`);
     const sessionId = this.#hostSession();
@@ -602,15 +603,18 @@ class ToolkitGovernanceCli {
     }
     // Shown once: a reply that cannot be used gets a short line, and the same run waits for the owner's
     // next own reply (BankTickets.rearm), never a second showing.
-    const again = (lines, reply) => this.#again(sessionId, entry, reference, lines, reply);
+    const again = (lines, reply) => this.#again(sessionId, entry, reference, lines, reply, parts);
     if (view.kind === 'line') {
       this.#print(false, {}, [...view.lines, 'The answer was not used.']);
       return 0;
     }
     if (entry.bank_reference !== reference) {
-      // What was shown changed since (another session, or GitHub): the answer is not used, and what
-      // stands now is shown in its place, open for the owner's next reply.
-      return again(['What Toolkit showed has changed since, so the answer was not used and nothing was written. Here it is as it stands now:', '', view.text], view.kind === 'summary' ? CHANGE_ANOTHER : REPLY_AGAIN);
+      // What was shown changed since (another session, or GitHub): the answer is not used, what changed
+      // is named where the note says, and what stands now is shown in its place, open for the owner's
+      // next reply.
+      const changed = governanceBank.changedParts(entry.shown_parts, parts);
+      const what = changed.length ? ` What changed: ${changed.length > 1 ? `${changed.slice(0, -1).join(', ')} and ${changed.at(-1)}` : changed[0]}.` : '';
+      return again([`What Toolkit showed has changed since, so the answer was not used and nothing was written.${what} Here it is as it stands now:`, '', view.text], view.kind === 'summary' ? CHANGE_ANOTHER : REPLY_AGAIN);
     }
     const answer = answers.replace(REFERENCE_PREFIX, '');
     // After an answer was used, a plain yes, no or later meant for something else is never read as a
@@ -631,7 +635,7 @@ class ToolkitGovernanceCli {
       code = await this.#applyView(view, state, task, chosen, found);
       return code;
     } finally {
-      try { new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).rearm(sessionId, entry, { bankReference: reference, used: code === 0 }); } catch { /* the owner can type toolkit governance */ }
+      try { new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).rearm(sessionId, entry, { bankReference: reference, used: code === 0, parts }); } catch { /* the owner can type toolkit governance */ }
     }
   }
 
@@ -645,7 +649,7 @@ class ToolkitGovernanceCli {
       const cleanable = Boolean(copies && copies.ok && copiesRow(copies)?.files > 0);
       const asked = summary.questionNumbers(facts);
       const fix = facts.settings?.fix || null;
-      return { kind: 'summary', text: summary.renderSummary(facts, { held }), agents: governanceBank.agentsSummary(), update: facts.update, fix, parse: reply => summary.parseChange(reply, { copies: cleanable, rows: Boolean(doneWhen?.pages?.length), update: Boolean(asked.update), fix: Boolean(asked.fix) }) };
+      return { kind: 'summary', text: summary.renderSummary(facts, { held }), parts: summary.summaryParts(facts), agents: governanceBank.agentsSummary(), update: facts.update, fix, parse: reply => summary.parseChange(reply, { copies: cleanable, rows: Boolean(doneWhen?.pages?.length), update: Boolean(asked.update), fix: Boolean(asked.fix) }) };
     }
     // The search's own reason is for the logs, not the owner: nothing can be set up until it works.
     if (adoption && adoption.blocked) return { kind: 'line', code: 1, lines: ['GitHub could not be read just now, so Toolkit cannot find or suggest the evidence store and parent issue yet, and the setup questions are not shown. Nothing changed. Type toolkit governance again in a moment.'] };
@@ -654,7 +658,7 @@ class ToolkitGovernanceCli {
     const store = adoption ? { repository: adoption.store.repository, path: `state/${owner}/${name}/`, exists: Boolean(adoption.found_store) } : null;
     const agreed = state.state === 'UNDECIDED' && this.#agreed(state);
     const questions = guided.guidedQuestions({ state, store, agreed, publicRepo: adoption?.visibility === 'public' });
-    return { kind: 'guided', text: guided.renderGuided(questions, { state, agreed }), agents: governanceBank.agentsGuided(), parse: reply => guided.parseGuidedAnswer(reply, questions, { state }) };
+    return { kind: 'guided', text: guided.renderGuided(questions, { state, agreed }), parts: questions.map(question => [question.title || question.key, question]), agents: governanceBank.agentsGuided(), parse: reply => guided.parseGuidedAnswer(reply, questions, { state }) };
   }
 
   // Whether the owner said yes to the session-start governance question in this run (PromptHold notes it).
@@ -726,7 +730,8 @@ class ToolkitGovernanceCli {
 
   // Whether the merged programme file is behind this Toolkit (toolkit-governance-summary.cjs
   // programmeUpdate), from a fresh read only: { offer, open } (an update pull request already open),
-  // or null. Reads the default branch's protection (never in tests without a reader).
+  // { offer: null, open: null, refresh } (it waits for Toolkit's refresh pull request), or null. Reads
+  // the default branch's protection (never in tests without a reader).
   #programmeUpdate(state, merged, read, readProtection = this.#protectionReader || protection.ghProtectionReader) {
     if (!merged || !read?.fresh || !state.root || !state.repository) return null;
     let running = null;
@@ -746,6 +751,16 @@ class ToolkitGovernanceCli {
     if (!offer) return null;
     let open = null;
     if (this.#switchTransport) { try { open = this.#switchTransport.openProgrammeUpdate(state.repository); } catch { open = null; } }
+    if (open) return { offer, open };
+    // One refresh, one binding pull request: while Toolkit's refresh pull request is open and adds a
+    // check of Toolkit's own that the update would not list, the update waits for it to land, so the
+    // owner never merges two binding pull requests in a row (SQAG, 28 November 2026: one for min_toolkit
+    // and checks, then one for personal-data once the guard landed). Listing the check before its
+    // workflow is on the default branch would require a check no job produces yet.
+    let refresh = null;
+    if (this.#switchTransport) { try { refresh = this.#switchTransport.openRefresh(state.repository); } catch { refresh = null; } }
+    const coming = refresh ? refresh.checks.filter(check => !offer.required_checks.includes(check)) : [];
+    if (coming.length) return { offer: null, open: null, refresh: { number: refresh.number, url: refresh.url, checks: coming } };
     return { offer, open };
   }
 
@@ -807,9 +822,9 @@ class ToolkitGovernanceCli {
 
   // A reply that could not be used: its lines and the one reply line, and the same questions noted
   // again for this run so the owner's next own reply answers them.
-  #again(sessionId, entry, reference, lines, reply = REPLY_AGAIN) {
+  #again(sessionId, entry, reference, lines, reply = REPLY_AGAIN, parts = null) {
     let noted = false;
-    try { noted = new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).rearm(sessionId, entry, { bankReference: reference }); } catch { noted = false; }
+    try { noted = new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).rearm(sessionId, entry, { bankReference: reference, parts }); } catch { noted = false; }
     this.#print(false, {}, [...lines, noted ? reply : 'Toolkit could not keep this open for another reply (its user-state folder could not be written). Type toolkit governance to see it again.']);
     return BANK_SHOWN;
   }
@@ -852,7 +867,7 @@ class ToolkitGovernanceCli {
 
   // Prints the guided questions or the summary and notes them for this run, so the owner's next own
   // reply (typed, or tapped on a card the app chose to show) can answer them.
-  #showBank(view, state, reference) {
+  #showBank(view, state, reference, parts = null) {
     if (this.#cloud()) {
       this.#stdout.write(`${view.text}\n\n${CLOUD_BANK}\n`);
       return BANK_SHOWN;
@@ -863,7 +878,7 @@ class ToolkitGovernanceCli {
     let noted = false;
     try {
       noted = Boolean(sessionId) && new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).shown(sessionId, {
-        epoch, repositoryMark: epochs.repository(state.repository_id), repositoryId: state.repository_id, root: state.root, bankReference: reference,
+        epoch, repositoryMark: epochs.repository(state.repository_id), repositoryId: state.repository_id, root: state.root, bankReference: reference, parts,
       });
     } catch { noted = false; }
     this.#stdout.write(`${view.text}\n\n${view.agents}\n`);

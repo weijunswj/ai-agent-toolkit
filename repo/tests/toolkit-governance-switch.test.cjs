@@ -209,7 +209,8 @@ test('a ticket answers only what it was given for: a changed state shows the sum
   ctx.merge(bindingText({ task_prs: { auto_merge: 'after-gates' } }));
   const result = await run(ctx, ['setup', '--answers', `${reference}: task auto-merge off`, '--ticket', ticket], { switchTransport });
   assert.equal(result.code, 0);
-  assert.match(result.out, /^What Toolkit showed has changed since, so the answer was not used and nothing was written\./m);
+  // The ticket keeps what was shown part by part, so the line names the part that changed.
+  assert.match(result.out, /^What Toolkit showed has changed since, so the answer was not used and nothing was written\. What changed: Task auto-merge with merge train\. Here it is as it stands now:$/m);
   assert.match(row(result.out, 'Task auto-merge with merge train'), /\| On \|/);
   assert.equal(calls.length, 0);
   const other = await run(ctx, ['setup', '--answers', `${reference}: task auto-merge off`, '--ticket', ticket], { switchTransport, environment: { TOOLKIT_HOST_SESSION: 'another-session' } });
