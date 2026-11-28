@@ -604,10 +604,11 @@ test('a part with many findings keeps a short cell, and lists each finding under
   const settings = summary.settingsRows({ rulesetResult: { status: 'missing' }, keepState: null, protectionResult: branch, securityResult: security });
   // The workflow file the checks could not read is the controller's, said once (P3 and P4 both name it);
   // "Quote Basis click budget" waits for that fix, never a by-hand step (G2 round 1, L1).
-  assert.equal(settings.protection, 'Drift: 1 item; Waiting for you: 3 items; For your controller: 2 items, listed below');
+  // Why Toolkit's ruleset waits is a note, not counted as the owner's (G2 of PR 1582 round 2, L2).
+  assert.equal(settings.protection, 'Drift: 1 item; Waiting for you: 2 items; For your controller: 2 items, listed below');
   assert.equal(settings.security, 'Waiting for you: 1 item, listed below');
   assert.deepEqual(settings.controller.map(finding => finding.kind), ['no-producer', 'workflow-unreadable'], 'each weakness to file once, as it is listed');
-  const text =summary.renderSummary({ repository: SLUG, defaultBranch: 'main', store: null, parents: [], task: {}, requiredChecks: ['Quote Basis click budget'], settings, files: null, permissions: {}, app: null, copies: null, stale: null });
+  const text = summary.renderSummary({ repository: SLUG, defaultBranch: 'main', store: null, parents: [], task: {}, requiredChecks: ['Quote Basis click budget'], settings, files: null, permissions: {}, app: null, copies: null, stale: null });
   // Every cell stays short; a settings cell, which can hold three counts, is only counts: each part a
   // label and its count, never a clause.
   for (const line of tableOf(text)) {
@@ -699,7 +700,8 @@ test('a repository\'s own ruleset that allows squash and rebase gets its exact c
   const shown = await run(ctx, ['setup']);
   assert.equal(shown.code, 0, shown.err);
   assert.equal(shown.out.split('\n')[0], '**Governance: on, not ready: 1 step left.**', 'one offer');
-  assert.ok(shown.out.includes(`   - **A. Yes (my pick):** Toolkit ${OWN_WORDS} and adds the "Toolkit: protected default branch" ruleset`), shown.out);
+  // Toolkit's ruleset is written only where the own change leaves it needed (G2 of PR 1580 round 2, L8).
+  assert.ok(shown.out.includes(`   - **A. Yes (my pick):** Toolkit ${OWN_WORDS} and adds the "Toolkit: protected default branch" ruleset on the default branch where still needed after the change to the repository's own ruleset (`), shown.out);
   assert.deepEqual(github.writes, [], 'nothing before the yes');
   const no = await reply(ctx, '1B');
   assert.equal(no.code, 0, no.err);
@@ -727,7 +729,10 @@ test('where Toolkit\'s ruleset is not offered, the yes to the own ruleset change
   assert.ok(shown.out.includes(`   - **A. Yes (my pick):** Toolkit ${OWN_WORDS} and ${summary.FILES_TASKS}, then reads each one back. Nothing else changes.`), shown.out);
   const listed = shown.out.slice(shown.out.indexOf('**Branch protection and rulesets:**'));
   assert.match(listed, /^- Drift: main allows merge, squash, rebase \(rulesets\); only merge commits are allowed$/m, 'what the yes fixes is drift, not by hand');
-  assert.match(listed, /^- Waiting for you: default-branch protection: waits for your controller's fix: Toolkit's ruleset is not offered while no workflow job produces "ghost-check", since requiring it would block every merge$/m);
+  // Why Toolkit's ruleset waits is a note, not a step counted as the owner's (G2 of PR 1582 round 2, L2).
+  assert.match(listed, /^- Held for your controller's fix: default-branch protection: Toolkit's ruleset is not offered while no workflow job produces "ghost-check", since requiring it would block every merge$/m);
+  assert.doesNotMatch(listed, /Waiting for you: default-branch protection: waits/);
+  assert.match(rowOf(shown.out, 'Branch protection and rulesets'), /; Waiting for you: 1 item;/, "only the by-hand setting counts as the owner's");
   assert.doesNotMatch(listed, /change by hand: main|workflow \(drift, fix by hand\)|by hand: Toolkit's ruleset/, 'one plain thing per line');
   const yes = await reply(ctx, '1A');
   assert.equal(yes.code, 0, yes.err);
@@ -807,7 +812,7 @@ test('an update already open while Toolkit\'s refresh pull request adds a check 
     openRefresh: () => ({ number: 40, url: `https://github.com/${SLUG}/pull/40`, checks: ['personal-data', 'plain-text'] }),
   } };
   const shown = await run(ctx, ['setup']);
-  assert.ok(shown.out.split('\n').includes(`**Programme file:** An update waits in https://github.com/${SLUG}/pull/30, but Toolkit's refresh pull request https://github.com/${SLUG}/pull/40 adds the personal-data check, which that update does not list. Merge the refresh pull request first, then close the update on GitHub and say toolkit governance: one update then covers it too. Merging the update now means a second one afterwards.`), shown.out);
+  assert.ok(shown.out.split('\n').includes(`**Programme file:** An update waits in https://github.com/${SLUG}/pull/30, but Toolkit's refresh pull request https://github.com/${SLUG}/pull/40 adds the personal-data check, which that update does not list. Merge the refresh pull request first, then tell your agent to close the update (it adds a closing comment) and say toolkit governance: one update then covers it too. Merging the update now means a second one afterwards.`), shown.out);
   assert.doesNotMatch(shown.out, /Question: Bring the programme file/);
 });
 
@@ -882,6 +887,8 @@ test('a Dependabot file gap goes to the controller and is filed as its task, and
   assert.doesNotMatch(shown.out, /change by hand: \.github\/dependabot\.yml/);
   const question = shown.out.split('\n').find(line => line.startsWith('   - **A. Yes (my pick):** Toolkit '));
   assert.ok(question && question.endsWith(` and ${summary.FILES_TASKS}, then reads each one back. Nothing else changes.`), `the question names the filing: ${question}`);
+  // Shown after the summary filed it, so the question says it files only what is not filed yet (G2 of PR 1583, L2).
+  assert.ok(question.includes('files each weakness listed for your controller that is not filed yet, once, as a task under the programme parent issue'), question);
   const yes = await reply(ctx, '1A');
   assert.equal(yes.code, 0, yes.err);
   assert.ok(yes.out.split('\n').includes(`- Your controller fixes this in a pull request: ${gap}. Already filed as #42, still open.`), yes.out);
@@ -970,4 +977,29 @@ test('status, check, a --json read and an answer file nothing; only the summary 
   assert.match(changed.out, /Here it is as it stands now:$/m);
   assert.ok(changed.out.includes(`\n- Your controller fixes this in a pull request: ${CI_LINE}. Already filed as #41, still open.\n`), changed.out);
   assert.equal(tracker.issues.length, 1, 'never filed twice');
+});
+
+// G2 of PR 1582 round 2, L8 (its probe E): where GitHub's security settings could not be read, the
+// summary lists no Dependabot file gap and its question names no filing, so the yes files none either:
+// an approval names every effect.
+test('with the security settings unread, the yes files no Dependabot gap the question did not name', async t => {
+  const ctx = fixture(t, { quiet: true, requiredChecks: ['plain-text'], commitFiles: { '.github/workflows/plain-text.yml': PLAIN_TEXT, '.github/dependabot.yml': DEPENDABOT, 'package.json': '{"name":"probe","version":"1.0.0"}\n' } });
+  const github = fakeGitHub(ctx);
+  const issues = [];
+  const { WeaknessTasks } = require(path.join(scripts, 'toolkit-governance-weakness.cjs'));
+  ctx.cli = { ...ctx.cli, securityReader: () => ({ ok: false, reason: 'forbidden' }), weaknessTasks: new WeaknessTasks({ request: (method, endpoint, input) => {
+    if (method === 'GET' && /\/issues\?/.test(endpoint)) return { ok: true, value: issues.filter(issue => issue.state === 'open') };
+    if (endpoint === `repos/${SLUG}/issues`) { issues.push({ number: 43, id: 4300, state: 'open', ...input }); return { ok: true, value: { number: 43, id: 4300 } }; }
+    if (endpoint === `repos/${SLUG}/issues/1/sub_issues`) return { ok: true, value: {} };
+    return { ok: false, reason: 'gh-request-failed' };
+  } }) };
+  const shown = await run(ctx, ['setup']);
+  const question = shown.out.split('\n').find(line => line.startsWith('   - **A. Yes (my pick):** Toolkit '));
+  assert.ok(question && !question.includes(summary.FILES_TASKS), `no filing named: ${question}`);
+  const yes = await reply(ctx, '1A');
+  assert.equal(yes.code, 2, 'not finished: the security settings are still to read');
+  assert.match(yes.out, /the security settings could not be read back/);
+  assert.ok(github.writes.length > 0, 'the yes still writes what it named');
+  assert.deepEqual(issues, [], 'nothing filed that the question did not name');
+  assert.doesNotMatch(yes.out, /dependabot\.yml has no/);
 });

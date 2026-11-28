@@ -578,7 +578,7 @@ class ToolkitGovernanceCli {
       else if (this.#interactive) {
         // In the owner's own terminal: shown once, then a reply that cannot be used gets one line, up
         // to TERMINAL_TRIES replies; an empty reply ends it.
-        this.#stdout.write(`${view.text}\n`);
+        this.#stdout.write(`${view.show()}\n`);
         for (let tries = 1; ; tries += 1) {
           const reply = tries > TERMINAL_TRIES ? '' : String(await this.#ask(view.kind === 'summary' ? 'A change, or Enter for none: ' : 'Your answer: ')).trim();
           if (!reply) { this.#print(false, {}, ['Nothing was written.']); return view.kind === 'summary' ? 0 : 1; }
@@ -616,7 +616,7 @@ class ToolkitGovernanceCli {
       // next reply.
       const changed = governanceBank.changedParts(entry.shown_parts, parts);
       const what = changed.length ? ` What changed: ${changed.length > 1 ? `${changed.slice(0, -1).join(', ')} and ${changed.at(-1)}` : changed[0]}.` : '';
-      return again([`What Toolkit showed has changed since, so the answer was not used and nothing was written.${what} Here it is as it stands now:`, '', view.text], view.kind === 'summary' ? CHANGE_ANOTHER : REPLY_AGAIN);
+      return again([`What Toolkit showed has changed since, so the answer was not used and nothing was written.${what} Here it is as it stands now:`, '', view.show()], view.kind === 'summary' ? CHANGE_ANOTHER : REPLY_AGAIN);
     }
     const answer = answers.replace(REFERENCE_PREFIX, '');
     // After an answer was used, a plain yes, no or later meant for something else is never read as a
@@ -641,8 +641,10 @@ class ToolkitGovernanceCli {
     }
   }
 
-  // The guided questions, the summary, or one line: { kind, text, agents, parse } or { kind: 'line',
-  // lines, code }.
+  // The guided questions, the summary, or one line: { kind, show, agents, parse } or { kind: 'line',
+  // lines, code }. `show()` gives the text the owner is shown; for the summary, the first call files
+  // each weakness it lists, so only code that prints the text calls it, never a spread, a JSON dump or
+  // a log of the view (governance review, 28 November 2026).
   #view({ state, specs, adoption, found, merged, read, switches, permissions, app, storeCheck, copies, doneWhen = null }) {
     if (state.state === 'ENABLED') {
       const facts = { ...this.#summaryFacts({ state, specs, merged, read, switches, permissions, app, storeCheck, copies }), doneWhen };
@@ -668,7 +670,7 @@ class ToolkitGovernanceCli {
         const reread = this.#settingsRows(state, merged, read, this.#protectionReader || protection.ghProtectionReader);
         return summary.renderTable({ ...facts, settings: reread.rows, unread: reread.unread });
       };
-      return { kind: 'summary', get text() { return shown(); }, parts: summary.summaryParts(facts), agents: governanceBank.agentsSummary(), update: facts.update, fix, table, parse: reply => summary.parseChange(reply, { copies: cleanable, rows: Boolean(doneWhen?.pages?.length), update: Boolean(asked.update), fix: Boolean(asked.fix) }) };
+      return { kind: 'summary', show: shown, parts: summary.summaryParts(facts), agents: governanceBank.agentsSummary(), update: facts.update, fix, table, parse: reply => summary.parseChange(reply, { copies: cleanable, rows: Boolean(doneWhen?.pages?.length), update: Boolean(asked.update), fix: Boolean(asked.fix) }) };
     }
     // The search's own reason is for the logs, not the owner: nothing can be set up until it works.
     if (adoption && adoption.blocked) return { kind: 'line', code: 1, lines: ['GitHub could not be read just now, so Toolkit cannot find or suggest the evidence store and parent issue yet, and the setup questions are not shown. Nothing changed. Type toolkit governance again in a moment.'] };
@@ -677,7 +679,8 @@ class ToolkitGovernanceCli {
     const store = adoption ? { repository: adoption.store.repository, path: `state/${owner}/${name}/`, exists: Boolean(adoption.found_store) } : null;
     const agreed = state.state === 'UNDECIDED' && this.#agreed(state);
     const questions = guided.guidedQuestions({ state, store, agreed, publicRepo: adoption?.visibility === 'public' });
-    return { kind: 'guided', text: guided.renderGuided(questions, { state, agreed }), parts: questions.map(question => [question.title || question.key, question]), agents: governanceBank.agentsGuided(), parse: reply => guided.parseGuidedAnswer(reply, questions, { state }) };
+    const text = guided.renderGuided(questions, { state, agreed });
+    return { kind: 'guided', show: () => text, parts: questions.map(question => [question.title || question.key, question]), agents: governanceBank.agentsGuided(), parse: reply => guided.parseGuidedAnswer(reply, questions, { state }) };
   }
 
   // Whether the owner said yes to the session-start governance question in this run (PromptHold notes it).
@@ -897,7 +900,7 @@ class ToolkitGovernanceCli {
   // reply (typed, or tapped on a card the app chose to show) can answer them.
   #showBank(view, state, reference, parts = null) {
     if (this.#cloud()) {
-      this.#stdout.write(`${view.text}\n\n${CLOUD_BANK}\n`);
+      this.#stdout.write(`${view.show()}\n\n${CLOUD_BANK}\n`);
       return BANK_SHOWN;
     }
     const sessionId = this.#hostSession();
@@ -909,7 +912,7 @@ class ToolkitGovernanceCli {
         epoch, repositoryMark: epochs.repository(state.repository_id), repositoryId: state.repository_id, root: state.root, bankReference: reference, parts,
       });
     } catch { noted = false; }
-    this.#stdout.write(`${view.text}\n\n${view.agents}\n`);
+    this.#stdout.write(`${view.show()}\n\n${view.agents}\n`);
     if (!noted) this.#stdout.write(`\nToolkit could not note this for this session (its session-start hook did not mark it, or its user-state folder could not be written), so a reply in chat cannot be recorded. Start a new session and say toolkit governance there, or run ${CMD('setup')} in your own terminal.\n`);
     return BANK_SHOWN;
   }

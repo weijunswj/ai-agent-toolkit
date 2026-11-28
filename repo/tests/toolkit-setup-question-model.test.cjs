@@ -836,6 +836,10 @@ test('Claude Code settings show one row per setting, each recommending on its ow
   assert.equal(fresh[2].current_short, 'On (Claude Code default)');
   assert.equal(fresh[2].choices.find((choice) => choice.value === 'disable').consequence, 'Sets "switchModelsOnFlag": false in settings.json. Claude Code then pauses and asks before switching models when a request is flagged.');
   assert.match(fresh[2].whatThisControls, /Turn on and Turn off each write this one value; the other settings are not touched\.$/);
+  // Row 3.5 names the exact key Claude Code reads (its memory doc): the value, its path in settings.json,
+  // and both plugin ids (#835 DONE WHEN, "the 3.5 wording names the verified key").
+  assert.match(fresh[3].whatThisControls, /"instructionFiles": "claude-md-and-agents-md" at pluginConfigs > cc-plugin-agents-md@builtin or agents-md@builtin > options in settings\.json/);
+  assert.doesNotMatch(fresh[3].whatThisControls, /\(in pluginConfigs\)/);
   // The on-by-default row hides Turn on; rows not set yet keep both, since Turn off records your off.
   assert.deepEqual(fresh.map((row) => row.choices.map((choice) => choice.value)), [['keep', 'enable', 'disable'], ['keep', 'enable', 'disable'], ['keep', 'disable'], ['keep', 'enable', 'disable']]);
 

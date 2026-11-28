@@ -79,3 +79,13 @@ test('a joined line runs several commands, and a quoted program path is read who
   ]) assert.equal(review.shellWords(line), words, line);
   assert.doesNotMatch(review.shellWords('Bash("C:/Program Files/tool.exe" go)'), /Program|Files/);
 });
+
+// Owner retest of 29 Nov 2026: the agent showed the review list inside a code block, so it read as
+// terminal text. The skill says to show it as ordinary text, as it does for remove toolkit's plan.
+test('the skill shows the review list as ordinary text, never in a code block of the agent\'s own', () => {
+  const skill = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', '..', 'skills', 'toolkit-setup', 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
+  const section = skill.split('\n').find(line => line.startsWith('For "review permissions"'));
+  assert.ok(section, 'the review permissions paragraph');
+  assert.match(section, /show its output exactly as printed, as ordinary text, never in a code block of your own/);
+  assert.match(section, /show that output the same way/);
+});

@@ -524,7 +524,9 @@ function describeResult(result) {
   const agent = [];
   if (result.plugins?.length) agent.push(...uninstallSteps(result.plugins));
   // After the plugin goes, the remove toolkit skill may be gone too, so the exact line is given.
-  if (result.folder_kept) agent.push(`- Once the plugin is uninstalled and the owner says \`remove toolkit\` again, and the skill is gone, run: node "${path.resolve(__filename)}" plan --app ${result.app || 'all'}`);
+  // A folder that waits only for Toolkit's permission lines waits for the owner's own command.
+  const once = result.plugins?.length ? 'the plugin is uninstalled and the owner says `remove toolkit` again, and the skill is gone' : 'the owner has run their toolkit permissions --remove command and says `remove toolkit` again';
+  if (result.folder_kept) agent.push(`- Once ${once}, run: node "${path.resolve(__filename)}" plan --app ${result.app || 'all'}`);
   if (agent.length) lines.push('', AGENT_LINE, ...agent);
   return lines;
 }

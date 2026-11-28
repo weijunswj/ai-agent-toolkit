@@ -226,7 +226,7 @@ function settingsRows(reads) {
   const security = require('./toolkit-governance-security.cjs');
   const changes = [];
   const ownRulesets = [];
-  const rules = { on: [], drift: [], free: [], waiting: [], controller: [], unread: [] };
+  const rules = { on: [], drift: [], free: [], waiting: [], controller: [], unread: [], held: [] };
   const findings = [];
   const rulesetPart = (result, { on, missing, change }) => {
     if (!result || result.status === 'not-applicable') return;
@@ -269,7 +269,9 @@ function settingsRows(reads) {
     if (unreadCheck) rules.unread.push({ name, why: unreadWhy(unreadCheck.details[0]) });
     else if (offer.offered) {
       rules.drift.push(...settingsDrift);
-      changes.push(`${branch.toolkit_ruleset ? 'updates' : 'adds'} the "${protection.RULESET_NAME}" ruleset on the default branch (pull requests only, the programme file's required checks pinned to GitHub Actions, branches up to date before merging, merge commits only, nobody can bypass it)`);
+      // Written after the own ruleset change, only where that change leaves it needed (governance review, 28 November 2026).
+      const stillNeeded = own.length ? ` where still needed after the change to the repository's own ${own.length === 1 ? 'ruleset' : 'rulesets'}` : '';
+      changes.push(`${branch.toolkit_ruleset ? 'updates' : 'adds'} the "${protection.RULESET_NAME}" ruleset on the default branch${stillNeeded} (pull requests only, the programme file's required checks pinned to GitHub Actions, branches up to date before merging, merge commits only, nobody can bypass it)`);
       rules.controller.push(...workflowNotes);
       findings.push(...workflowFindings(branch));
     } else {
@@ -286,8 +288,9 @@ function settingsRows(reads) {
       rules.waiting.push(...left.map(detail => `${name}, change by hand: ${detail}`));
       rules.controller.push(...workflowNotes);
       findings.push(...workflowFindings(branch));
-      if (offer.fixes && offer.unproduced.length) rules.waiting.push(`${name}: waits for your controller's fix: Toolkit's ruleset is not offered while no workflow job produces ${offer.unproduced.map(check => `"${check}"`).join(', ')}, since requiring it would block every merge`);
-      if (offer.fixes && offer.silent.length) rules.waiting.push(`${name}: waits for your controller's fix: Toolkit's ruleset is not offered while ${offer.silent.map(check => `"${check}"`).join(', ')} does not report on every pull request, since requiring it would block those merges`);
+      // Why Toolkit's ruleset waits is a note under the items, not a step counted as the owner's.
+      if (offer.fixes && offer.unproduced.length) rules.held.push(`${name}: Toolkit's ruleset is not offered while no workflow job produces ${offer.unproduced.map(check => `"${check}"`).join(', ')}, since requiring it would block every merge`);
+      if (offer.fixes && offer.silent.length) rules.held.push(`${name}: Toolkit's ruleset is not offered while ${offer.silent.map(check => `"${check}"`).join(', ')} does not report on every pull request, since requiring it would block those merges`);
       if (!left.length && !workflowNotes.length && !own.length && !(offer.fixes && (offer.unproduced.length || offer.silent.length))) rules.waiting.push(`${name}, check by hand: it is not confirmed`);
       if (left.length) rules.where = WHERE.protection;
     }
@@ -349,7 +352,8 @@ function withTasks(settings, filed) {
 }
 
 // What the yes question and the turn-on's after-merge list say about filing the controller's tasks.
-const FILES_TASKS = 'files each weakness listed for your controller once as a task under the programme parent issue, linked as a sub-issue';
+// Shown after the summary has filed what it lists, so it names only what is not filed yet (governance review, 28 November 2026).
+const FILES_TASKS = 'files each weakness listed for your controller that is not filed yet, once, as a task under the programme parent issue, linked as a sub-issue';
 
 // One row's state from its parts: { state, items }. The table cell stays short, each state with its
 // count in a fixed order; the items are the short list shown under the table, one line each, ending
@@ -362,9 +366,9 @@ const { controllerLine } = require('./toolkit-governance-finish.cjs');
 // The cell's pointer to the items under the table; the short table after a yes has none.
 const LISTED_BELOW = ', listed below';
 
-function partState({ on, drift, free, waiting, controller = [], unread, where = null }) {
+function partState({ on, drift, free, waiting, controller = [], unread, held = [], where = null }) {
   const whys = [...new Set(unread.map(item => item.why))];
-  if (on.length && !drift.length && !free.length && !waiting.length && !controller.length && !unread.length) return { state: 'On', items: [] };
+  if (on.length && !drift.length && !free.length && !waiting.length && !controller.length && !unread.length && !held.length) return { state: 'On', items: [] };
   if (unread.length && whys.length === 1 && whys[0] && !on.length && !drift.length && !free.length && !waiting.length && !controller.length) return { state: `Not checked here yet: GitHub could not be read (${whys[0]})`, items: [] };
   const groups = [
     ['On', on.length, on.length ? [`On: ${listed(on)}`] : []],
@@ -375,7 +379,7 @@ function partState({ on, drift, free, waiting, controller = [], unread, where = 
     ['Not checked here yet', unread.length, unread.map(item => `Not checked here yet: ${item.why ? `${item.name} (${item.why})` : item.name}`)],
   ].filter(([, count]) => count > 0);
   if (!groups.length) return { state: 'Nothing to check', items: [] };
-  const items = [...groups.flatMap(([, , lines]) => lines), ...(where ? [where] : [])];
+  const items = [...groups.flatMap(([, , lines]) => lines), ...held.map(item => `Held for your controller's fix: ${item}`), ...(where ? [where] : [])];
   return { state: `${groups.map(([label, count]) => `${label}: ${count} ${count === 1 ? 'item' : 'items'}`).join('; ')}${LISTED_BELOW}`, items };
 }
 
@@ -443,7 +447,7 @@ function summaryRows(facts) {
   const update = facts.update;
   if (update?.open && update.refresh) {
     const checks = update.refresh.checks;
-    steps.push({ part: 'Programme file', text: `An update waits in ${update.open.url}, but Toolkit's refresh pull request ${update.refresh.url} adds the ${listed(checks)} ${checks.length === 1 ? 'check' : 'checks'}, which that update does not list. Merge the refresh pull request first, then close the update on GitHub and say toolkit governance: one update then covers ${checks.length === 1 ? 'it' : 'them'} too. Merging the update now means a second one afterwards.` });
+    steps.push({ part: 'Programme file', text: `An update waits in ${update.open.url}, but Toolkit's refresh pull request ${update.refresh.url} adds the ${listed(checks)} ${checks.length === 1 ? 'check' : 'checks'}, which that update does not list. Merge the refresh pull request first, then tell your agent to close the update (it adds a closing comment) and say toolkit governance: one update then covers ${checks.length === 1 ? 'it' : 'them'} too. Merging the update now means a second one afterwards.` });
   } else if (update?.open) steps.push({ part: 'Programme file', text: `An update waits in ${update.open.url}: merge it, then say toolkit governance.` });
   else if (update?.refresh) {
     const checks = update.refresh.checks;

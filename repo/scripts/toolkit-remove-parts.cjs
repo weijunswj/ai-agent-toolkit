@@ -638,7 +638,7 @@ class ToolkitFolderPart {
     const ownerFolders = [...new Set([...this.#before.keys()].filter(ownerBackupOf).map(file => file.split('/').slice(0, 2).join('/')))].sort();
     return [
       ...going.map(name => ({ what: shown(name), action: 'remove',
-        ...(BACKUP_TREES.some(tree => tree.split('/')[0] === name) && olderIn(name) ? { detail: `${olderIn(name)} older backup ${olderIn(name) === 1 ? 'file' : 'files'}`, older: olderIn(name) } : {}) })),
+        ...(BACKUP_TREES.some(tree => tree.split('/')[0] === name) && olderIn(name) ? { detail: `${olderIn(name)} older backup ${olderIn(name) === 1 ? 'file' : 'files'} of Toolkit's own`, older: olderIn(name) } : {}) })),
       // This removal gathers its backup in a one-app removal too, so the line shows in every scope.
       ...(this.#savesBackup ? [{ what: shown(REMOVAL_BACKUP), action: 'save', app: 'any', label: "This removal's backup", text: `${shown(REMOVAL_BACKUP)}, the copies of the files this removal changes` }] : []),
       ...(lastKept ? [{ what: shown(REMOVAL_BACKUP), action: 'keep', label: "The last removal's backup", text: shown(REMOVAL_BACKUP) }] : []),
@@ -654,7 +654,7 @@ class ToolkitFolderPart {
       ...(names.some(name => !['source', 'backups'].includes(name)) ? ['its records and locks'] : []),
       ...(older ? [`${older} older backup ${older === 1 ? 'file' : 'files'} of Toolkit's own`] : [])];
     const said = what.length < 2 ? what.join('') : `${what.slice(0, -1).join(', ')}, and ${what.at(-1)}`;
-    return `${display(this.#home, this.#root)}: ${said}${items.length > FOLD_AT ? ` (${items.length} items, full list on request)` : ''}; it goes last, once no Toolkit plugin is installed`;
+    return `${display(this.#home, this.#root)}: ${said}${items.length > FOLD_AT ? ` (${items.length} items, full list on request)` : ''}; it goes last, once no Toolkit plugin or Toolkit permission line is left`;
   }
   // Runs last. Entries a removal step wrote after the plan (such as the global rules record) go too,
   // because they are on the same fixed list. This removal's backup files are moved into
@@ -724,7 +724,7 @@ class ToolkitFolderPart {
       if (!fs.readdirSync(dir).length) fs.rmdirSync(dir);
     };
     prune(path.join(this.#root, 'backups'));
-    return { result: 'removed', reason: `${count} older backup ${count === 1 ? 'file' : 'files'}` };
+    return { result: 'removed', reason: `${count} older backup ${count === 1 ? 'file' : 'files'} of Toolkit's own` };
   }
 }
 

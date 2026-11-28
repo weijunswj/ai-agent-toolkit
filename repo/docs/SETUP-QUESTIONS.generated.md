@@ -258,7 +258,7 @@ Setup run with `--host claude-code` asks one question instead, for the same repr
 
 ## Toolkit setup - 1 question: Apply Toolkit's defaults to the 6 Claude Code settings that have no value yet? Your own values and offs stay.
 
-Bank reference: MM3A-XDQ4-26M2-3MFR
+Bank reference: 8WCF-HG0N-9XCN-NQ68
 
 Setup applies the Toolkit default to 6 settings not set yet and keeps every other setting as it is.
 
@@ -505,7 +505,7 @@ Apply Toolkit's defaults to the 6 Claude Code settings that have no value yet? Y
 
 ### 3.5 Claude Code setting: Read AGENTS.md (in all local repos) too?
 
-**What this controls:** One value in your Claude Code user settings (settings.json in your Claude Code config folder): Project instructions set to "claude-md-and-agents-md" (in pluginConfigs), so Claude Code reads AGENTS.md as well as CLAUDE.md, also in a repository with its own CLAUDE.md. Claude Code 2.1.285 or later reads it under cc-plugin-agents-md@builtin or agents-md@builtin, and 2.1.277 to 2.1.284 only under agents-md@builtin; setup writes cc-plugin-agents-md@builtin on 2.1.285 or later, agents-md@builtin on 2.1.277 to 2.1.284 or when it cannot tell the version, and nothing on an older version. Turn off removes this one setting whoever added it; the other settings are not touched.
+**What this controls:** One value in your Claude Code user settings (settings.json in your Claude Code config folder): "instructionFiles": "claude-md-and-agents-md" at pluginConfigs > cc-plugin-agents-md@builtin or agents-md@builtin > options in settings.json, so Claude Code reads AGENTS.md as well as CLAUDE.md, also in a repository with its own CLAUDE.md. Claude Code 2.1.285 or later reads it under cc-plugin-agents-md@builtin or agents-md@builtin, and 2.1.277 to 2.1.284 only under agents-md@builtin; setup writes cc-plugin-agents-md@builtin on 2.1.285 or later, agents-md@builtin on 2.1.277 to 2.1.284 or when it cannot tell the version, and nothing on an older version. Turn off removes this one setting whoever added it; the other settings are not touched.
 
 **Current:** Read AGENTS.md as well as CLAUDE.md: off (Claude Code default).
 
