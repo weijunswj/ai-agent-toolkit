@@ -849,3 +849,51 @@ test('P-20: a block scalar under a key the reader never reads is skipped, so the
     'needs as a block': ['on: [pull_request]', 'jobs:', '  a:', '    needs: >-', '      b', '    runs-on: x', ''].join('\n'),
   })) assert.match(protection.readWorkflow(text).problems.join('\n'), /a block scalar where this check reads its value/, name);
 });
+
+// Owner decision INT-TK421-1398: Toolkit may change the repository's own rulesets to what governance
+// needs after the owner's yes to the exact change. SQAG's own ruleset allowed merge, squash and rebase
+// and did not require up-to-date branches (28 November 2026).
+test('P-21: the repository\'s own ruleset changes are exact, never touch Toolkit\'s or an organization\'s, and the writer refuses a ruleset that changed', () => {
+  const read = {
+    ok: true, default_branch: 'main', repository: {}, classic: null, toolkit_ruleset: { id: 99 },
+    rulesets: [{ id: 7, name: 'protect-main', source_type: 'Repository' }, { id: 8, name: 'org rules', source_type: 'Organization' }, { id: 99, name: protection.RULESET_NAME, source_type: 'Repository' }],
+    rules: [
+      { type: 'pull_request', ruleset_id: 7, parameters: { allowed_merge_methods: ['merge', 'squash', 'rebase'] } },
+      { type: 'required_status_checks', ruleset_id: 7, parameters: { strict_required_status_checks_policy: false, required_status_checks: [{ context: 'validate' }, { context: 'other' }] } },
+      { type: 'pull_request', ruleset_id: 8, parameters: { allowed_merge_methods: ['squash'] } },
+      { type: 'pull_request', ruleset_id: 99, parameters: { allowed_merge_methods: ['merge'] } },
+    ],
+  };
+  const changes = protection.ownRulesetChanges(read, ['validate'], { pin: true });
+  assert.deepEqual(changes, [{ id: 7, name: 'protect-main', changes: [
+    { setting: 'allowed_merge_methods', before: ['merge', 'squash', 'rebase'], after: ['merge'] },
+    { setting: 'strict_required_status_checks_policy', before: false, after: true },
+    { setting: 'pinned_checks', before: ['validate'], after: [{ context: 'validate', integration_id: 15368 }] },
+  ] }], 'only the repository ruleset; a check outside the binding is never pinned or removed');
+  assert.deepEqual(protection.ownRulesetChanges(read, ['validate']).flatMap(entry => entry.changes.map(change => change.setting)), ['allowed_merge_methods', 'strict_required_status_checks_policy'], 'no pinning unless every check has its one producer');
+  assert.match(protection.ownRulesetWords(changes[0]), /^changes the repository's own ruleset "protect-main": merge methods from merge, squash, rebase to merge commits only; branches up to date before merging from not required to required; "validate" from any source to pinned to GitHub Actions$/);
+  // The writer: reads the ruleset, sends only its rules with the change, reads it back.
+  const stored = { id: 7, name: 'protect-main', source_type: 'Repository', enforcement: 'active', bypass_actors: [{ actor_id: 5 }], rules: read.rules.filter(rule => rule.ruleset_id === 7).map(({ type, parameters }) => ({ type, parameters })) };
+  const calls = [];
+  const spawn = (command, args, options) => {
+    calls.push(args.join(' '));
+    if (args.includes('PUT')) { const body = JSON.parse(options.input); assert.deepEqual(Object.keys(body), ['rules'], 'only the rules are sent'); stored.rules = body.rules; return { status: 0, stdout: JSON.stringify(stored) }; }
+    return { status: 0, stdout: JSON.stringify(stored) };
+  };
+  assert.deepEqual(protection.ghOwnRulesetWriter('o/r', changes[0], { spawn }), { ok: true });
+  assert.deepEqual(calls, ['api repos/o/r/rulesets/7', 'api -X PUT repos/o/r/rulesets/7 --input -', 'api repos/o/r/rulesets/7']);
+  assert.deepEqual(stored.rules[0].parameters.allowed_merge_methods, ['merge']);
+  assert.equal(stored.rules[1].parameters.strict_required_status_checks_policy, true);
+  assert.deepEqual(stored.rules[1].parameters.required_status_checks, [{ context: 'validate', integration_id: 15368 }, { context: 'other' }]);
+  assert.deepEqual(stored.bypass_actors, [{ actor_id: 5 }], 'its bypass list stays as it is');
+  // Changed since it was shown: nothing is written.
+  calls.length = 0;
+  stored.rules[0].parameters.allowed_merge_methods = ['merge', 'rebase'];
+  assert.deepEqual(protection.ghOwnRulesetWriter('o/r', changes[0], { spawn }), { ok: false, reason: 'ruleset-changed' });
+  assert.deepEqual(calls, ['api repos/o/r/rulesets/7'], 'no write');
+  // Not the repository ruleset shown (renamed, or an organization ruleset): nothing is written.
+  stored.rules[0].parameters.allowed_merge_methods = ['merge', 'squash', 'rebase'];
+  stored.name = 'renamed';
+  assert.deepEqual(protection.ghOwnRulesetWriter('o/r', changes[0], { spawn }), { ok: false, reason: 'ruleset-changed' });
+  assert.equal(protection.applyOwnChanges([{ type: 'pull_request', parameters: { allowed_merge_methods: ['merge'] } }], changes[0].changes.slice(0, 1)), null, 'a value that differs from before is refused');
+});

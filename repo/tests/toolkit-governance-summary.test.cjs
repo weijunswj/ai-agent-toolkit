@@ -630,3 +630,55 @@ test('while Toolkit\'s refresh pull request adds a check of its own, the program
   same.cli = { ...pending.cli, switchTransport: { ...pending.cli.switchTransport, openRefresh: () => ({ number: 40, url: refreshUrl, checks: ['plain-text'] }) } };
   assert.match((await run(same, ['setup'])).out, /^\*\*1\. Question: Bring the programme file up to date\?\*\*$/m);
 });
+
+// Owner decision INT-TK421-1398, the SQAG shape: the repository's own ruleset allows merge, squash and
+// rebase, does not require up-to-date branches and does not require plain-text. One yes covers
+// Toolkit's ruleset and the exact change to the own ruleset; a no writes nothing.
+const CI = 'name: CI\non: [pull_request]\njobs:\n  validate:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n';
+test('a repository\'s own ruleset that allows squash and rebase gets its exact change in the one offer; a no writes nothing, a yes writes it and reads it back', async t => {
+  const ctx = fixture(t, { quiet: true, requiredChecks: ['plain-text', 'validate'], commitFiles: { '.github/workflows/plain-text.yml': PLAIN_TEXT, '.github/workflows/ci.yml': CI, '.github/dependabot.yml': DEPENDABOT } });
+  const binding = { status: 'ok', text: fs.readFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), 'utf8') };
+  const own = { id: 7, name: 'protect-main', source_type: 'Repository', enforcement: 'active', bypass_actors: [], rules: [
+    { type: 'pull_request', parameters: { required_approving_review_count: 0, allowed_merge_methods: ['merge', 'squash', 'rebase'] } },
+    { type: 'required_status_checks', parameters: { strict_required_status_checks_policy: false, required_status_checks: [{ context: 'validate', integration_id: 15368 }] } },
+  ] };
+  const github = { toolkit: null, writes: [] };
+  const spawn = (command, args, options) => {
+    if (args.includes('PUT')) { github.writes.push(['own ruleset', args[3], JSON.parse(options.input)]); own.rules = JSON.parse(options.input).rules; }
+    return { status: 0, stdout: JSON.stringify(own) };
+  };
+  const { ghOwnRulesetWriter } = require(path.join(scripts, 'toolkit-governance-protection.cjs'));
+  ctx.cli = {
+    ...QUIET,
+    rulesetReader: () => ({ ok: true, rulesets: [NO_FORCE_PUSH] }),
+    protectionReader: () => ({ ok: true, default_branch: 'main', repository: { allow_merge_commit: true, allow_squash_merge: true, allow_rebase_merge: true },
+      rules: [...own.rules.map(rule => ({ ...rule, ruleset_id: 7 })), ...(github.toolkit ? github.toolkit.rules.map(rule => ({ ...rule, ruleset_id: 99 })) : [])],
+      classic: null, toolkit_ruleset: github.toolkit ? { id: 99 } : null,
+      rulesets: [{ id: 5, name: NO_FORCE_PUSH.name, source_type: 'Repository' }, { id: 7, name: 'protect-main', source_type: 'Repository' }, ...(github.toolkit ? [{ id: 99, name: protectionRulesetBody([]).name, source_type: 'Repository' }] : [])] }),
+    securityReader: () => ({ ok: true, ...SETTINGS_ON, binding }),
+    rulesetCreator: () => { throw new Error('not expected'); },
+    protectionWriter: (slug, checks, existing) => { github.writes.push(['toolkit ruleset', checks, existing]); github.toolkit = protectionRulesetBody(checks); return { ok: true, id: 99 }; },
+    ownRulesetWriter: (slug, entry) => ghOwnRulesetWriter(slug, entry, { spawn }),
+    securityWriter: () => { throw new Error('not expected'); },
+    securityFileWriter: () => [],
+  };
+  const shown = await run(ctx, ['setup']);
+  assert.equal(shown.code, 0, shown.err);
+  assert.equal(shown.out.split('\n')[0], '**Governance: on, not ready: 1 step left.**', 'one offer');
+  assert.match(shown.out, /^ {3}- \*\*A\. Yes \(my pick\):\*\* Toolkit changes the repository's own ruleset "protect-main": merge methods from merge, squash, rebase to merge commits only; branches up to date before merging from not required to required and adds the "Toolkit: protected default branch" ruleset [^\n]+, then reads each one back\. Nothing else changes\.$/m);
+  assert.deepEqual(github.writes, [], 'nothing before the yes');
+  const no = await reply(ctx, '1B');
+  assert.equal(no.code, 0, no.err);
+  assert.deepEqual(github.writes, [], 'a no writes nothing');
+  const yes = await reply(ctx, '1A');
+  assert.equal(yes.code, 0, yes.err);
+  assert.deepEqual(github.writes.map(entry => entry[0]), ['toolkit ruleset', 'own ruleset'], 'Toolkit\'s ruleset, then the own ruleset change, nothing else');
+  assert.deepEqual(own.rules[0].parameters.allowed_merge_methods, ['merge']);
+  assert.equal(own.rules[1].parameters.strict_required_status_checks_policy, true);
+  assert.deepEqual(own.rules[1].parameters.required_status_checks, [{ context: 'validate', integration_id: 15368 }], 'its required checks stay as they were');
+  assert.match(yes.out, /^- toolkit-test-fixture\/card: the repository's own ruleset "protect-main" changed and read back\.$/m);
+  assert.match(yes.out, /^On and read back: [^\n]*the repository's own ruleset "protect-main"/m);
+  const after = await run(ctx, ['setup']);
+  assert.equal(rowOf(after.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | On | Pull requests only, required checks and no force pushes on the default branch |');
+  assert.equal(after.out.split('\n')[0], '**Governance: on and ready.**');
+});

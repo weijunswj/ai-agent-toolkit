@@ -130,11 +130,11 @@ class GovernanceCliError extends Error {
 }
 
 class ToolkitGovernanceCli {
-  #proposals; #proposalsLive; #pullOutcome; #stdout; #stderr; #ask; #confirm; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #firstSweep; #copiesReader; #doneWhen;
+  #proposals; #proposalsLive; #pullOutcome; #stdout; #stderr; #ask; #confirm; #interactive; #cwd; #registryOptions; #discoveryGh; #refresh; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #ownRulesetWriter; #securityReader; #securityWriter; #securityFileWriter; #hookReader; #queueReader; #appReader; #switchTransport; #permissionsChecker; #environment; #adoptionWriter; #plainTextInstaller; #firstSweep; #copiesReader; #doneWhen;
 
   // `ask(question)` resolves to the typed line; `interactive` says whether a person is at a
   // terminal. `registryOptions` ({ registryPath, testOnly: true }), `rulesetReader`,
-  // `rulesetCreator`, `stateRulesetCreator`, `protectionReader`, `protectionWriter`, `securityReader`, `securityWriter` and
+  // `rulesetCreator`, `stateRulesetCreator`, `protectionReader`, `protectionWriter`, `ownRulesetWriter`, `securityReader`, `securityWriter` and
   // `securityFileWriter` are only for tests, as are `discoveryGh` (discovery's GitHub reader) and
   // `refresh` (the merged-binding refresh `status` runs first), `hookReader` (the Hooks: lines) and
   // `queueReader` (the offline queue count for a repository root) and `appReader` (the governance App
@@ -143,7 +143,7 @@ class ToolkitGovernanceCli {
   // ticket is bound to) are for tests too, as are `firstSweep` (the finish's first-install sweep),
   // `copiesReader` (version => the release identity check's read of this computer's Toolkit copies) and
   // `doneWhenBackfill` ((root, { apply }) => the DONE WHEN backfill's result, toolkit-governance-done-when.cjs).
-  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, confirm = null, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, firstSweep = null, copiesReader = null, doneWhenBackfill = null } = {}) {
+  constructor({ stdout = process.stdout, stderr = process.stderr, ask = terminalAsk, confirm = null, interactive = isInteractiveTerminal(), cwd = process.cwd(), registryOptions = {}, discoveryGh = null, refresh = null, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, ownRulesetWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, hookReader = null, queueReader = null, proposalTransport = null, appReader = null , cloudWorkflows = null, switchTransport = null, permissionsChecker = null, environment = process.env, adoptionWriter = null, plainTextInstaller = null, firstSweep = null, copiesReader = null, doneWhenBackfill = null } = {}) {
     const pulls = proposalTransport || (registryOptions.testOnly || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new GitHubProposalTransport());
     this.#proposals = new GovernanceProposals({ registryOptions, ...(cloudWorkflows ? { cloudWorkflows } : {}), transport: pulls });
     // The turn-on pull request's outcome, read before a post-merge finish (offline and in tests: unread).
@@ -165,6 +165,7 @@ class ToolkitGovernanceCli {
     this.#stateRulesetCreator = stateRulesetCreator;
     this.#protectionReader = protectionReader;
     this.#protectionWriter = protectionWriter;
+    this.#ownRulesetWriter = ownRulesetWriter;
     this.#securityReader = securityReader;
     this.#securityWriter = securityWriter;
     this.#securityFileWriter = securityFileWriter;
@@ -774,7 +775,9 @@ class ToolkitGovernanceCli {
       return 0;
     }
     let said = '';
-    const outcome = await this.#maintenance({ write: text => { said += text; return true; } }, null).finish(state.root || this.#cwd, { sweep: false });
+    // The repository's own ruleset changes go only as shown: the yes reached here only because what
+    // was shown is unchanged (owner decision INT-TK421-1398).
+    const outcome = await this.#maintenance({ write: text => { said += text; return true; } }, null).finish(state.root || this.#cwd, { sweep: false, ownRulesets: fix.own_rulesets || [] });
     this.#print(false, {}, [...said.split('\n').map(line => line.trim()).filter(Boolean), ...summary.fixResultLines(outcome)]);
     return outcome.result === 'done' ? 0 : 2;
   }
@@ -785,7 +788,7 @@ class ToolkitGovernanceCli {
     return new GovernanceMaintenance({
       stdout, confirm: async () => false, interactive: true, registryOptions: this.#registryOptions,
       rulesetReader: this.#rulesetReader, rulesetCreator: this.#rulesetCreator, stateRulesetCreator: this.#stateRulesetCreator,
-      protectionReader: this.#protectionReader, protectionWriter: this.#protectionWriter,
+      protectionReader: this.#protectionReader, protectionWriter: this.#protectionWriter, ownRulesetWriter: this.#ownRulesetWriter,
       securityReader: this.#securityReader, securityWriter: this.#securityWriter, securityFileWriter: this.#securityFileWriter,
       firstSweep,
     });

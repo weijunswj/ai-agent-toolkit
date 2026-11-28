@@ -1,3 +1,7 @@
+### Added
+
+- **The repository's own rulesets in the settings fix:** refresh governance's "Fix the drifted GitHub settings?" question can now also change a governed repository's own rulesets on the default branch, each shown from before to after: merge commits only, branches up to date before merging, and the programme file's checks pinned to GitHub Actions where each has exactly one workflow job producing it. Nothing is written without your yes to that exact change, a ruleset that changed since it was shown is left alone, each change is read back, required checks are never added or removed there, and organization rulesets and Toolkit's own are never touched.
+
 ### Changed
 
 - **Short governance summary cells:** the Branch protection and rulesets and Security settings cells now hold each state with its count, such as "Drift: 1 item; Waiting for you: 2 items, listed below", and every finding follows the table as a short list, one per line. A part that is all on says just On.

@@ -223,6 +223,7 @@ function settingsRows(reads) {
   const protection = require('./toolkit-governance-protection.cjs');
   const security = require('./toolkit-governance-security.cjs');
   const changes = [];
+  const ownRulesets = [];
   const rules = { on: [], drift: [], free: [], waiting: [], unread: [] };
   const rulesetPart = (result, { on, missing, change }) => {
     if (!result || result.status === 'not-applicable') return;
@@ -257,20 +258,29 @@ function settingsRows(reads) {
     const offer = protectionOffer(branch);
     const settingsDrift = protection.SETTINGS_CHECKS.flatMap(id => (branch.checks[id]?.status === 'drift' ? branch.checks[id].details : []));
     const workflowNotes = ['P3', 'P4'].flatMap(id => (['drift', 'unverified'].includes(branch.checks[id]?.status) ? branch.checks[id].details : []));
+    // The repository's own ruleset changes governance needs (owner decision INT-TK421-1398): in the
+    // same one yes, each with its before and after.
+    const own = !unreadCheck && Array.isArray(branch.own_rulesets) ? branch.own_rulesets : [];
+    for (const entry of own) { changes.push(protection.ownRulesetWords(entry)); ownRulesets.push(entry); }
     if (unreadCheck) rules.unread.push({ name, why: unreadWhy(unreadCheck.details[0]) });
     else if (offer.offered) {
       rules.drift.push(...settingsDrift);
       changes.push(`${branch.toolkit_ruleset ? 'updates' : 'adds'} the "${protection.RULESET_NAME}" ruleset on the default branch (pull requests only, the programme file's required checks pinned to GitHub Actions, branches up to date before merging, merge commits only, nobody can bypass it)`);
       rules.waiting.push(...workflowNotes.map(note => `check the workflow by hand: ${note}`));
     } else {
-      const notes = branch.status === 'drift' ? protectionNotes(branch) : workflowNotes;
+      // What the own ruleset changes fix is drift the yes fixes; the rest stays the owner's.
+      const after = own.length && branch.own_after ? { ...branch.checks, ...branch.own_after } : branch.checks;
+      const left = protection.SETTINGS_CHECKS.flatMap(id => (after[id]?.status === 'drift' ? after[id].details : []));
+      rules.drift.push(...settingsDrift.filter(detail => !left.includes(detail)));
+      const changeByHand = left.length > 0 || ['P3', 'P4'].some(id => branch.checks[id]?.status === 'drift');
+      const notes = branch.status === 'drift' ? protectionNotes({ checks: after }) : workflowNotes;
       const why = [
         offer.fixes && offer.unproduced.length ? `Toolkit's ruleset is not offered while no workflow job produces ${offer.unproduced.map(check => `"${check}"`).join(', ')}` : '',
         offer.fixes && offer.silent.length ? `Toolkit's ruleset is not offered while ${offer.silent.map(check => `"${check}"`).join(', ')} does not report on every pull request` : '',
       ].filter(Boolean);
       const items = [...notes, ...why];
-      rules.waiting.push(...(items.length ? items : ['it is not confirmed']).map(item => `${name}, ${branch.status === 'drift' ? 'change' : 'check'} by hand: ${item}`));
-      if (settingsDrift.length) rules.where = WHERE.protection;
+      if (items.length || !own.length) rules.waiting.push(...(items.length ? items : ['it is not confirmed']).map(item => `${name}, ${changeByHand ? 'change' : 'check'} by hand: ${item}`));
+      if (left.length) rules.where = WHERE.protection;
     }
   }
   const secure = { on: [], drift: [], free: [], waiting: [], unread: [] };
@@ -304,7 +314,7 @@ function settingsRows(reads) {
     free,
     security: securityPart.state,
     details: { protection: protectionPart.items, security: securityPart.items },
-    fix: changes.length ? { changes } : null,
+    fix: changes.length ? { changes, ...(ownRulesets.length ? { own_rulesets: ownRulesets } : {}) } : null,
   };
 }
 

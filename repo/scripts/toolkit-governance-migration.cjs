@@ -103,10 +103,10 @@ function protectionNotes(result) {
 // It never reads, copies, repairs or writes a historical local governance answer. Keep the command
 // name for existing operators until the explicit migration route separates inventory and maintenance.
 class GovernanceMaintenance {
-  #stdout; #confirm; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #firstSweep; #now;
+  #stdout; #confirm; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #ownRulesetWriter; #firstSweep; #now;
 
   // `firstSweep` runs the first-install sweep (toolkit-governance-first-sweep.cjs), or null where it cannot run here.
-  constructor({ stdout, confirm, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, firstSweep = null, now = () => new Date() }) {
+  constructor({ stdout, confirm, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, ownRulesetWriter = null, firstSweep = null, now = () => new Date() }) {
     this.#stdout = stdout;
     this.#confirm = confirm;
     this.#interactive = interactive === true;
@@ -119,6 +119,7 @@ class GovernanceMaintenance {
     this.#securityReader = securityReader;
     this.#securityWriter = securityWriter || security.ghSecurityWriter;
     this.#securityFileWriter = securityFileWriter || security.writeSecurityFiles;
+    this.#ownRulesetWriter = ownRulesetWriter || protection.ghOwnRulesetWriter;
     this.#firstSweep = firstSweep;
     this.#now = now;
   }
@@ -150,16 +151,20 @@ class GovernanceMaintenance {
   // unavailable (GitHub cannot enforce it on this plan), held (an owner step Toolkit cannot take
   // itself, named in the result) or retry; only retry keeps the finish pending.
   // `sweep` is whether the turn-on added the personal data guard, so its first-install sweep runs too.
+  // `ownRulesets` is the repository's own ruleset changes the owner said yes to, exactly as shown
+  // (toolkit-governance-summary.cjs settingsRows, owner decision INT-TK421-1398); a turn-on's finish
+  // passes none, so it never touches a repository's own ruleset.
   // { result: 'not-ready' } or { result: 'done' | 'failed', reason, on, unavailable, held, reports, files }.
-  async finish(root, { sweep = false } = {}) {
+  async finish(root, { sweep = false, ownRulesets = null } = {}) {
     const state = governance.governanceState(root, this.#registryOptions);
     const slug = slugFor(root);
     if (state.state !== 'ENABLED' || state.programme_records_bind !== true || !slug) return { result: 'not-ready' };
     const rows = [{ root: path.resolve(root), state, slug }];
     const rulesets = [...this.#finishRulesets(rows), ...this.#finishStateRulesets(rows)];
     const protections = this.#finishProtection(rows);
+    const owned = Array.isArray(ownRulesets) ? this.#applyOwnRulesets(rows[0], ownRulesets) : [];
     const securities = await this.#applySecurity(rows);
-    if (rulesets.length || protections.length || securities.length) this.#writeRecord([], rulesets, protections, securities);
+    if (rulesets.length || owned.length || protections.length || securities.length) this.#writeRecord([], [...rulesets, ...owned], protections, securities);
     const on = [], unavailable = [], held = [], retry = [], reports = [];
     const reader = this.#rulesetReader ? { reader: this.#rulesetReader } : {};
     // GitHub's own answer to a refused write goes into the reason, so a refusal that repeats is not
@@ -180,6 +185,15 @@ class GovernanceMaintenance {
     const noForcePush = ruleset.noForcePushRuleset(rows[0].root, reader);
     rulesetEnd('the no-force-push ruleset', noForcePush, rulesets.filter(entry => !entry.ruleset));
     if (governance.mergedBinding(rows[0].root, this.#registryOptions)?.state) rulesetEnd('the ruleset that keeps the programme state branch', ruleset.keepStateRuleset(rows[0].root, reader), rulesets.filter(entry => entry.ruleset === 'keep-programme-state'));
+    // The repository's own rulesets: changed and read back, held when the account may not write them
+    // or the ruleset changed on GitHub after it was shown (the yes covered only what it saw), else retried.
+    for (const entry of owned) {
+      const name = `the repository's own ruleset "${entry.name}"`;
+      if (entry.result === 'changed') on.push(name);
+      else if (entry.reason === 'forbidden') held.push({ name, step: admin });
+      else if (entry.reason === 'ruleset-changed') held.push({ name, step: 'it changed on GitHub after it was shown, so nothing was written to it. Say refresh governance to see it as it is now.' });
+      else retry.push(`${name} did not read back after the write${because([entry.reason].filter(Boolean))}`);
+    }
     // A write that did not read back is retried; only what is left after a clean write is held.
     if (forbidden(answered(protections))) held.push({ name: 'default-branch protection', step: admin });
     else if (protections.some(entry => ['failed', 'unverified'].includes(entry.result))) retry.push(`default-branch protection did not read back after the write${because(answered(protections))}`);
@@ -426,6 +440,20 @@ class GovernanceMaintenance {
       protectionResult: read ? read.result : null,
       ...(this.#securityReader ? { reader: this.#securityReader } : {}),
     });
+  }
+
+  // Writes each own ruleset change the owner said yes to, through the writer that refuses a ruleset
+  // that changed since it was shown and reads each change back. Nothing else is written to it.
+  #applyOwnRulesets(row, entries) {
+    const results = [];
+    for (const entry of entries) {
+      let written;
+      try { written = this.#ownRulesetWriter(row.slug, entry); } catch { written = { ok: false, reason: 'writer-failed' }; }
+      const ok = Boolean(written && written.ok);
+      this.#say(`- ${row.slug}: the repository's own ruleset "${entry.name}" ${ok ? 'changed and read back' : `not changed (${written && written.reason ? written.reason : 'unknown'})`}.`);
+      results.push({ repository_id: row.state.repository_id, ruleset: `own:${entry.id}`, name: entry.name, result: ok ? 'changed' : 'failed', ...(ok ? {} : { reason: written && written.reason ? written.reason : 'unknown' }) });
+    }
+    return results;
   }
 
   // The free dependency and security settings are on by default for every governed repository, so

@@ -729,7 +729,8 @@ function ghProtectionReader(slug, { spawn = childProcess.spawnSync } = {}) {
   }
   const list = ghJson([`repos/${slug}/rulesets?targets=branch&per_page=100`], spawn);
   if (!list.ok) return list;
-  const own = (Array.isArray(list.value) ? list.value : []).find(entry => entry && entry.name === RULESET_NAME && entry.source_type !== 'Organization');
+  const listed = Array.isArray(list.value) ? list.value : [];
+  const own = listed.find(entry => entry && entry.name === RULESET_NAME && entry.source_type !== 'Organization');
   return {
     ok: true,
     default_branch: branch,
@@ -737,6 +738,7 @@ function ghProtectionReader(slug, { spawn = childProcess.spawnSync } = {}) {
     rules: rules.value,
     classic,
     toolkit_ruleset: own && Number.isInteger(own.id) ? { id: own.id } : null,
+    rulesets: listed.filter(entry => entry && Number.isInteger(entry.id) && typeof entry.name === 'string').map(entry => ({ id: entry.id, name: entry.name, source_type: entry.source_type })),
   };
 }
 
@@ -771,6 +773,102 @@ function protectionRulesetBody(requiredChecks) {
       },
     ],
   };
+}
+
+// ---- the repository's own rulesets (owner decision INT-TK421-1398) ------------------------------
+// Refresh governance may change a governed repository's own rulesets on the default branch to what
+// governance needs, only after the owner's yes to the exact change shown, and reads each one back:
+// merge commits only where a ruleset lists other merge methods, branches up to date where its
+// required status checks rule does not ask for it, and the binding's checks it requires pinned to
+// GitHub Actions where every one has exactly one workflow job producing it (`pin`). It never adds or
+// removes a required check there (one no job produces would block every merge), and never touches an
+// organization ruleset or one of Toolkit's own. The failure this prevents: SQAG's own ruleset allowed
+// squash and rebase and did not require up-to-date branches, and Toolkit could only say to change it
+// by hand (28 November 2026).
+
+const OWN_SETTINGS = Object.freeze({
+  allowed_merge_methods: { rule: 'pull_request', parameter: 'allowed_merge_methods' },
+  strict_required_status_checks_policy: { rule: 'required_status_checks', parameter: 'strict_required_status_checks_policy' },
+  pinned_checks: { rule: 'required_status_checks', parameter: 'required_status_checks' },
+});
+
+// [{ id, name, changes: [{ setting, before, after }] }] for the repository's own rulesets on the
+// default branch, from a protection read (ghProtectionReader); [] when the read failed.
+function ownRulesetChanges(read, requiredChecks, { pin = false } = {}) {
+  if (!read || read.ok !== true || !Array.isArray(read.rules)) return [];
+  const toolkitId = read.toolkit_ruleset ? read.toolkit_ruleset.id : null;
+  const names = new Map((read.rulesets || []).filter(entry => entry.source_type === 'Repository' && !/^Toolkit: /.test(entry.name)).map(entry => [entry.id, entry.name]));
+  const found = new Map();
+  for (const rule of read.rules) {
+    if (!rule || !rule.parameters || !Number.isInteger(rule.ruleset_id) || rule.ruleset_id === toolkitId || !names.has(rule.ruleset_id)) continue;
+    const entry = found.get(rule.ruleset_id) || { id: rule.ruleset_id, name: names.get(rule.ruleset_id), changes: [] };
+    found.set(rule.ruleset_id, entry);
+    const methods = rule.parameters.allowed_merge_methods;
+    if (rule.type === 'pull_request' && Array.isArray(methods) && !(methods.length === 1 && methods[0] === 'merge')) entry.changes.push({ setting: 'allowed_merge_methods', before: [...methods], after: ['merge'] });
+    if (rule.type === 'required_status_checks') {
+      if (rule.parameters.strict_required_status_checks_policy !== true) entry.changes.push({ setting: 'strict_required_status_checks_policy', before: rule.parameters.strict_required_status_checks_policy === undefined ? false : rule.parameters.strict_required_status_checks_policy, after: true });
+      const unpinned = (rule.parameters.required_status_checks || []).filter(item => item && requiredChecks.includes(item.context) && !Number.isInteger(item.integration_id)).map(item => item.context);
+      if (pin && unpinned.length) entry.changes.push({ setting: 'pinned_checks', before: unpinned, after: unpinned.map(context => ({ context, integration_id: GITHUB_ACTIONS_APP_ID })) });
+    }
+  }
+  return [...found.values()].filter(entry => entry.changes.length);
+}
+
+// The rules of a ruleset with `changes` applied, or null when any value differs from the one shown
+// (`before`): the yes covers only the exact change it saw.
+function applyOwnChanges(rules, changes) {
+  const next = JSON.parse(JSON.stringify(Array.isArray(rules) ? rules : []));
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  for (const change of changes) {
+    const where = OWN_SETTINGS[change.setting];
+    const matching = where ? next.filter(rule => rule && rule.type === where.rule && rule.parameters) : [];
+    if (matching.length !== 1) return null;
+    const parameters = matching[0].parameters;
+    if (change.setting === 'pinned_checks') {
+      const unpinned = (parameters.required_status_checks || []).filter(item => item && change.before.includes(item.context) && !Number.isInteger(item.integration_id)).map(item => item.context);
+      if (!same(unpinned, change.before)) return null;
+      parameters.required_status_checks = parameters.required_status_checks.map(item => (change.before.includes(item.context) ? { ...item, integration_id: GITHUB_ACTIONS_APP_ID } : item));
+    } else {
+      const current = parameters[where.parameter] === undefined && change.setting === 'strict_required_status_checks_policy' ? false : parameters[where.parameter];
+      if (!same(current, change.before)) return null;
+      parameters[where.parameter] = change.after;
+    }
+  }
+  return next;
+}
+
+// Writes the shown `entry` ({ id, name, changes }) to the repository's own ruleset: reads it, refuses
+// when it is not that repository ruleset or a value differs from the one shown (ruleset-changed),
+// sends only its rules (name, conditions, enforcement and bypass stay as they are), then reads it back.
+// { ok: true } or { ok: false, reason }.
+function ghOwnRulesetWriter(slug, entry, { spawn = childProcess.spawnSync } = {}) {
+  const endpoint = `repos/${slug}/rulesets/${entry.id}`;
+  const before = ghJson([endpoint], spawn);
+  if (!before.ok) return before;
+  const ruleset = before.value || {};
+  if (ruleset.id !== entry.id || ruleset.name !== entry.name || ruleset.source_type !== 'Repository') return { ok: false, reason: 'ruleset-changed' };
+  const rules = applyOwnChanges(ruleset.rules, entry.changes);
+  if (!rules) return { ok: false, reason: 'ruleset-changed' };
+  const written = ghJson(['-X', 'PUT', endpoint, '--input', '-'], spawn, JSON.stringify({ rules }));
+  if (!written.ok) return written;
+  const after = ghJson([endpoint], spawn);
+  if (!after.ok) return { ok: false, reason: 'not-read-back' };
+  const back = (after.value && after.value.rules) || [];
+  const holds = entry.changes.every(change => {
+    const rule = back.find(item => item && item.type === OWN_SETTINGS[change.setting].rule && item.parameters);
+    if (!rule) return false;
+    if (change.setting === 'pinned_checks') return change.before.every(context => (rule.parameters.required_status_checks || []).some(item => item.context === context && item.integration_id === GITHUB_ACTIONS_APP_ID));
+    return JSON.stringify(rule.parameters[OWN_SETTINGS[change.setting].parameter]) === JSON.stringify(change.after);
+  });
+  return holds ? { ok: true } : { ok: false, reason: 'not-read-back' };
+}
+
+// One plain line for a shown change: the ruleset, then each setting from before to after.
+function ownRulesetWords(entry) {
+  const words = change => (change.setting === 'allowed_merge_methods' ? `merge methods from ${change.before.join(', ') || 'none'} to merge commits only`
+    : change.setting === 'strict_required_status_checks_policy' ? 'branches up to date before merging from not required to required'
+      : `${change.before.map(context => `"${context}"`).join(', ')} from any source to pinned to GitHub Actions`);
+  return `changes the repository's own ruleset "${entry.name}": ${entry.changes.map(words).join('; ')}`;
 }
 
 // Creates the Toolkit ruleset, or updates it when `existingId` names it. { ok, id } or { ok: false, reason }.
@@ -866,7 +964,20 @@ function defaultBranchProtection(root, { requiredChecks = [], commit = null, off
   }
   const statuses = Object.values(checks).map(entry => entry.status);
   const status = statuses.includes('drift') ? 'drift' : statuses.every(item => item === 'ok') ? 'conformant' : 'unverified';
-  return verdict(status, null, checks, read && read.ok ? { toolkit_ruleset: read.toolkit_ruleset, slug } : { slug });
+  if (!read || !read.ok) return verdict(status, null, checks, { slug });
+  // The repository's own ruleset changes governance needs, and the settings checks as they would read
+  // after them (what is still left for Toolkit's ruleset or the owner).
+  const own = ownRulesetChanges(read, requiredChecks, { pin: checks.P3.status === 'ok' });
+  let ownAfter = null;
+  if (own.length) {
+    let rules = read.rules;
+    for (const entry of own) {
+      const applied = applyOwnChanges(rules.filter(rule => rule && rule.ruleset_id === entry.id), entry.changes);
+      if (applied) rules = [...rules.filter(rule => !rule || rule.ruleset_id !== entry.id), ...applied];
+    }
+    ownAfter = settingsVerdict(requiredChecks, { ...read, rules });
+  }
+  return verdict(status, null, checks, { toolkit_ruleset: read.toolkit_ruleset, slug, own_rulesets: own, own_after: ownAfter });
 }
 
 module.exports = Object.freeze({
@@ -879,5 +990,9 @@ module.exports = Object.freeze({
   protectionRulesetBody,
   ghProtectionReader,
   ghProtectionRulesetWriter,
+  ownRulesetChanges,
+  applyOwnChanges,
+  ghOwnRulesetWriter,
+  ownRulesetWords,
   defaultBranchProtection,
 });

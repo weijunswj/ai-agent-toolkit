@@ -374,3 +374,16 @@ test('a finish mark whose turn-on pull request closed without merging is cleared
   await merged.run();
   assert.deepEqual(created, ['no-force-push'], 'the merged turn-on is finished');
 });
+
+// Owner decision INT-TK421-1398: only the owner's yes to the exact change shown changes a repository's
+// own ruleset. A turn-on's finish was never shown one, so it writes only Toolkit's own.
+test('a turn-on finish never changes the repository\'s own ruleset, even where it allows squash and rebase', async t => {
+  const ctx = governedRepo(t, { workflow: true }), created = [], rulesets = [], own = [];
+  const state = governance.governanceState(ctx.repo, ctx.registryOptions);
+  finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 1 });
+  const ownRuleset = () => ({ ...unprotected(), rules: [{ type: 'pull_request', ruleset_id: 7, parameters: { allowed_merge_methods: ['merge', 'squash', 'rebase'] } }], rulesets: [{ id: 7, name: 'protect-main', source_type: 'Repository' }] });
+  const run = cli(ctx, rulesets, created, { protectionReader: ownRuleset, protectionWriter: () => ({ ok: true, id: 9 }), ownRulesetWriter: (...args) => { own.push(args); return { ok: true }; }, securityReader: publicSecurity(ctx) });
+  await run.run();
+  assert.match(run.out.join(''), /These governed GitHub repositories need default-branch protection/, 'the finish ran its protection step');
+  assert.deepEqual(own, [], 'the repository\'s own ruleset is not written');
+});
