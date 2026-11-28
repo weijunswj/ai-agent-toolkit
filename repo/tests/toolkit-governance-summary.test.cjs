@@ -868,10 +868,11 @@ test('a Dependabot file gap goes to the controller and is filed as its task, and
   const gap = '.github/dependabot.yml has no "npm" entry for /';
   assert.ok(shown.out.includes(`\n- Your controller fixes this in a pull request: ${gap}.\n`), shown.out);
   assert.doesNotMatch(shown.out, /change by hand: \.github\/dependabot\.yml/);
-  assert.match(shown.out, new RegExp(`^ {3}- \\*\\*A\\. Yes \\(my pick\\):\\*\\* Toolkit .* and ${summary.FILES_TASKS}, then reads each one back\\. Nothing else changes\\.$`, 'm'), 'the question names the filing');
+  const question = shown.out.split('\n').find(line => line.startsWith('   - **A. Yes (my pick):** Toolkit '));
+  assert.ok(question && question.endsWith(` and ${summary.FILES_TASKS}, then reads each one back. Nothing else changes.`), `the question names the filing: ${question}`);
   const yes = await reply(ctx, '1A');
   assert.equal(yes.code, 0, yes.err);
-  assert.match(yes.out, new RegExp(`^- Your controller fixes this in a pull request: ${gap.replace(/[.]/g, '\\.')}\\. Filed as #42 under #1\\.$`, 'm'), yes.out);
+  assert.ok(yes.out.split('\n').includes(`- Your controller fixes this in a pull request: ${gap}. Filed as #42 under #1.`), yes.out);
   assert.doesNotMatch(yes.out, /by hand/);
   assert.deepEqual(issues.map(issue => issue.title), ['CI: Dependabot file .github/dependabot.yml misses a package ecosystem']);
 });
