@@ -437,14 +437,15 @@ const NO_FORCE_PUSH = Object.freeze({ id: 5, name: 'protect all branches', targe
 const DEPENDABOT = 'version: 2\nupdates:\n  - package-ecosystem: "github-actions"\n    directory: "/"\n    schedule:\n      interval: "weekly"\n';
 const SETTINGS_ON = Object.freeze({ visibility: 'public', allow_auto_merge: true, delete_branch_on_merge: 'enabled', alerts: 'enabled', security_updates: 'enabled', secret_scanning: 'enabled', push_protection: 'enabled', code_scanning: 'enabled', private_reporting: 'enabled', advanced_codeql: null });
 
-// One GitHub repository the readers and writers share, so a write shows in the next read.
-function fakeGitHub(ctx, { squash = true, alerts = 'enabled', unreadable = null, noForcePush = true } = {}) {
+// One GitHub repository the readers and writers share, so a write shows in the next read. `checks` are
+// the checks protect-main requires.
+function fakeGitHub(ctx, { squash = true, alerts = 'enabled', unreadable = null, noForcePush = true, checks = ['plain-text'] } = {}) {
   const github = { merge: { allow_merge_commit: true, allow_squash_merge: squash, allow_rebase_merge: squash }, own: null, rulesets: noForcePush ? [NO_FORCE_PUSH] : [], alerts, writes: [] };
   const binding = { status: 'ok', text: fs.readFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), 'utf8') };
   // protect-main: pull requests and the check, pinned and up to date; it says nothing on merge methods.
   const rules = () => [
     { type: 'pull_request', ruleset_id: 7, parameters: { required_approving_review_count: 0 } },
-    { type: 'required_status_checks', ruleset_id: 7, parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: 'plain-text', integration_id: 15368 }] } },
+    { type: 'required_status_checks', ruleset_id: 7, parameters: { strict_required_status_checks_policy: true, required_status_checks: checks.map(context => ({ context, integration_id: 15368 })) } },
     ...(github.own ? github.own.rules.map(rule => ({ ...rule, ruleset_id: 99 })) : []),
   ];
   const failed = () => ({ ok: false, reason: unreadable });
@@ -572,9 +573,14 @@ test('drift Toolkit\'s ruleset cannot fix waits for the owner by hand, and is ne
   assert.match(summary.WHERE.protection, /^Where on GitHub: the repository's Settings, then Rules, then Rulesets/);
   assert.equal(rows.fix, null);
   // Settings in step, but a workflow the check cannot confirm: checked by hand, never offered.
-  const unsure = { status: 'unverified', reason: null, toolkit_ruleset: null, checks: { ...branch.checks, P1: { status: 'ok', details: [], missing: [], extra: [] }, P4: { status: 'unverified', details: ['"plain-text" job has a needs list'] } } };
+  const unsure = { status: 'unverified', reason: null, toolkit_ruleset: null, checks: { ...branch.checks, P1: { status: 'ok', details: [], missing: [], extra: [] }, P4: { status: 'unverified', details: ['"plain-text" job has a needs list'], findings: [{ kind: 'job-unclear', check: 'plain-text', file: '.github/workflows/ci.yml', unverified: true, detail: '"plain-text" job has a needs list' }] } } };
   const checked = summary.settingsRows({ rulesetResult: { status: 'present' }, keepState: null, protectionResult: unsure, securityResult: { status: 'conformant', fixes: {}, checks: {} } });
   assert.deepEqual([checked.protection, checked.details.protection, checked.fix], ['On: 1 item; For your controller: 1 item, listed below', ['On: the no-force-push ruleset', 'Your controller fixes this in a pull request: "plain-text" job has a needs list.'], null]);
+  // What the controller is handed is what the summary files as its task, and only the text names the task.
+  assert.deepEqual(checked.controller, unsure.checks.P4.findings);
+  const named = summary.withTasks(checked, [{ note: '"plain-text" job has a needs list', task: { state: 'open', number: 7, parent: 1 } }]);
+  assert.deepEqual(named.details.protection, ['On: the no-force-push ruleset', 'Your controller fixes this in a pull request: "plain-text" job has a needs list. Already filed as #7, still open.']);
+  assert.deepEqual([named.protection, checked.details.protection[1]], [checked.protection, 'Your controller fixes this in a pull request: "plain-text" job has a needs list.'], 'the rows themselves are left as they were');
   // GitHub Free (private): every part not enforceable.
   const free = summary.settingsRows({ rulesetResult: { status: 'not-enforceable' }, keepState: null, protectionResult: { status: 'not-enforceable', checks: {} }, securityResult: { status: 'conformant', fixes: {}, checks: {} } });
   assert.deepEqual([free.protection, free.free], ['Not available on GitHub Free (private)', true]);
@@ -586,8 +592,11 @@ test('a part with many findings keeps a short cell, and lists each finding under
   const branch = { status: 'drift', reason: null, toolkit_ruleset: null, checks: {
     P1: { status: 'drift', details: ['"Quote Basis click budget" is in the binding but not required'], missing: ['Quote Basis click budget'], extra: [] },
     P2: { status: 'ok', details: [] },
-    P3: { status: 'unverified', details: ['no readable workflow job is named "Quote Basis click budget"', '.github/workflows/ci.yml: it is outside the YAML subset this check follows'], missing: ['Quote Basis click budget'] },
-    P4: { status: 'unverified', details: ['.github/workflows/ci.yml: it is outside the YAML subset this check follows'] },
+    P3: { status: 'unverified', details: ['no readable workflow job is named "Quote Basis click budget"', '.github/workflows/ci.yml: it is outside the YAML subset this check follows'], missing: ['Quote Basis click budget'], findings: [
+      { kind: 'no-producer', check: 'Quote Basis click budget', file: null, unverified: true, detail: 'no readable workflow job is named "Quote Basis click budget"' },
+      { kind: 'workflow-unreadable', check: null, file: '.github/workflows/ci.yml', unverified: true, detail: '.github/workflows/ci.yml: it is outside the YAML subset this check follows' }] },
+    P4: { status: 'unverified', details: ['.github/workflows/ci.yml: it is outside the YAML subset this check follows'], findings: [
+      { kind: 'workflow-unreadable', check: null, file: '.github/workflows/ci.yml', unverified: true, detail: '.github/workflows/ci.yml: it is outside the YAML subset this check follows' }] },
     P5: { status: 'drift', details: ['main allows merge, squash, rebase (rulesets); only merge commits are allowed'] },
     P6: { status: 'drift', details: ['main does not require branches to be up to date before merging'] },
   } };
@@ -597,7 +606,8 @@ test('a part with many findings keeps a short cell, and lists each finding under
   // "Quote Basis click budget" waits for that fix, never a by-hand step (G2 round 1, L1).
   assert.equal(settings.protection, 'Drift: 1 item; Waiting for you: 3 items; For your controller: 2 items, listed below');
   assert.equal(settings.security, 'Waiting for you: 1 item, listed below');
-  const text = summary.renderSummary({ repository: SLUG, defaultBranch: 'main', store: null, parents: [], task: {}, requiredChecks: ['Quote Basis click budget'], settings, files: null, permissions: {}, app: null, copies: null, stale: null });
+  assert.deepEqual(settings.controller.map(finding => finding.kind), ['no-producer', 'workflow-unreadable'], 'each weakness to file once, as it is listed');
+  const text =summary.renderSummary({ repository: SLUG, defaultBranch: 'main', store: null, parents: [], task: {}, requiredChecks: ['Quote Basis click budget'], settings, files: null, permissions: {}, app: null, copies: null, stale: null });
   // Every cell stays short; a settings cell, which can hold three counts, is only counts: each part a
   // label and its count, never a clause.
   for (const line of tableOf(text)) {
@@ -740,7 +750,7 @@ test('the summary hands a skippable required CI job to the repository\'s control
   const shown = await run(ctx, ['setup']);
   assert.equal(shown.code, 0, shown.err);
   const listed = shown.out.slice(shown.out.indexOf('**Branch protection and rulesets:**'));
-  assert.ok(listed.includes(`\n- Your controller fixes this in a pull request: ${CI_LINE}.\n`), listed);
+  assert.ok(listed.includes(`\n- Your controller fixes this in a pull request: ${CI_LINE}. Not filed as a task (this run does not write to GitHub); your controller files it.\n`), listed);
   assert.equal(rowOf(shown.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | Drift: 4 items; For your controller: 1 item, listed below | Pull requests only, required checks and no force pushes on the default branch |');
   assert.doesNotMatch(shown.out, /check the workflow by hand/, 'a workflow file is the controller\'s, not the owner\'s');
 });
@@ -757,7 +767,9 @@ test('after the yes, the SQAG shape shows each change once, hands the CI job to 
     if (endpoint === `repos/${SLUG}/issues/1/sub_issues`) { issues.find(issue => issue.id === input.sub_issue_id).parent = 1; return { ok: true, value: {} }; }
     return { ok: false, reason: 'gh-request-failed' };
   } }) };
-  assert.equal((await run(ctx, ['setup'])).code, 0);
+  const shown = await run(ctx, ['setup']);
+  assert.equal(shown.code, 0, shown.err);
+  assert.ok(shown.out.includes(`\n- Your controller fixes this in a pull request: ${CI_LINE}. Filed as #41 under #1.\n`), shown.out);
   const yes = await reply(ctx, '1A');
   assert.deepEqual(issues.map(issue => [issue.number, issue.parent, issue.title]), [[41, 1, 'CI: Required check "validate" can be skipped and still count as passed (.github/workflows/ci.yml)']]);
   assert.equal(yes.code, 0, yes.err);
@@ -773,7 +785,7 @@ test('after the yes, the SQAG shape shows each change once, hands the CI job to 
     '- The "Toolkit: protected default branch" ruleset on the default branch, added',
   ], out);
   // What is left, with who acts: the CI job once, for the controller, naming its file and job.
-  assert.deepEqual(lines.slice(at('**Left to do:**'), at('**Left to do:**') + 2), ['**Left to do:**', `- Your controller fixes this in a pull request: ${CI_LINE}. Filed as #41 under #1.`], out);
+  assert.deepEqual(lines.slice(at('**Left to do:**'), at('**Left to do:**') + 2), ['**Left to do:**', `- Your controller fixes this in a pull request: ${CI_LINE}. Already filed as #41, still open.`], out);
   assert.equal(out.split('secret-scan without').length - 1, 1, 'the CI line is said once');
   assert.doesNotMatch(out, /by hand|Waiting for you/, 'nothing is left to the owner by hand');
   // Then the table, read again after the writes, with no pointer to items it does not list.
@@ -866,13 +878,13 @@ test('a Dependabot file gap goes to the controller and is filed as its task, and
   } }) };
   const shown = await run(ctx, ['setup']);
   const gap = '.github/dependabot.yml has no "npm" entry for /';
-  assert.ok(shown.out.includes(`\n- Your controller fixes this in a pull request: ${gap}.\n`), shown.out);
+  assert.ok(shown.out.includes(`\n- Your controller fixes this in a pull request: ${gap}. Filed as #42 under #1.\n`), shown.out);
   assert.doesNotMatch(shown.out, /change by hand: \.github\/dependabot\.yml/);
   const question = shown.out.split('\n').find(line => line.startsWith('   - **A. Yes (my pick):** Toolkit '));
   assert.ok(question && question.endsWith(` and ${summary.FILES_TASKS}, then reads each one back. Nothing else changes.`), `the question names the filing: ${question}`);
   const yes = await reply(ctx, '1A');
   assert.equal(yes.code, 0, yes.err);
-  assert.ok(yes.out.split('\n').includes(`- Your controller fixes this in a pull request: ${gap}. Filed as #42 under #1.`), yes.out);
+  assert.ok(yes.out.split('\n').includes(`- Your controller fixes this in a pull request: ${gap}. Already filed as #42, still open.`), yes.out);
   assert.doesNotMatch(yes.out, /by hand/);
   assert.deepEqual(issues.map(issue => issue.title), ['CI: Dependabot file .github/dependabot.yml misses a package ecosystem']);
 });
@@ -883,4 +895,79 @@ test('the yes question names the filing only when there is a weakness for the co
   const shown = await run(ctx, ['setup']);
   assert.match(shown.out, /\*\*A\. Yes \(my pick\):\*\* Toolkit adds the "Toolkit: protected default branch" ruleset/);
   assert.ok(!shown.out.includes(summary.FILES_TASKS), 'nothing to file, so the question does not say it files');
+});
+
+// G-5 (SQAG final run on 3.212.0): with no settings drift left there was no yes, so the skippable
+// required job "Quote Basis click budget" was handed to the controller but never filed. Red on main:
+// the summary filed nothing and named no task.
+const CI_FILES = { '.github/workflows/plain-text.yml': PLAIN_TEXT, '.github/workflows/ci.yml': CI_SKIPPABLE, '.github/dependabot.yml': DEPENDABOT };
+// The programme parent's issues on GitHub, through the weakness filer's own request route: every
+// request is kept, so a run that reads or files anything shows.
+function issueTracker() {
+  const issues = [], requests = [];
+  const { WeaknessTasks } = require(path.join(scripts, 'toolkit-governance-weakness.cjs'));
+  const tasks = new WeaknessTasks({ request: (method, endpoint, input) => {
+    requests.push([method, endpoint]);
+    if (method === 'GET' && endpoint.startsWith(`repos/${SLUG}/issues?state=open&`)) return { ok: true, value: issues.filter(issue => issue.state === 'open') };
+    const parentOf = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)\/parent$/.exec(endpoint);
+    if (method === 'GET' && parentOf) {
+      const issue = issues.find(entry => entry.number === Number(parentOf[1]));
+      return issue?.parent ? { ok: true, value: { number: issue.parent } } : { ok: false, reason: 'not-visible' };
+    }
+    if (method === 'POST' && endpoint === `repos/${SLUG}/issues`) {
+      const number = 41 + issues.length;
+      issues.push({ number, id: number * 100, state: 'open', ...input });
+      return { ok: true, value: { number, id: number * 100 } };
+    }
+    if (method === 'POST' && endpoint === `repos/${SLUG}/issues/1/sub_issues`) { issues.find(issue => issue.id === input.sub_issue_id).parent = 1; return { ok: true, value: {} }; }
+    return { ok: false, reason: 'gh-request-failed' };
+  } });
+  return { issues, requests, tasks };
+}
+// A governed repository whose GitHub settings are all in step, with one skippable required job.
+function noSettingsDrift(t) {
+  const ctx = fixture(t, { quiet: true, requiredChecks: ['plain-text', 'validate'], commitFiles: CI_FILES });
+  const github = fakeGitHub(ctx, { squash: false, checks: ['plain-text', 'validate'] });
+  const tracker = issueTracker();
+  ctx.cli = { ...ctx.cli, weaknessTasks: tracker.tasks };
+  return { ctx, github, tracker };
+}
+
+test('with no settings drift, refresh governance files a skippable required job once as the controller\'s task, and a rerun names it without filing again', async t => {
+  const { ctx, github, tracker } = noSettingsDrift(t);
+  const shown = await run(ctx, ['refresh']);
+  assert.equal(shown.code, 0, shown.err);
+  assert.doesNotMatch(shown.out, /Question:/, 'no settings drift, so there is no yes to wait for');
+  assert.equal(rowOf(shown.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | On: 1 item; For your controller: 1 item, listed below | Pull requests only, required checks and no force pushes on the default branch |');
+  assert.ok(shown.out.includes(`\n- Your controller fixes this in a pull request: ${CI_LINE}. Filed as #41 under #1.\n`), shown.out);
+  assert.deepEqual(tracker.issues.map(issue => [issue.number, issue.parent, issue.title]), [[41, 1, 'CI: Required check "validate" can be skipped and still count as passed (.github/workflows/ci.yml)']]);
+  assert.ok(tracker.issues[0].body.split('\n').includes('**File:** `.github/workflows/ci.yml`'), tracker.issues[0].body);
+  assert.deepEqual(github.writes, [], 'no GitHub setting is written');
+  const again = await run(ctx, ['refresh']);
+  assert.equal(again.code, 0, again.err);
+  assert.ok(again.out.includes(`\n- Your controller fixes this in a pull request: ${CI_LINE}. Already filed as #41, still open.\n`), again.out);
+  assert.equal(tracker.issues.length, 1, 'never filed twice');
+  assert.deepEqual(tracker.requests.filter(([method]) => method === 'POST').map(([, endpoint]) => endpoint), [`repos/${SLUG}/issues`, `repos/${SLUG}/issues/1/sub_issues`], 'the rerun writes nothing');
+});
+
+test('status, check, a --json read and an answer file nothing; only the summary shown to the owner files', async t => {
+  const { ctx, tracker } = noSettingsDrift(t);
+  for (const argv of [['status'], ['check'], ['setup', '--json'], ['refresh', '--json']]) {
+    await run(ctx, argv);
+    assert.deepEqual(tracker.requests, [], `${argv.join(' ')} reads and files nothing`);
+  }
+  // The same weakness is filed by the run that shows it, so the reads above had it to file.
+  assert.equal((await run(ctx, ['setup'])).code, 0);
+  assert.equal(tracker.issues.length, 1, 'the summary shown files it');
+  const before = tracker.requests.length;
+  const answer = await reply(ctx, 'task auto-merge off');
+  assert.equal(answer.code, 0, answer.err);
+  assert.match(answer.out, /^Task auto-merge is already off\. Nothing changed\.$/m);
+  assert.equal(tracker.requests.length, before, 'an answer to the summary reads and files nothing more');
+  // An answer that finds the summary changed shows it again as it stands: that showing names the task.
+  ctx.cli = { ...ctx.cli, permissionsChecker: () => ({ checked: true, host: 'claude', missing: 3, stale: 0, update: 'node fixture-apply.cjs --apply' }) };
+  const changed = await reply(ctx, 'task auto-merge on');
+  assert.match(changed.out, /Here it is as it stands now:$/m);
+  assert.ok(changed.out.includes(`\n- Your controller fixes this in a pull request: ${CI_LINE}. Already filed as #41, still open.\n`), changed.out);
+  assert.equal(tracker.issues.length, 1, 'never filed twice');
 });

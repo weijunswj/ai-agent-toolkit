@@ -229,15 +229,18 @@ class GovernanceMaintenance {
     const owed = sweep ? this.#sweepEnd(slug, { held, reports }) : null;
     // Security files written into this working tree still need a pull request; the result says so.
     const files = securities.flatMap(entry => (entry.files || []).filter(file => file.result === 'written').map(file => file.file));
-    return { result: retry.length ? 'failed' : 'done', reason: [...new Set(retry)].join('; '), changed, unconfirmed, on, unavailable, held, controller: this.#fileWeaknesses(rows[0], controller), reports, files, ...(owed ? { sweep_owed: owed } : {}) };
+    return { result: retry.length ? 'failed' : 'done', reason: [...new Set(retry)].join('; '), changed, unconfirmed, on, unavailable, held, controller: this.fileWeaknesses(rows[0], controller), reports, files, ...(owed ? { sweep_owed: owed } : {}) };
   }
 
   // Each workflow weakness for the controller, filed once as a child task under the programme parent
-  // (toolkit-governance-weakness.cjs, owner decision of 28 November 2026): [{ note, task }], where
-  // task says whether it was filed, is already open, or why it was not filed.
-  #fileWeaknesses(row, findings) {
+  // (toolkit-governance-weakness.cjs, owner decision INT-TK421-1399): [{ note, task }], where task says
+  // whether it was filed, is already open, or why it was not filed. `row` is { root, slug }. The finish,
+  // the settings fix and the governance summary the owner is shown all file here, so a weakness is
+  // filed whether or not any setting changed.
+  fileWeaknesses(row, findings) {
     if (!findings.length) return [];
-    const parent = governance.mergedBinding(row.root, this.#registryOptions)?.parents?.[0]?.issue ?? null;
+    let parent = null;
+    try { parent = governance.mergedBinding(row.root, this.#registryOptions)?.parents?.[0]?.issue ?? null; } catch { parent = null; }
     let tasks;
     try { tasks = this.#weaknessTasks ? this.#weaknessTasks.file(row.slug, parent, findings) : null; } catch { tasks = null; }
     const why = this.#weaknessTasks ? 'the GitHub request failed' : 'this run does not write to GitHub';
@@ -593,4 +596,4 @@ class GovernanceMaintenance {
 
 
 
-module.exports = Object.freeze({ GovernanceMaintenance, appendRunRecord, protectionOffer, workflowNotes, SettingsOperationHistory, RECORD_BASENAME });
+module.exports = Object.freeze({ GovernanceMaintenance, appendRunRecord, protectionOffer, workflowNotes, workflowFindings, SettingsOperationHistory, RECORD_BASENAME });

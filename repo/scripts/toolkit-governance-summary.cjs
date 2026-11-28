@@ -217,14 +217,17 @@ const WHERE = Object.freeze({
 // Waiting for you (a change only the owner can make) or Not checked here yet (GitHub could not be read,
 // with why). `fix` lists what one yes changes, the same writes a turn-on's post-merge finish makes
 // (toolkit-governance-migration.cjs finish), or is null when nothing drifted that Toolkit fixes.
+// `controller` is each weakness listed for the repository's controller ({ kind, check, file, detail }),
+// for the summary to file as its task (withTasks).
 function settingsRows(reads) {
-  const { protectionOffer, workflowNotes: workflowsOf } = require('./toolkit-governance-migration.cjs');
+  const { protectionOffer, workflowNotes: workflowsOf, workflowFindings } = require('./toolkit-governance-migration.cjs');
   const rulesets = require('./toolkit-governance-ruleset.cjs');
   const protection = require('./toolkit-governance-protection.cjs');
   const security = require('./toolkit-governance-security.cjs');
   const changes = [];
   const ownRulesets = [];
   const rules = { on: [], drift: [], free: [], waiting: [], controller: [], unread: [] };
+  const findings = [];
   const rulesetPart = (result, { on, missing, change }) => {
     if (!result || result.status === 'not-applicable') return;
     if (result.status === 'present') rules.on.push(on);
@@ -268,6 +271,7 @@ function settingsRows(reads) {
       rules.drift.push(...settingsDrift);
       changes.push(`${branch.toolkit_ruleset ? 'updates' : 'adds'} the "${protection.RULESET_NAME}" ruleset on the default branch (pull requests only, the programme file's required checks pinned to GitHub Actions, branches up to date before merging, merge commits only, nobody can bypass it)`);
       rules.controller.push(...workflowNotes);
+      findings.push(...workflowFindings(branch));
     } else {
       // What the own ruleset changes fix is drift the yes fixes; the rest stays the owner's.
       const after = own.length && branch.own_after ? { ...branch.checks, ...branch.own_after } : branch.checks;
@@ -281,6 +285,7 @@ function settingsRows(reads) {
       // Toolkit's ruleset is not offered.
       rules.waiting.push(...left.map(detail => `${name}, change by hand: ${detail}`));
       rules.controller.push(...workflowNotes);
+      findings.push(...workflowFindings(branch));
       if (offer.fixes && offer.unproduced.length) rules.waiting.push(`${name}: waits for your controller's fix: Toolkit's ruleset is not offered while no workflow job produces ${offer.unproduced.map(check => `"${check}"`).join(', ')}, since requiring it would block every merge`);
       if (offer.fixes && offer.silent.length) rules.waiting.push(`${name}: waits for your controller's fix: Toolkit's ruleset is not offered while ${offer.silent.map(check => `"${check}"`).join(', ')} does not report on every pull request, since requiring it would block those merges`);
       if (!left.length && !workflowNotes.length && !own.length && !(offer.fixes && (offer.unproduced.length || offer.silent.length))) rules.waiting.push(`${name}, check by hand: it is not confirmed`);
@@ -296,8 +301,10 @@ function settingsRows(reads) {
   else if (result.status === 'conformant') secure.on.push('the free dependency and security settings');
   else {
     const byHand = security.byHandNotes(result);
-    const fileNotes = security.repositoryFileFindings(result).map(finding => finding.detail);
+    const files = security.repositoryFileFindings(result);
+    const fileNotes = files.map(finding => finding.detail);
     secure.controller.push(...fileNotes);
+    findings.push(...files);
     for (const check of Object.values(result.checks || {})) {
       if (check.status === 'drift') secure.drift.push(...check.details.filter(detail => !byHand.includes(detail) && !fileNotes.includes(detail)));
       else if (check.status === 'not-on-plan') secure.free.push(...check.details);
@@ -308,8 +315,8 @@ function settingsRows(reads) {
     if (byHand.length) secure.where = WHERE.security;
     const turnOn = Object.entries(result.fixes).filter(([, wanted]) => wanted).map(([setting]) => security.SETTING_LABELS[setting] || setting);
     if (turnOn.length) changes.push(`turns on ${listed(turnOn)}`);
-    const files = [result.files?.dependabot ? security.DEPENDABOT_REL : null, result.files?.workflow ? security.WORKFLOW_REL : null].filter(Boolean);
-    if (files.length) changes.push(`writes ${listed(files)} into this working tree, for your controller to commit through a pull request`);
+    const written = [result.files?.dependabot ? security.DEPENDABOT_REL : null, result.files?.workflow ? security.WORKFLOW_REL : null].filter(Boolean);
+    if (written.length) changes.push(`writes ${listed(written)} into this working tree, for your controller to commit through a pull request`);
     if (!secure.drift.length && !secure.waiting.length && !secure.controller.length && !secure.unread.length) secure.on.push('the free dependency and security settings');
   }
   // The yes also files each weakness listed for the controller as its task, once (owner decision
@@ -324,7 +331,21 @@ function settingsRows(reads) {
     security: securityPart.state,
     details: { protection: protectionPart.items, security: securityPart.items },
     fix: changes.length ? { changes, ...(ownRulesets.length ? { own_rulesets: ownRulesets } : {}) } : null,
+    controller: [...new Map(findings.map(finding => [finding.detail, finding])).values()],
   };
+}
+
+// The settings rows with each line for the controller naming its task: filed, already open, or why it
+// was not filed (`filed`: [{ note, task }], GovernanceMaintenance.fileWeaknesses). Only the text the
+// owner reads gets these words: what was shown is compared without them, since the same weakness reads
+// "filed" once and "already filed" after (governance bank parts).
+// The failure this prevents: SQAG's summary said "Your controller fixes this in a pull request" for a
+// skippable required job, and nothing was filed, because filing ran only after a settings yes (G-5).
+function withTasks(settings, filed) {
+  if (!settings?.details || !Array.isArray(filed) || !filed.length) return settings;
+  const named = new Map(filed.map(entry => [controllerLine(entry.note), controllerLine(entry)]));
+  const name = items => (items || []).map(item => named.get(item) || item);
+  return { ...settings, details: { protection: name(settings.details.protection), security: name(settings.details.security) } };
 }
 
 // What the yes question and the turn-on's after-merge list say about filing the controller's tasks.
@@ -555,4 +576,4 @@ function parseChange(text, { copies = false, rows = false, update = false, fix =
   throw new GuidedAnswerError(`This was not read as a change: "${String(text || '').trim()}". Say turn off governance, task auto-merge on or off, or change store${asked}.`);
 }
 
-module.exports = Object.freeze({ DOES, FILES_TASKS, WHERE, branchRequiredChecks, summaryParts, finishRows, fixResultLines, mergedFiles, mergedOwnChecks, parseChange, programmeUpdate, programmeUpdateText, questionNumbers, renderSummary, renderTable, settingsRows, summaryRows, updateWords });
+module.exports = Object.freeze({ DOES, FILES_TASKS, WHERE, branchRequiredChecks, summaryParts, finishRows, fixResultLines, mergedFiles, mergedOwnChecks, parseChange, programmeUpdate, programmeUpdateText, questionNumbers, renderSummary, renderTable, settingsRows, summaryRows, updateWords, withTasks });
