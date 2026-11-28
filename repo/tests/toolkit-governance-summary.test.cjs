@@ -114,8 +114,8 @@ test('a governed repository shows its steps left, Toolkit permissions first with
     '| Parent issue | Ready: #1 | Tracks every task as a sub-issue |',
     '| Task auto-merge with merge train | Off | Reviewed, green task pull requests land on their own, in merge trains |',
     '| Required checks | Set: validate | Every pull request passes these before it lands |',
-    '| Branch protection and rulesets | Not checked here yet | Pull requests only, required checks and no force pushes on the default branch |',
-    '| Security settings | Not checked here yet | Flags and updates vulnerable dependencies |',
+    '| Branch protection and rulesets | Not checked here yet: this run does not read GitHub | Pull requests only, required checks and no force pushes on the default branch |',
+    '| Security settings | Not checked here yet: this run does not read GitHub | Flags and updates vulnerable dependencies |',
     '| Cloud workflows | Not read | Keep records in step from GitHub, with no computer on |',
     '| Guards | Not read | Check every pull request and push |',
     '| Toolkit permissions (Claude Code, this computer) | Waiting: 2 to add, 1 old to update | Agents run Toolkit\'s own commands without asking each time |',
@@ -424,4 +424,132 @@ test('a repository whose governance cannot be read gets one more read, then the 
     assert.equal(answered.code, 1);
     assert.match(answered.out, /^Nothing changed, and this answer was not used: GitHub could not be read just now/m);
   }
+});
+
+// ---- the GitHub settings in an already-governed repository ------------------------------------------
+// The SQAG shape of 28 Nov: governed long before this Toolkit (no finish record), an active ruleset
+// requiring the check, and the repository allowing squash and rebase merges. Red on main: both rows said
+// "Not checked here yet" and nothing offered the fix.
+const { protectionRulesetBody } = require(path.join(scripts, 'toolkit-governance-protection.cjs'));
+const NO_FORCE_PUSH = Object.freeze({ id: 5, name: 'protect all branches', target: 'branch', enforcement: 'active', bypass_actors: [], conditions: { ref_name: { include: ['~ALL'], exclude: [] } }, rules: [{ type: 'non_fast_forward' }] });
+const DEPENDABOT = 'version: 2\nupdates:\n  - package-ecosystem: "github-actions"\n    directory: "/"\n    schedule:\n      interval: "weekly"\n';
+const SETTINGS_ON = Object.freeze({ visibility: 'public', allow_auto_merge: true, delete_branch_on_merge: 'enabled', alerts: 'enabled', security_updates: 'enabled', secret_scanning: 'enabled', push_protection: 'enabled', code_scanning: 'enabled', private_reporting: 'enabled', advanced_codeql: null });
+
+// One GitHub repository the readers and writers share, so a write shows in the next read.
+function fakeGitHub(ctx, { squash = true, alerts = 'enabled', unreadable = null } = {}) {
+  const github = { merge: { allow_merge_commit: true, allow_squash_merge: squash, allow_rebase_merge: squash }, own: null, rulesets: [NO_FORCE_PUSH], alerts, writes: [] };
+  const binding = { status: 'ok', text: fs.readFileSync(path.join(ctx.repo, '.github', 'toolkit-programme.json'), 'utf8') };
+  // protect-main: pull requests and the check, pinned and up to date; it says nothing on merge methods.
+  const rules = () => [
+    { type: 'pull_request', ruleset_id: 7, parameters: { required_approving_review_count: 0 } },
+    { type: 'required_status_checks', ruleset_id: 7, parameters: { strict_required_status_checks_policy: true, required_status_checks: [{ context: 'plain-text', integration_id: 15368 }] } },
+    ...(github.own ? github.own.rules.map(rule => ({ ...rule, ruleset_id: 99 })) : []),
+  ];
+  const failed = () => ({ ok: false, reason: unreadable });
+  ctx.cli = {
+    ...QUIET,
+    rulesetReader: () => (unreadable ? failed() : { ok: true, rulesets: github.rulesets }),
+    protectionReader: () => (unreadable ? failed() : { ok: true, default_branch: 'main', repository: github.merge, rules: rules(), classic: null, toolkit_ruleset: github.own ? { id: 99 } : null }),
+    securityReader: () => (unreadable ? failed() : { ok: true, ...SETTINGS_ON, alerts: github.alerts, binding }),
+    rulesetCreator: slug => { github.writes.push(['no-force-push ruleset', slug]); return { ok: false, reason: 'not-expected' }; },
+    protectionWriter: (slug, checks, existing) => { github.writes.push(['protection ruleset', slug, checks, existing]); github.own = protectionRulesetBody(checks); return { ok: true, id: 99 }; },
+    securityWriter: (slug, plan) => {
+      github.writes.push(['security', slug, Object.keys(plan).filter(key => plan[key])]);
+      if (plan.alerts) github.alerts = 'enabled';
+      return Object.keys(plan).filter(key => plan[key]).map(setting => ({ setting, ok: true, reason: null }));
+    },
+    securityFileWriter: (root, files) => { github.writes.push(['files', files]); return []; },
+  };
+  return github;
+}
+const governedSince = t => fixture(t, { quiet: true, requiredChecks: ['plain-text'], commitFiles: { '.github/workflows/plain-text.yml': PLAIN_TEXT, '.github/dependabot.yml': DEPENDABOT } });
+const rowOf = (out, part) => tableOf(out).find(line => line.startsWith(`| ${part} |`));
+
+test('an already-governed repository with squash and rebase allowed beside an active ruleset shows the drift and offers one yes; a no writes nothing, a yes fixes it the way a turn-on does', async t => {
+  const ctx = governedSince(t);
+  const github = fakeGitHub(ctx);
+  const shown = await run(ctx, ['setup']);
+  assert.equal(shown.code, 0, shown.err);
+  assert.equal(rowOf(shown.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | On: the no-force-push ruleset. Drift: main allows merge, squash, rebase (repository settings); only merge commits are allowed | Pull requests only, required checks and no force pushes on the default branch |');
+  assert.equal(rowOf(shown.out, 'Security settings'), '| Security settings | On: the free dependency and security settings | Flags and updates vulnerable dependencies |');
+  assert.equal(shown.out.split('\n')[0], '**Governance: on, not ready: 1 step left.**');
+  assert.ok(shown.out.split('\n').includes('**GitHub settings:** They have drifted from what governance needs, as the table shows. One yes fixes them the way a turn-on sets them up. Answer question 1 below.'));
+  assert.match(shown.out, /^\*\*1\. Question: Fix the drifted GitHub settings\?\*\*\n {3}- \*\*A\. Yes \(my pick\):\*\* Toolkit adds the "Toolkit: protected default branch" ruleset on the default branch \(pull requests only, the programme file's required checks pinned to GitHub Actions, branches up to date before merging, merge commits only, nobody can bypass it\), then reads each one back\. Nothing else changes\.\n {3}- \*\*B\. No:\*\* Nothing is written, and Toolkit asks again next time\.$/m);
+  agentsLast(shown.out);
+  assert.deepEqual(github.writes, [], 'nothing is written before the owner\'s yes');
+  const no = await reply(ctx, '1B');
+  assert.equal(no.code, 0, no.err);
+  assert.match(no.out, /^GitHub settings: not changed\. Nothing was written; Toolkit asks again next time\.$/m);
+  assert.deepEqual(github.writes, [], 'a no writes nothing');
+  const yes = await reply(ctx, '1A');
+  assert.equal(yes.code, 0, yes.err);
+  assert.deepEqual(github.writes, [['protection ruleset', SLUG, ['plain-text'], null]], 'only Toolkit\'s own ruleset is written, as the finish writes it');
+  assert.match(yes.out, /^On and read back: the no-force-push ruleset, default-branch protection and the free dependency and security settings\.$/m);
+  const after = await run(ctx, ['setup']);
+  assert.equal(rowOf(after.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | On: the no-force-push ruleset and default-branch protection | Pull requests only, required checks and no force pushes on the default branch |');
+  assert.equal(after.out.split('\n')[0], '**Governance: on and ready.**');
+  assert.doesNotMatch(after.out, /Question:/);
+});
+
+test('a fully conformant governed repository shows On for protection and security, and asks nothing', async t => {
+  const ctx = governedSince(t);
+  const github = fakeGitHub(ctx, { squash: false });
+  const shown = await run(ctx, ['setup']);
+  assert.equal(shown.code, 0, shown.err);
+  assert.equal(rowOf(shown.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | On: the no-force-push ruleset and default-branch protection | Pull requests only, required checks and no force pushes on the default branch |');
+  assert.equal(rowOf(shown.out, 'Security settings'), '| Security settings | On: the free dependency and security settings | Flags and updates vulnerable dependencies |');
+  assert.equal(shown.out.split('\n')[0], '**Governance: on and ready.**');
+  assert.doesNotMatch(shown.out, /Question:|GitHub settings/);
+  // The full read is saved for the session-start line, so drift saved earlier ends.
+  const parts = require(path.join(scripts, 'toolkit-governance-parts.cjs'));
+  assert.deepEqual(parts.saved(ctx.registryOptions, governance.governanceState(ctx.repo, ctx.registryOptions).repository_id).settings, { drift: [], unread: false });
+  assert.deepEqual(github.writes, []);
+});
+
+test('GitHub that cannot be read keeps Not checked here yet with the reason, offers nothing and clears no saved drift', async t => {
+  const ctx = governedSince(t);
+  const parts = require(path.join(scripts, 'toolkit-governance-parts.cjs'));
+  const id = governance.governanceState(ctx.repo, ctx.registryOptions).repository_id;
+  parts.record(ctx.registryOptions, id, { settings: [{ id: 'PROTECTION_MERGE_METHODS', severity: 'drift' }] });
+  const github = fakeGitHub(ctx, { unreadable: 'gh-unavailable' });
+  const shown = await run(ctx, ['setup']);
+  assert.equal(shown.code, 0, shown.err);
+  assert.equal(rowOf(shown.out, 'Branch protection and rulesets'), '| Branch protection and rulesets | Not checked here yet: GitHub could not be read (the GitHub CLI could not run) | Pull requests only, required checks and no force pushes on the default branch |');
+  assert.equal(rowOf(shown.out, 'Security settings'), '| Security settings | Not checked here yet: GitHub could not be read (the GitHub CLI could not run) | Flags and updates vulnerable dependencies |');
+  assert.doesNotMatch(shown.out, /Question: Fix/);
+  assert.deepEqual(parts.saved(ctx.registryOptions, id).settings.drift, ['PROTECTION_MERGE_METHODS'], 'an unread read never clears saved drift');
+  assert.deepEqual(github.writes, []);
+});
+
+test('security drift Toolkit turns on is offered with protection drift in one yes; with the programme file update too, each answer names its question', async t => {
+  const ctx = governedSince(t);
+  fakeGitHub(ctx, { alerts: 'disabled' });
+  const shown = await run(ctx, ['setup']);
+  assert.equal(rowOf(shown.out, 'Security settings'), '| Security settings | Drift: Dependabot alerts is off | Flags and updates vulnerable dependencies |');
+  assert.match(shown.out, /^ {3}- \*\*A\. Yes \(my pick\):\*\* Toolkit adds the "Toolkit: protected default branch" ruleset [^\n]+ and turns on Dependabot alerts, then reads each one back\. Nothing else changes\.$/m);
+  // Both questions open: a bare answer is refused, a numbered one picks its question.
+  assert.deepEqual(summary.parseChange('2A', { update: true, fix: true }), { fix: 'yes' });
+  assert.deepEqual(summary.parseChange('1 b', { update: true, fix: true }), { update: 'no' });
+  assert.deepEqual(summary.parseChange('fix the settings', { fix: true }), { fix: 'yes' });
+  assert.deepEqual(summary.parseChange('yes', { fix: true }), { fix: 'yes' });
+  assert.throws(() => summary.parseChange('yes', { update: true, fix: true }), /answer question 1 or 2 with A or B, one at a time \(for example 2A\)/);
+  assert.throws(() => summary.parseChange('2A', { update: true }), /answer question 1 with A or B\./);
+  assert.equal(summary.questionNumbers({ update: { offer: {} }, settings: { fix: { changes: ['x'] } } }).fix, 2);
+});
+
+test('drift Toolkit\'s ruleset cannot fix waits for the owner by hand, and is never offered', () => {
+  const branch = { status: 'drift', reason: null, toolkit_ruleset: null, checks: {
+    P1: { status: 'drift', details: ['"lint" is required but not in the binding'], missing: [], extra: ['lint'] },
+    P2: { status: 'ok', details: [] }, P3: { status: 'ok', details: [], missing: [] }, P4: { status: 'ok', details: [] }, P5: { status: 'ok', details: [] }, P6: { status: 'ok', details: [] },
+  } };
+  const rows = summary.settingsRows({ rulesetResult: { status: 'present' }, keepState: null, protectionResult: branch, securityResult: { status: 'conformant', fixes: {}, checks: {} } });
+  assert.equal(rows.protection, 'On: the no-force-push ruleset. Waiting for you: default-branch protection: change by hand: "lint" is required but not in the binding');
+  assert.equal(rows.fix, null);
+  // Settings in step, but a workflow the check cannot confirm: checked by hand, never offered.
+  const unsure = { status: 'unverified', reason: null, toolkit_ruleset: null, checks: { ...branch.checks, P1: { status: 'ok', details: [], missing: [], extra: [] }, P4: { status: 'unverified', details: ['"plain-text" job has a needs list'] } } };
+  const checked = summary.settingsRows({ rulesetResult: { status: 'present' }, keepState: null, protectionResult: unsure, securityResult: { status: 'conformant', fixes: {}, checks: {} } });
+  assert.deepEqual([checked.protection, checked.fix], ['On: the no-force-push ruleset. Waiting for you: default-branch protection: check by hand: "plain-text" job has a needs list', null]);
+  // GitHub Free (private): every part not enforceable.
+  const free = summary.settingsRows({ rulesetResult: { status: 'not-enforceable' }, keepState: null, protectionResult: { status: 'not-enforceable', checks: {} }, securityResult: { status: 'conformant', fixes: {}, checks: {} } });
+  assert.deepEqual([free.protection, free.free], ['Not available on GitHub Free (private)', true]);
 });

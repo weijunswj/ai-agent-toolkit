@@ -400,13 +400,7 @@ class ToolkitGovernanceCli {
   async #finishLocked(json, state) {
     let said = '';
     const out = { write: text => { said += text; return true; } };
-    const outcome = await new GovernanceMaintenance({
-      stdout: out, confirm: async () => false, interactive: true, registryOptions: this.#registryOptions,
-      rulesetReader: this.#rulesetReader, rulesetCreator: this.#rulesetCreator, stateRulesetCreator: this.#stateRulesetCreator,
-      protectionReader: this.#protectionReader, protectionWriter: this.#protectionWriter,
-      securityReader: this.#securityReader, securityWriter: this.#securityWriter, securityFileWriter: this.#securityFileWriter,
-      firstSweep: this.#firstSweep || (this.#registryOptions.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new FirstInstallSweep()),
-    }).finish(state.root || this.#cwd, { sweep: finishing.entryFor(this.#registryOptions, state.repository_id)?.first_sweep === true });
+    const outcome = await this.#maintenance(out, this.#firstSweep || (this.#registryOptions.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1' ? null : new FirstInstallSweep())).finish(state.root || this.#cwd, { sweep: finishing.entryFor(this.#registryOptions, state.repository_id)?.first_sweep === true });
     const lines = said.split('\n').map(line => line.trim()).filter(Boolean);
     if (outcome.result === 'not-ready') {
       finishing.touch(this.#registryOptions, state.repository_id);
@@ -566,8 +560,10 @@ class ToolkitGovernanceCli {
     const view = this.#view({ state, specs, adoption, found, merged, read, switches, permissions, app, storeCheck, copies, doneWhen });
     // The programme file update offered is part of what was shown: a yes to one offer never applies to another.
     const shownReference = governanceBank.bankReference(specs);
-    const reference = view.update?.offer
-      ? require('./toolkit-question-bank.cjs').bankReferenceFromIdentity(crypto.createHash('sha256').update(JSON.stringify([shownReference, view.update.offer, view.update.open?.url || null])).digest('hex'))
+    // The questions offered are part of what was shown: a yes to one offer (a programme file update,
+    // a settings fix for the drift read then) never applies to another.
+    const reference = view.update?.offer || view.fix
+      ? require('./toolkit-question-bank.cjs').bankReferenceFromIdentity(crypto.createHash('sha256').update(JSON.stringify([shownReference, view.update?.offer || null, view.update?.open?.url || null, view.fix || null])).digest('hex'))
       : shownReference;
     if (answers === null) {
       if (json) { this.#print(true, { state: state.state, bank_reference: reference, questions: specs }, []); return BANK_SHOWN; }
@@ -632,7 +628,7 @@ class ToolkitGovernanceCli {
     // ticket and its own line, never a spent ticket. An answer that did what it said is noted as used.
     let code = null;
     try {
-      code = this.#applyView(view, state, task, chosen, found);
+      code = await this.#applyView(view, state, task, chosen, found);
       return code;
     } finally {
       try { new governanceBank.BankTickets({ registryOptions: this.#registryOptions }).rearm(sessionId, entry, { bankReference: reference, used: code === 0 }); } catch { /* the owner can type toolkit governance */ }
@@ -647,8 +643,9 @@ class ToolkitGovernanceCli {
       let held = false;
       try { const result = require('./toolkit-governance-ready.cjs').readiness(state, this.#registryOptions); held = result.applies && !result.ready; } catch { held = false; }
       const cleanable = Boolean(copies && copies.ok && copiesRow(copies)?.files > 0);
-      const update = Boolean(facts.update?.offer && !facts.update.open);
-      return { kind: 'summary', text: summary.renderSummary(facts, { held }), agents: governanceBank.agentsSummary(), update: facts.update, parse: reply => summary.parseChange(reply, { copies: cleanable, rows: Boolean(doneWhen?.pages?.length), update }) };
+      const asked = summary.questionNumbers(facts);
+      const fix = facts.settings?.fix || null;
+      return { kind: 'summary', text: summary.renderSummary(facts, { held }), agents: governanceBank.agentsSummary(), update: facts.update, fix, parse: reply => summary.parseChange(reply, { copies: cleanable, rows: Boolean(doneWhen?.pages?.length), update: Boolean(asked.update), fix: Boolean(asked.fix) }) };
     }
     // The search's own reason is for the logs, not the owner: nothing can be set up until it works.
     if (adoption && adoption.blocked) return { kind: 'line', code: 1, lines: ['GitHub could not be read just now, so Toolkit cannot find or suggest the evidence store and parent issue yet, and the setup questions are not shown. Nothing changed. Type toolkit governance again in a moment.'] };
@@ -677,6 +674,14 @@ class ToolkitGovernanceCli {
     let drift = null;
     try { drift = require('./toolkit-governance-parts.cjs').saved(this.#registryOptions, state.repository_id)?.settings?.drift || null; } catch { drift = null; }
     const store = merged?.store?.repository || null;
+    // One read of the default branch's protection per summary, shared by the settings rows and the
+    // programme file update.
+    let protectionRead;
+    const readProtection = slug => {
+      if (protectionRead === undefined || protectionRead.slug !== slug) protectionRead = { slug, value: (this.#protectionReader || protection.ghProtectionReader)(slug) };
+      return protectionRead.value;
+    };
+    const settings = this.#settingsRows(state, merged, read, readProtection);
     return {
       repository: state.repository,
       defaultBranch: state.merged?.default_branch || null,
@@ -684,27 +689,50 @@ class ToolkitGovernanceCli {
       parents: (merged?.parents || []).map(parent => parent.issue),
       task: { auto_merge: switches.task, merge_train: switches.train },
       requiredChecks: merged?.required_checks || [],
-      finish, drift,
+      settings: settings.rows, unread: settings.unread, finish, drift,
       files: this.#mergedFiles(state),
       permissions: { ...permissions, app: permissions.app || governanceBank.APP_NAMES[permissions.host] },
       app,
       appCommand: state.repository ? governanceApp.setupCommand(state.repository, store) : null,
       copies: copiesRow(copies),
       stale: read && !read.fresh ? read.refresh_error || 'no fresh read' : null,
-      update: this.#programmeUpdate(state, merged, read),
+      update: this.#programmeUpdate(state, merged, read, readProtection),
     };
+  }
+
+  // Branch protection and rulesets, merge settings and the security settings, read from GitHub for
+  // the summary as the governance check reads them (toolkit-governance-conformance.cjs settingsReads),
+  // plus the programme state ruleset where the merged programme file keeps state. Read only: nothing
+  // is written here. { rows } (toolkit-governance-summary.cjs settingsRows), or { rows: null, unread }
+  // where GitHub is not read (an offline or test run without readers, or a merged programme file read
+  // that is not fresh). A read GitHub answered in full is saved for the session-start drift line
+  // (toolkit-governance-parts.cjs); one with any part unread is not, so it never clears saved drift.
+  #settingsRows(state, merged, read, readProtection) {
+    const readers = Boolean(this.#rulesetReader && this.#protectionReader && this.#securityReader);
+    if (!readers && (this.#registryOptions.testOnly === true || process.env.TOOLKIT_GOVERNANCE_OFFLINE === '1')) return { rows: null, unread: 'this run does not read GitHub' };
+    if (!merged || !read?.fresh || !state.root) return { rows: null, unread: 'GitHub could not be read just now' };
+    const rulesetReader = this.#rulesetReader ? { reader: this.#rulesetReader } : {};
+    let reads;
+    try {
+      reads = conformance.settingsReads(state, { ...this.#registryOptions, rulesetReader: this.#rulesetReader || undefined, protectionReader: readProtection, securityReader: this.#securityReader || undefined });
+      reads.keepState = merged.state ? require('./toolkit-governance-ruleset.cjs').keepStateRuleset(state.root, rulesetReader) : null;
+    } catch { return { rows: null, unread: 'the read failed' }; }
+    if (!reads.findings.some(item => item.severity === 'unverified')) {
+      try { require('./toolkit-governance-parts.cjs').record(this.#registryOptions, state.repository_id, { settings: reads.findings }); } catch { /* not saved: the background check catches up */ }
+    }
+    return { rows: summary.settingsRows(reads), unread: null };
   }
 
   // Whether the merged programme file is behind this Toolkit (toolkit-governance-summary.cjs
   // programmeUpdate), from a fresh read only: { offer, open } (an update pull request already open),
   // or null. Reads the default branch's protection (never in tests without a reader).
-  #programmeUpdate(state, merged, read) {
+  #programmeUpdate(state, merged, read, readProtection = this.#protectionReader || protection.ghProtectionReader) {
     if (!merged || !read?.fresh || !state.root || !state.repository) return null;
     let running = null;
     try { running = require('./toolkit-version.cjs').readToolkitVersion(); } catch { running = null; }
     let branchChecks = null;
     if (this.#protectionReader || (this.#registryOptions.testOnly !== true && process.env.TOOLKIT_GOVERNANCE_OFFLINE !== '1')) {
-      try { branchChecks = summary.branchRequiredChecks((this.#protectionReader || protection.ghProtectionReader)(state.repository)); } catch { branchChecks = null; }
+      try { branchChecks = summary.branchRequiredChecks(readProtection(state.repository)); } catch { branchChecks = null; }
     }
     let keyReadable = Object.hasOwn(merged, 'min_toolkit');
     if (!keyReadable) {
@@ -718,6 +746,33 @@ class ToolkitGovernanceCli {
     let open = null;
     if (this.#switchTransport) { try { open = this.#switchTransport.openProgrammeUpdate(state.repository); } catch { open = null; } }
     return { offer, open };
+  }
+
+  // The owner's yes to the settings fix: the post-merge finish's own writes (rulesets, default-branch
+  // protection, the free dependency and security settings), each read back, with no first personal
+  // data sweep. The answer only reaches here when what the summary showed is unchanged, so it covers
+  // exactly the changes it listed.
+  async #fixSettings(state, fix) {
+    if (!fix) {
+      this.#print(false, {}, ['The GitHub settings no longer differ from what governance needs. Nothing was written.']);
+      return 0;
+    }
+    let said = '';
+    const outcome = await this.#maintenance({ write: text => { said += text; return true; } }, null).finish(state.root || this.#cwd, { sweep: false });
+    this.#print(false, {}, [...said.split('\n').map(line => line.trim()).filter(Boolean), ...summary.fixResultLines(outcome)]);
+    return outcome.result === 'done' ? 0 : 2;
+  }
+
+  // The settings writer the post-merge finish and the summary's settings fix share (migrate asks its own
+  // question in the owner's terminal, so it builds its own).
+  #maintenance(stdout, firstSweep) {
+    return new GovernanceMaintenance({
+      stdout, confirm: async () => false, interactive: true, registryOptions: this.#registryOptions,
+      rulesetReader: this.#rulesetReader, rulesetCreator: this.#rulesetCreator, stateRulesetCreator: this.#stateRulesetCreator,
+      protectionReader: this.#protectionReader, protectionWriter: this.#protectionWriter,
+      securityReader: this.#securityReader, securityWriter: this.#securityWriter, securityFileWriter: this.#securityFileWriter,
+      firstSweep,
+    });
   }
 
   // The owner's yes to the programme file update: one pull request from the exact merged text.
@@ -745,7 +800,7 @@ class ToolkitGovernanceCli {
 
   // The answer applied: the guided setup's turn-on, off or later, or a change after setup.
   #applyView(view, state, task, chosen, found) {
-    if (view.kind === 'summary') return this.#applyChange(state, task, chosen, view.update);
+    if (view.kind === 'summary') return this.#applyChange(state, task, chosen, view.update, view.fix);
     return this.#applyBank(state, chosen, found);
   }
 
@@ -828,8 +883,13 @@ class ToolkitGovernanceCli {
 
   // A change the owner asked for after setup, in words (toolkit-governance-summary.cjs parseChange): at
   // most one pull request, which applies only after the owner merges it.
-  #applyChange(state, task, chosen, update = null) {
+  #applyChange(state, task, chosen, update = null, fix = null) {
     if (chosen.governance === 'off') return this.#prepareOff();
+    if (chosen.fix === 'no') {
+      this.#print(false, {}, ['GitHub settings: not changed. Nothing was written; Toolkit asks again next time.']);
+      return 0;
+    }
+    if (chosen.fix === 'yes') return this.#fixSettings(state, fix);
     if (chosen.update === 'no') {
       this.#print(false, {}, ['Programme file: not updated. Nothing was written; Toolkit asks again next time.']);
       return 0;

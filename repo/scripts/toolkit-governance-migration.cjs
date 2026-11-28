@@ -66,6 +66,39 @@ function slugFor(root) {
 }
 
 
+// What Toolkit's own ruleset fixes on the default branch (a defaultBranchProtection verdict): a
+// binding check that is not required, squash or rebase allowed, branches not required up to date, or
+// an unpinned check in Toolkit's own ruleset.
+function rulesetFixes(result) {
+  if (!result || result.status !== 'drift') return false;
+  const { P1, P2, P5, P6 } = result.checks;
+  const own = result.toolkit_ruleset ? `ruleset ${result.toolkit_ruleset.id}` : null;
+  return Boolean((P1 && P1.status === 'drift' && P1.missing.length > 0) || (P5 && P5.status === 'drift') || (P6 && P6.status === 'drift')
+    || (own && P2 && P2.status === 'drift' && P2.details.some(detail => detail.includes(own))));
+}
+
+// Whether Toolkit's ruleset is offered for a default-branch verdict, read only: { fixes, offered,
+// unproduced, silent }. A required check that no job produces would wait forever, and with no bypass
+// that blocks every merge, so it is not offered until the workflow is fixed; the same goes for a check
+// whose workflow does not report on every pull request. migrate, the post-merge finish and the
+// governance summary's offer all decide here.
+function protectionOffer(result) {
+  const fixes = rulesetFixes(result);
+  const checks = (result && result.checks) || {};
+  const unproduced = checks.P3 && Array.isArray(checks.P3.missing) ? checks.P3.missing : [];
+  const silent = checks.P4 && Array.isArray(checks.P4.never_reports) ? checks.P4.never_reports.filter(check => !unproduced.includes(check)) : [];
+  return { fixes, offered: fixes && unproduced.length === 0 && silent.length === 0, unproduced, silent };
+}
+
+// What a protection candidate needs changed: the settings that drift, then the workflow problems the
+// ruleset does not fix, which are shown by hand.
+function protectionNotes(result) {
+  return [
+    ...protection.SETTINGS_CHECKS.flatMap(id => (result.checks[id] && result.checks[id].status === 'drift' ? result.checks[id].details : [])),
+    ...['P3', 'P4'].flatMap(id => (result.checks[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details.map(detail => `workflow (${result.checks[id].status}, fix by hand): ${detail}`) : [])),
+  ];
+}
+
 // The historical migrate command retains its separately approved protection/security work.
 // It never reads, copies, repairs or writes a historical local governance answer. Keep the command
 // name for existing operators until the explicit migration route separates inventory and maintenance.
@@ -224,7 +257,7 @@ class GovernanceMaintenance {
     const changes = [];
     if (noForcePush.length) changes.push(`- Add the "${ruleset.RULESET_NAME}" ruleset (every branch, no bypass) to:`, ...noForcePush.map(row => `  - ${row.slug} (${row.root})`));
     if (keepState.length) changes.push(`- Add the "${ruleset.KEEP_STATE_RULESET_NAME}" ruleset (that branch only, no deletion, no bypass) to:`, ...keepState.map(row => `  - ${row.slug} (${row.root})`));
-    if (protectionCandidates.length) changes.push(`- Add or update default-branch protection (the "${protection.RULESET_NAME}" ruleset) on:`, ...protectionCandidates.flatMap(({ row, result }) => [`  - ${row.slug} (${row.root})`, ...GovernanceMaintenance.#protectionNotes(result).map(note => `    - ${note}`)]), ...GovernanceMaintenance.#protectionTerms());
+    if (protectionCandidates.length) changes.push(`- Add or update default-branch protection (the "${protection.RULESET_NAME}" ruleset) on:`, ...protectionCandidates.flatMap(({ row, result }) => [`  - ${row.slug} (${row.root})`, ...protectionNotes(result).map(note => `    - ${note}`)]), ...GovernanceMaintenance.#protectionTerms());
     this.#say(['These governed GitHub repositories would change on GitHub. No ruleset or default-branch protection is written until you answer once; the free dependency and security settings are turned on either way:', ...changes]);
     if (await this.#confirm(GovernanceMaintenance.#question({ noForcePush, keepState, protectionCandidates })) === true) return true;
     this.#say('No rulesets or default-branch protection were added.');
@@ -235,15 +268,6 @@ class GovernanceMaintenance {
     const names = [noForcePush.length && ruleset.RULESET_NAME, keepState.length && ruleset.KEEP_STATE_RULESET_NAME, protectionCandidates.length && protection.RULESET_NAME].filter(Boolean);
     const what = [noForcePush.length || keepState.length ? 'the rulesets' : null, protectionCandidates.length ? 'default-branch protection' : null].filter(Boolean).join(' and ');
     return `add or update ${what} listed above to these repositories on GitHub: ${names.map(name => `"${name}"`).join(', ')}`;
-  }
-
-  // What a protection candidate needs changed: the settings that drift, then the workflow problems the
-  // ruleset does not fix, which are shown by hand.
-  static #protectionNotes(result) {
-    return [
-      ...protection.SETTINGS_CHECKS.flatMap(id => (result.checks[id] && result.checks[id].status === 'drift' ? result.checks[id].details : [])),
-      ...['P3', 'P4'].flatMap(id => (result.checks[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details.map(detail => `workflow (${result.checks[id].status}, fix by hand): ${detail}`) : [])),
-    ];
   }
 
   static #protectionTerms() {
@@ -328,16 +352,6 @@ class GovernanceMaintenance {
     return { requiredChecks, result: protection.defaultBranchProtection(row.root, { requiredChecks, commit: row.state.merged?.commit, ...(this.#protectionReader ? { reader: this.#protectionReader } : {}) }) };
   }
 
-  // What Toolkit's own ruleset fixes: a binding check that is not required, squash or rebase
-  // allowed, or an unpinned check in Toolkit's own ruleset.
-  static #rulesetFixes(result) {
-    if (result.status !== 'drift') return false;
-    const { P1, P2, P5, P6 } = result.checks;
-    const own = result.toolkit_ruleset ? `ruleset ${result.toolkit_ruleset.id}` : null;
-    return (P1 && P1.status === 'drift' && P1.missing.length > 0) || (P5 && P5.status === 'drift') || (P6 && P6.status === 'drift')
-      || Boolean(own && P2 && P2.status === 'drift' && P2.details.some(detail => detail.includes(own)));
-  }
-
   #byHand(row, result) {
     const notes = [];
     for (const id of ['P1', 'P2', 'P3', 'P4', 'P5', 'P6']) {
@@ -360,15 +374,11 @@ class GovernanceMaintenance {
         const unread = protection.SETTINGS_CHECKS.map(id => result.checks[id]).find(check => check && check.status === 'unverified');
         if (unread) this.#say(`${row.root}: default-branch protection could not be checked on GitHub (${unread.details.join('; ')}).`);
       }
-      // A required check that no job produces would wait forever, and with no bypass that blocks
-      // every merge, so such a repository is not offered the ruleset until its workflow is fixed.
-      // The same goes for a check whose workflow does not report on every pull request.
-      const unproduced = result.checks.P3 && Array.isArray(result.checks.P3.missing) ? result.checks.P3.missing : [];
-      const silent = result.checks.P4 && Array.isArray(result.checks.P4.never_reports) ? result.checks.P4.never_reports.filter(check => !unproduced.includes(check)) : [];
-      if (GovernanceMaintenance.#rulesetFixes(result) && unproduced.length === 0 && silent.length === 0) candidates.push({ row, ...read });
+      const { fixes, offered, unproduced, silent } = protectionOffer(result);
+      if (offered) candidates.push({ row, ...read });
       else {
-        if (GovernanceMaintenance.#rulesetFixes(result) && unproduced.length) this.#say(`${row.slug}: Toolkit ruleset not offered: no workflow job produces ${unproduced.map(check => `"${check}"`).join(', ')}, so requiring it would block every merge. Add the job, then run migrate again.`);
-        if (GovernanceMaintenance.#rulesetFixes(result) && silent.length) this.#say(`${row.slug}: Toolkit ruleset not offered: ${silent.map(check => `"${check}"`).join(', ')} does not report on every pull request to the default branch, so requiring it would block those merges. Fix its workflow trigger, then run migrate again.`);
+        if (fixes && unproduced.length) this.#say(`${row.slug}: Toolkit ruleset not offered: no workflow job produces ${unproduced.map(check => `"${check}"`).join(', ')}, so requiring it would block every merge. Add the job, then run migrate again.`);
+        if (fixes && silent.length) this.#say(`${row.slug}: Toolkit ruleset not offered: ${silent.map(check => `"${check}"`).join(', ')} does not report on every pull request to the default branch, so requiring it would block those merges. Fix its workflow trigger, then run migrate again.`);
         this.#byHand(row, result);
       }
     }
@@ -388,7 +398,7 @@ class GovernanceMaintenance {
         continue;
       }
       const after = this.#protectionFor(row).result;
-      const fixed = !GovernanceMaintenance.#rulesetFixes(after) && ['P1', 'P5'].every(id => after.checks[id] && after.checks[id].status !== 'unverified');
+      const fixed = !rulesetFixes(after) && ['P1', 'P5'].every(id => after.checks[id] && after.checks[id].status !== 'unverified');
       this.#say(`- ${row.slug}: ruleset ${existing ? 'updated' : 'added'}${fixed ? ' and read back' : ', but reading it back still shows drift'}.`);
       if (after.status === 'drift') this.#byHand(row, after);
       results.push({ repository_id: row.state.repository_id, result: fixed ? (existing ? 'updated' : 'added') : 'failed' });
@@ -402,7 +412,7 @@ class GovernanceMaintenance {
     if (candidates.length === 0) return [];
     this.#say(['These governed GitHub repositories need default-branch protection:', ...candidates.flatMap(({ row, result }) => [
       `- ${row.slug} (${row.root})`,
-      ...GovernanceMaintenance.#protectionNotes(result).map(note => `  - ${note}`),
+      ...protectionNotes(result).map(note => `  - ${note}`),
     ])]);
     this.#say(GovernanceMaintenance.#protectionTerms());
     return this.#applyProtection(candidates);
@@ -441,4 +451,4 @@ class GovernanceMaintenance {
 
 
 
-module.exports = Object.freeze({ GovernanceMaintenance, appendRunRecord, SettingsOperationHistory, RECORD_BASENAME });
+module.exports = Object.freeze({ GovernanceMaintenance, appendRunRecord, protectionNotes, protectionOffer, SettingsOperationHistory, RECORD_BASENAME });
