@@ -528,6 +528,23 @@ class GitHubProposalTransport {
     const found = prs.find(pr => String(pr.repo).toLowerCase() === repository.toLowerCase() && UPDATE_BRANCH.test(String(pr.ref)));
     return found ? { number: found.number, url: found.url } : null;
   }
+  // This repository's own open Toolkit refresh pull request (toolkit-cloud-workflows-refresh.cjs) and
+  // the checks of Toolkit's own (OWN_CHECKS) its head defines: { number, url, checks }, or null when
+  // none is open. Read only.
+  openRefresh(repository) {
+    this.#auth();
+    const { BRANCH } = require('./toolkit-cloud-workflows-refresh.cjs');
+    const owner = repository.split('/')[0];
+    const prs = this.#api(`repos/${repository}/pulls?state=open&head=${encodeURIComponent(`${owner}:${BRANCH}`)}&per_page=10`);
+    const pr = Array.isArray(prs) ? prs.find(item => item?.head?.ref === BRANCH && String(item.head.repo?.full_name).toLowerCase() === repository.toLowerCase() && SHA.test(String(item.head.sha))) : null;
+    if (!pr) return null;
+    const files = {};
+    for (const entry of OWN_CHECKS) {
+      const file = this.#optional(`repos/${repository}/contents/${entry.file}?ref=${pr.head.sha}`);
+      if (file && file.type === 'file' && file.encoding === 'base64' && typeof file.content === 'string') files[entry.file] = Buffer.from(file.content, 'base64').toString('utf8');
+    }
+    return { number: pr.number, url: pr.html_url, checks: withOwnChecks([], files) };
+  }
   // One pull request that brings an older governed programme file up to date (`update`, from
   // toolkit-governance-summary.cjs programmeUpdate): min_toolkit and required_checks only, from the
   // exact merged text. Like a switch it carries no governance proposal marker and merges only by the owner.

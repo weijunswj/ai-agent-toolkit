@@ -103,10 +103,10 @@ function protectionNotes(result) {
 // It never reads, copies, repairs or writes a historical local governance answer. Keep the command
 // name for existing operators until the explicit migration route separates inventory and maintenance.
 class GovernanceMaintenance {
-  #stdout; #confirm; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #firstSweep; #now;
+  #stdout; #confirm; #interactive; #registryOptions; #rulesetReader; #rulesetCreator; #stateRulesetCreator; #protectionReader; #protectionWriter; #securityReader; #securityWriter; #securityFileWriter; #ownRulesetWriter; #firstSweep; #now;
 
   // `firstSweep` runs the first-install sweep (toolkit-governance-first-sweep.cjs), or null where it cannot run here.
-  constructor({ stdout, confirm, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, firstSweep = null, now = () => new Date() }) {
+  constructor({ stdout, confirm, interactive, registryOptions = {}, rulesetReader = null, rulesetCreator = null, stateRulesetCreator = null, protectionReader = null, protectionWriter = null, securityReader = null, securityWriter = null, securityFileWriter = null, ownRulesetWriter = null, firstSweep = null, now = () => new Date() }) {
     this.#stdout = stdout;
     this.#confirm = confirm;
     this.#interactive = interactive === true;
@@ -119,6 +119,7 @@ class GovernanceMaintenance {
     this.#securityReader = securityReader;
     this.#securityWriter = securityWriter || security.ghSecurityWriter;
     this.#securityFileWriter = securityFileWriter || security.writeSecurityFiles;
+    this.#ownRulesetWriter = ownRulesetWriter || protection.ghOwnRulesetWriter;
     this.#firstSweep = firstSweep;
     this.#now = now;
   }
@@ -150,16 +151,22 @@ class GovernanceMaintenance {
   // unavailable (GitHub cannot enforce it on this plan), held (an owner step Toolkit cannot take
   // itself, named in the result) or retry; only retry keeps the finish pending.
   // `sweep` is whether the turn-on added the personal data guard, so its first-install sweep runs too.
+  // `ownRulesets` is the repository's own ruleset changes the owner said yes to, exactly as shown
+  // (toolkit-governance-summary.cjs settingsRows, owner decision INT-TK421-1398); a turn-on's finish
+  // passes none, so it never touches a repository's own ruleset.
   // { result: 'not-ready' } or { result: 'done' | 'failed', reason, on, unavailable, held, reports, files }.
-  async finish(root, { sweep = false } = {}) {
+  async finish(root, { sweep = false, ownRulesets = null } = {}) {
     const state = governance.governanceState(root, this.#registryOptions);
     const slug = slugFor(root);
     if (state.state !== 'ENABLED' || state.programme_records_bind !== true || !slug) return { result: 'not-ready' };
     const rows = [{ root: path.resolve(root), state, slug }];
     const rulesets = [...this.#finishRulesets(rows), ...this.#finishStateRulesets(rows)];
+    // The owner's own ruleset changes go first, so the protection plan, its by-hand notes and Toolkit's
+    // read-back all see them: nothing the yes changes is ever listed to change by hand.
+    const owned = Array.isArray(ownRulesets) ? this.#applyOwnRulesets(rows[0], ownRulesets) : [];
     const protections = this.#finishProtection(rows);
     const securities = await this.#applySecurity(rows);
-    if (rulesets.length || protections.length || securities.length) this.#writeRecord([], rulesets, protections, securities);
+    if (rulesets.length || owned.length || protections.length || securities.length) this.#writeRecord([], [...rulesets, ...owned], protections, securities);
     const on = [], unavailable = [], held = [], retry = [], reports = [];
     const reader = this.#rulesetReader ? { reader: this.#rulesetReader } : {};
     // GitHub's own answer to a refused write goes into the reason, so a refusal that repeats is not
@@ -168,7 +175,9 @@ class GovernanceMaintenance {
     const answered = entries => [...new Set(entries.filter(entry => entry.result === 'failed' && entry.reason).map(entry => entry.reason))];
     const because = reasons => (reasons.length ? ` (GitHub answered: ${reasons.join(', ')})` : '');
     const forbidden = reasons => reasons.length > 0 && reasons.every(reason => reason === 'forbidden');
-    const admin = `GitHub refused the write for the account Toolkit used (forbidden): run \`${governance.governanceCommand('migrate')}\` in your own terminal from an account with admin rights on the repository.`;
+    // What only the owner can change is said as GitHub settings steps, never a command to run: the
+    // agent runs Toolkit's own check again when the owner says refresh governance.
+    const admin = `GitHub refused the write for the account this computer's GitHub sign-in uses (forbidden): that account needs admin rights on ${slug}. On GitHub, an admin of the repository gives it the Admin role under Settings, then Collaborators and teams (Collaborators on a personal account); then say refresh governance and answer yes again.`;
     const rulesetEnd = (name, read, entries) => {
       if (read.status === 'present') on.push(name);
       else if (read.status === 'not-enforceable') unavailable.push(name);
@@ -178,6 +187,15 @@ class GovernanceMaintenance {
     const noForcePush = ruleset.noForcePushRuleset(rows[0].root, reader);
     rulesetEnd('the no-force-push ruleset', noForcePush, rulesets.filter(entry => !entry.ruleset));
     if (governance.mergedBinding(rows[0].root, this.#registryOptions)?.state) rulesetEnd('the ruleset that keeps the programme state branch', ruleset.keepStateRuleset(rows[0].root, reader), rulesets.filter(entry => entry.ruleset === 'keep-programme-state'));
+    // The repository's own rulesets: changed and read back, held when the account may not write them
+    // or the ruleset changed on GitHub after it was shown (the yes covered only what it saw), else retried.
+    for (const entry of owned) {
+      const name = `the repository's own ruleset "${entry.name}"`;
+      if (entry.result === 'changed') on.push(name);
+      else if (entry.reason === 'forbidden') held.push({ name, step: admin });
+      else if (entry.reason === 'ruleset-changed') held.push({ name, step: 'it changed on GitHub after it was shown, so nothing was written to it. Say refresh governance to see it as it is now.' });
+      else retry.push(`${name} did not read back after the write${because([entry.reason].filter(Boolean))}`);
+    }
     // A write that did not read back is retried; only what is left after a clean write is held.
     if (forbidden(answered(protections))) held.push({ name: 'default-branch protection', step: admin });
     else if (protections.some(entry => ['failed', 'unverified'].includes(entry.result))) retry.push(`default-branch protection did not read back after the write${because(answered(protections))}`);
@@ -238,15 +256,15 @@ class GovernanceMaintenance {
     const read = this.#protectionFor(row);
     if (!read) { retry.push('the binding\'s required checks could not be read'); return; }
     const { result } = read;
-    const then = `then run \`${governance.governanceCommand('migrate')}\` in your own terminal`;
     if (result.status === 'conformant') on.push(name);
     else if (result.status === 'not-enforceable' || (rulesetsUnavailable && result.reason === 'binding-has-no-required-checks')) unavailable.push(name);
     else if (result.reason === 'binding-has-no-required-checks') {
-      held.push({ name, step: `the programme file lists no required checks yet, so there is nothing for it to require. Say toolkit governance: its summary offers one pull request that adds the checks the default branch already requires and Toolkit's own. Merge it, ${then} to add the protection.` });
+      held.push({ name, step: 'the programme file lists no required checks yet, so there is nothing for it to require. Say refresh governance: it offers one pull request that adds the checks the default branch already requires and Toolkit\'s own. Once that is merged, refresh governance offers to add the protection.' });
     } else if (protection.SETTINGS_CHECKS.some(id => result.checks[id]?.status === 'unverified')) retry.push(`${name} could not be read back`);
     else {
       const notes = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'].flatMap(id => (result.checks[id] && ['drift', 'unverified'].includes(result.checks[id].status) ? result.checks[id].details : []));
-      held.push({ name, step: `change by hand: ${notes.join('; ') || 'reading it back still shows drift'}; ${then} to check it again.` });
+      const where = protection.SETTINGS_CHECKS.some(id => result.checks[id]?.status === 'drift') ? ` ${require('./toolkit-governance-summary.cjs').WHERE.protection}.` : '';
+      held.push({ name, step: `change by hand: ${notes.join('; ') || 'reading it back still shows drift'}.${where} Then say refresh governance, and your agent checks it again.` });
     }
   }
 
@@ -358,7 +376,7 @@ class GovernanceMaintenance {
       const check = result.checks[id];
       if (check && check.status === 'drift') notes.push(...check.details);
     }
-    if (notes.length) this.#say([`${row.slug}: change by hand (Toolkit edits only its own ruleset):`, ...notes.map(note => `  - ${note}`)]);
+    if (notes.length) this.#say([`${row.slug}: change by hand:`, ...notes.map(note => `  - ${note}`)]);
   }
 
   // Reads only: the repositories whose default branch the Toolkit ruleset would fix, and notes on the
@@ -377,8 +395,8 @@ class GovernanceMaintenance {
       const { fixes, offered, unproduced, silent } = protectionOffer(result);
       if (offered) candidates.push({ row, ...read });
       else {
-        if (fixes && unproduced.length) this.#say(`${row.slug}: Toolkit ruleset not offered: no workflow job produces ${unproduced.map(check => `"${check}"`).join(', ')}, so requiring it would block every merge. Add the job, then run migrate again.`);
-        if (fixes && silent.length) this.#say(`${row.slug}: Toolkit ruleset not offered: ${silent.map(check => `"${check}"`).join(', ')} does not report on every pull request to the default branch, so requiring it would block those merges. Fix its workflow trigger, then run migrate again.`);
+        if (fixes && unproduced.length) this.#say(`${row.slug}: Toolkit ruleset not offered: no workflow job produces ${unproduced.map(check => `"${check}"`).join(', ')}, so requiring it would block every merge. Add the job, then say refresh governance to check again.`);
+        if (fixes && silent.length) this.#say(`${row.slug}: Toolkit ruleset not offered: ${silent.map(check => `"${check}"`).join(', ')} does not report on every pull request to the default branch, so requiring it would block those merges. Fix its workflow trigger, then say refresh governance to check again.`);
         this.#byHand(row, result);
       }
     }
@@ -426,6 +444,20 @@ class GovernanceMaintenance {
     });
   }
 
+  // Writes each own ruleset change the owner said yes to, through the writer that refuses a ruleset
+  // that changed since it was shown and reads each change back. Nothing else is written to it.
+  #applyOwnRulesets(row, entries) {
+    const results = [];
+    for (const entry of entries) {
+      let written;
+      try { written = this.#ownRulesetWriter(row.slug, entry); } catch { written = { ok: false, reason: 'writer-failed' }; }
+      const ok = Boolean(written && written.ok);
+      this.#say(`- ${row.slug}: the repository's own ruleset "${entry.name}" ${ok ? 'changed and read back' : `not changed (${written && written.reason ? written.reason : 'unknown'})`}.`);
+      results.push({ repository_id: row.state.repository_id, ruleset: `own:${entry.id}`, name: entry.name, result: ok ? 'changed' : 'failed', ...(ok ? {} : { reason: written && written.reason ? written.reason : 'unknown' }) });
+    }
+    return results;
+  }
+
   // The free dependency and security settings are on by default for every governed repository, so
   // they are turned on without another question (the owner's yes to governance covers them); nothing
   // that needs billing is turned on. Nothing here asks.
@@ -451,4 +483,4 @@ class GovernanceMaintenance {
 
 
 
-module.exports = Object.freeze({ GovernanceMaintenance, appendRunRecord, protectionNotes, protectionOffer, SettingsOperationHistory, RECORD_BASENAME });
+module.exports = Object.freeze({ GovernanceMaintenance, appendRunRecord, protectionOffer, SettingsOperationHistory, RECORD_BASENAME });

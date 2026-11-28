@@ -490,8 +490,9 @@ test('P-19: the shared hostile inputs are unverified, except the shapes the read
   const acceptsShape = shape => shape.place === 'name' ? protection.producerVerdict([shape.github], [{ file: 'ci.yml', workflow: protection.readWorkflow(pair(shape)) }], 'main').P3.status === 'ok' : accepts(place(shape));
   hostile.expectDefaultDeny(assert, (text, shape) => acceptsShape(shape), hostile.cases(['line-breaks', 'continued-lines', 'quoting', 'yaml-structure', 'indents', 'invisible', 'check-names'], ['yaml']), {
     // Decoded exactly as YAML decodes them: a CRLF line end, a quoted key with no escapes, a
-    // consistent odd indent and one leading byte order mark.
-    allow: ['crlf-line-end', 'quoted-on-key', 'odd-indent', 'bom-at-start'],
+    // consistent odd indent and one leading byte order mark. A `>-` or `|-` block under a step's
+    // `id`, which the reader never reads, is skipped as the text YAML reads it as.
+    allow: ['crlf-line-end', 'quoted-on-key', 'odd-indent', 'bom-at-start', 'block-scalar->-', 'block-scalar-|-'],
   });
   // The base workflow with every line-break shape, a byte order mark and tab indents.
   const forms = Object.fromEntries(hostile.variants(AGGREGATE).map(item => [item.id, accepts(item.text)]));
@@ -761,4 +762,171 @@ test('P-17: the workflows are read at the merged default-branch commit, not the 
   protection.defaultBranchProtection(root, { requiredChecks: ['plain-text'], reader: own, commit: merged, runGit: (args, options) => { calls.push([args, options.cwd]); return { status: 0, stdout: Buffer.from('') }; } });
   assert.deepEqual(calls, [[['-c', 'core.quotePath=false', 'ls-tree', '-l', '-z', merged, '--', '.github/workflows/'], root]]);
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'scripts', 'toolkit-governance-protection.cjs'), 'utf8'), /require\('\.\/toolkit-governance-binding\.cjs'\)\.defaultRunGit/, 'the default runner is the binding reader\'s');
+});
+
+// A real CI file (SQAG, 28 November 2026) gives a service's `options` a folded block scalar: the
+// whole file used to be unverified, so its required check had no producer and Toolkit's ruleset was
+// never offered. Block text under a key the reader never reads is skipped; where it reads, it is not.
+const SERVICE_OPTIONS = [
+  'name: CI',
+  'on:',
+  '  pull_request:',
+  '  push:',
+  '    branches:',
+  '      - main',
+  'permissions:',
+  '  contents: read',
+  'jobs:',
+  '  secret-scan:',
+  '    name: Secret scan',
+  '    runs-on: ubuntu-24.04',
+  '    steps:',
+  '      - name: Scan',
+  '        run: |',
+  '          python scripts/scan.py',
+  '  quote-basis-click-budget:',
+  '    name: Quote Basis click budget',
+  '    runs-on: ubuntu-24.04',
+  '    needs:',
+  '      - secret-scan',
+  '    timeout-minutes: 20',
+  '    env:',
+  '      CI: "true"',
+  '    steps:',
+  '      - name: Check out repository',
+  '        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1',
+  '        with:',
+  '          ref: ${{ github.event.pull_request.head.sha || github.sha }}',
+  '      - name: Script',
+  '        uses: actions/github-script@v7',
+  '        with:',
+  '          script: |',
+  '            name: not a key',
+  '      - name: Budget',
+  '        run: |',
+  '          npm run test:budget',
+  '  validate:',
+  '    name: Validate app',
+  '    runs-on: ubuntu-24.04',
+  '    services:',
+  '      postgres:',
+  '        image: postgres:17',
+  '        env:',
+  '          POSTGRES_DB: postgres',
+  '        ports:',
+  '          - 5432:5432',
+  '        options: >-',
+  '          --health-cmd "pg_isready -U cloud_admin -d postgres"',
+  '          --health-interval 10s',
+  '    steps:',
+  '      - name: Test',
+  '        run: npm test',
+  '',
+].join('\n');
+
+test('P-20: a block scalar under a key the reader never reads is skipped, so the producer is found and the ruleset offered', (t) => {
+  const { protectionOffer } = require(path.join(scripts, 'toolkit-governance-migration.cjs'));
+  const workflow = protection.readWorkflow(SERVICE_OPTIONS);
+  assert.deepEqual(workflow.problems, []);
+  assert.deepEqual(workflow.jobs.map(job => job.name), ['Secret scan', 'Quote Basis click budget', 'Validate app']);
+  const root = repo(t, { 'ci.yml': SERVICE_OPTIONS });
+  const requiredChecks = ['Quote Basis click budget'];
+  // Squash and rebase allowed: Toolkit's ruleset fixes that, and is offered now the producer is found.
+  const reader = github({ checks: [{ context: 'Quote Basis click budget', integration_id: 15368 }], methods: ['merge', 'squash', 'rebase'] });
+  const result = protection.defaultBranchProtection(root, { requiredChecks, reader, commit: headOf(root) });
+  assert.equal(result.checks.P3.status, 'ok', result.checks.P3.details.join('\n'));
+  assert.deepEqual(result.checks.P3.missing, []);
+  assert.deepEqual(result.checks.P4.never_reports, []);
+  const offer = protectionOffer(result);
+  assert.equal(offer.offered, true, JSON.stringify(offer));
+  // Where the reader reads a value, a block scalar is still outside the subset: never read as structure.
+  for (const [name, text] of Object.entries({
+    'job written as a block': ['on: [pull_request]', 'jobs:', '  fake: |', '    name: Quote Basis click budget', ''].join('\n'),
+    'event written as a block': ['on:', '  pull_request: |', '    paths: [docs]', 'jobs:', '  a:', '    runs-on: x', ''].join('\n'),
+    'env value as a block': ['on: [pull_request]', 'env:', '  NODE_OPTIONS: >-', '    --require x', 'jobs:', '  a:', '    runs-on: x', ''].join('\n'),
+    'matrix as a block': ['on: [pull_request]', 'jobs:', '  a:', '    strategy:', '      matrix: |', '        x: [1]', '    runs-on: x', ''].join('\n'),
+    'step env value as a block': ['on: [pull_request]', 'jobs:', '  a:', '    runs-on: x', '    steps:', '      - env:', '          TEST_LEGS: |', '            x', '        run: x', ''].join('\n'),
+    'needs as a block': ['on: [pull_request]', 'jobs:', '  a:', '    needs: >-', '      b', '    runs-on: x', ''].join('\n'),
+  })) assert.match(protection.readWorkflow(text).problems.join('\n'), /a block scalar where this check reads its value/, name);
+});
+
+// Owner decision INT-TK421-1398: Toolkit may change the repository's own rulesets to what governance
+// needs after the owner's yes to the exact change. SQAG's own ruleset allowed merge, squash and rebase
+// and did not require up-to-date branches (28 November 2026).
+test('P-21: the repository\'s own ruleset changes are exact, never touch Toolkit\'s or an organization\'s, and the writer refuses a ruleset that changed', () => {
+  const read = {
+    ok: true, default_branch: 'main', repository: {}, classic: null, toolkit_ruleset: { id: 99 },
+    rulesets: [{ id: 7, name: 'protect-main', source_type: 'Repository', branches: { include: ['~DEFAULT_BRANCH', 'refs/heads/release/*'], exclude: ['refs/heads/release/old'] } }, { id: 8, name: 'org rules', source_type: 'Organization' }, { id: 99, name: protection.RULESET_NAME, source_type: 'Repository' }],
+    rules: [
+      { type: 'pull_request', ruleset_id: 7, parameters: { allowed_merge_methods: ['merge', 'squash', 'rebase'] } },
+      { type: 'required_status_checks', ruleset_id: 7, parameters: { strict_required_status_checks_policy: false, required_status_checks: [{ context: 'validate' }, { context: 'other' }] } },
+      { type: 'pull_request', ruleset_id: 8, parameters: { allowed_merge_methods: ['squash'] } },
+      { type: 'pull_request', ruleset_id: 99, parameters: { allowed_merge_methods: ['merge'] } },
+    ],
+  };
+  const changes = protection.ownRulesetChanges(read, ['validate'], { pin: true });
+  const branches = { include: ['~DEFAULT_BRANCH', 'refs/heads/release/*'], exclude: ['refs/heads/release/old'] };
+  assert.deepEqual(changes, [{ id: 7, name: 'protect-main', branches, changes: [
+    { setting: 'allowed_merge_methods', before: ['merge', 'squash', 'rebase'], after: ['merge'] },
+    { setting: 'strict_required_status_checks_policy', before: false, after: true },
+    { setting: 'pinned_checks', before: ['validate'], after: [{ context: 'validate', integration_id: 15368 }] },
+  ] }], 'only the repository ruleset; a check outside the binding is never pinned or removed');
+  assert.deepEqual(protection.ownRulesetChanges(read, ['validate']).flatMap(entry => entry.changes.map(change => change.setting)), ['allowed_merge_methods', 'strict_required_status_checks_policy'], 'no pinning unless every check has its one producer');
+  // The change names the branches the ruleset covers (G2 round 1, L2); one whose branches could not be read is not offered.
+  assert.deepEqual(protection.ownRulesetChanges({ ...read, rulesets: read.rulesets.map(entry => (entry.id === 7 ? { ...entry, branches: null } : entry)) }, ['validate']), []);
+  assert.match(protection.ownRulesetWords(changes[0]), /^changes the repository's own ruleset "protect-main" \(it covers the default branch and release\/\*, except release\/old\): merge methods from merge, squash, rebase to merge commits only; branches up to date before merging from not required to required; "validate" from any source to pinned to GitHub Actions$/);
+  // The writer: reads the ruleset, sends only its rules with the change, reads it back.
+  const stored = { id: 7, name: 'protect-main', target: 'branch', source_type: 'Repository', enforcement: 'active', bypass_actors: [{ actor_id: 5 }], conditions: { ref_name: { ...branches } }, rules: read.rules.filter(rule => rule.ruleset_id === 7).map(({ type, parameters }) => ({ type, parameters })) };
+  const calls = [];
+  const spawn = (command, args, options) => {
+    calls.push(args.join(' '));
+    if (args.includes('PUT')) { const body = JSON.parse(options.input); assert.deepEqual(Object.keys(body), ['rules'], 'only the rules are sent'); stored.rules = body.rules; return { status: 0, stdout: JSON.stringify(stored) }; }
+    return { status: 0, stdout: JSON.stringify(stored) };
+  };
+  assert.deepEqual(protection.ghOwnRulesetWriter('o/r', changes[0], { spawn }), { ok: true });
+  assert.deepEqual(calls, ['api repos/o/r/rulesets/7', 'api -X PUT repos/o/r/rulesets/7 --input -', 'api repos/o/r/rulesets/7']);
+  assert.deepEqual(stored.rules[0].parameters.allowed_merge_methods, ['merge']);
+  assert.equal(stored.rules[1].parameters.strict_required_status_checks_policy, true);
+  assert.deepEqual(stored.rules[1].parameters.required_status_checks, [{ context: 'validate', integration_id: 15368 }, { context: 'other' }]);
+  assert.deepEqual(stored.bypass_actors, [{ actor_id: 5 }], 'its bypass list stays as it is');
+  // Changed since it was shown: nothing is written.
+  calls.length = 0;
+  stored.rules[0].parameters.allowed_merge_methods = ['merge', 'rebase'];
+  assert.deepEqual(protection.ghOwnRulesetWriter('o/r', changes[0], { spawn }), { ok: false, reason: 'ruleset-changed' });
+  assert.deepEqual(calls, ['api repos/o/r/rulesets/7'], 'no write');
+  // Not the repository ruleset shown (renamed, or an organization ruleset): nothing is written.
+  stored.rules[0].parameters.allowed_merge_methods = ['merge', 'squash', 'rebase'];
+  stored.name = 'renamed';
+  assert.deepEqual(protection.ghOwnRulesetWriter('o/r', changes[0], { spawn }), { ok: false, reason: 'ruleset-changed' });
+  assert.equal(protection.applyOwnChanges([{ type: 'pull_request', parameters: { allowed_merge_methods: ['merge'] } }], changes[0].changes.slice(0, 1)), null, 'a value that differs from before is refused');
+  // Branches that differ from the ones shown: nothing is written (G2 round 1, L2).
+  stored.name = 'protect-main';
+  stored.conditions = { ref_name: { include: ['~ALL'], exclude: [] } };
+  calls.length = 0;
+  assert.deepEqual(protection.ghOwnRulesetWriter('o/r', changes[0], { spawn }), { ok: false, reason: 'ruleset-changed' });
+  assert.deepEqual(calls, ['api repos/o/r/rulesets/7'], 'no write');
+  // The read-back also proves its name, target, enforcement, branches and bypass list stayed (G2 round 1, L1).
+  stored.conditions = { ref_name: { ...branches } };
+  stored.rules = read.rules.filter(rule => rule.ruleset_id === 7).map(({ type, parameters }) => ({ type, parameters: JSON.parse(JSON.stringify(parameters)) }));
+  const moved = (command, args, options) => {
+    const answer = spawn(command, args, options);
+    if (args.includes('PUT')) stored.bypass_actors = [];
+    return answer;
+  };
+  assert.deepEqual(protection.ghOwnRulesetWriter('o/r', changes[0], { spawn: moved }), { ok: false, reason: 'not-read-back' });
+  // The reader reads the branches of each repository ruleset with rules on the default branch, with GETs only.
+  const readCalls = [];
+  const answers = {
+    'repos/o/r': { default_branch: 'main' },
+    'repos/o/r/rules/branches/main?per_page=100': read.rules,
+    'repos/o/r/rulesets?targets=branch&per_page=100': [{ id: 7, name: 'protect-main', source_type: 'Repository' }, { id: 8, name: 'org rules', source_type: 'Organization' }, { id: 9, name: 'elsewhere', source_type: 'Repository' }, { id: 99, name: protection.RULESET_NAME, source_type: 'Repository' }],
+    'repos/o/r/rulesets/7': { ...stored, conditions: { ref_name: { ...branches } } },
+  };
+  const reader = protection.ghProtectionReader('o/r', { spawn: (command, args) => {
+    readCalls.push(args);
+    if (args[1].endsWith('/protection')) return { status: 1, stdout: '', stderr: 'gh: Branch not protected (HTTP 404)' };
+    return args[1] in answers ? { status: 0, stdout: JSON.stringify(answers[args[1]]) } : { status: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' };
+  } });
+  assert.deepEqual(reader.rulesets.map(entry => [entry.id, entry.branches]), [[7, branches], [8, undefined], [9, undefined], [99, undefined]], 'only the repository ruleset with rules on the branch, never Toolkit\'s or an organization\'s');
+  assert.ok(readCalls.every(args => args[0] === 'api' && !args.includes('-X')), 'only GET requests');
 });

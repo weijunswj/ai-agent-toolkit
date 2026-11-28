@@ -152,7 +152,9 @@ test('a fresh repository with no required checks finishes: protection waits for 
   assert.doesNotMatch(entry.line, /tried again/);
   assert.match(entry.line, /finished here, apart from what waits for you below\. On and read back: the no-force-push ruleset and the free dependency and security settings\./);
   // Never a hand edit of the programme file: the summary's one update pull request adds the checks.
-  assert.match(entry.line, /Waiting for you, default-branch protection: the programme file lists no required checks yet, so there is nothing for it to require\. Say toolkit governance: its summary offers one pull request that adds the checks the default branch already requires and Toolkit's own\. Merge it, then run `node ".*toolkit-governance\.cjs" migrate` in your own terminal to add the protection\./);
+  // Never a command for the owner's own terminal: the agent runs refresh governance (SQAG, 28 Nov).
+  assert.match(entry.line, /Waiting for you, default-branch protection: the programme file lists no required checks yet, so there is nothing for it to require\. Say refresh governance: it offers one pull request that adds the checks the default branch already requires and Toolkit's own\. Once that is merged, refresh governance offers to add the protection\./);
+  assert.doesNotMatch(entry.line, /migrate|own terminal/);
   assert.doesNotMatch(entry.line, /required_checks in|by hand/);
   const started = [];
   assert.match(finishing.sessionLines(state, ctx.registryOptions, { startFinish: () => started.push(1) }).join(' '), /Waiting for you, default-branch protection/);
@@ -170,7 +172,9 @@ test('protection held for a by-hand fix ends the finish with that step in the re
   assert.deepEqual(wrote, []);
   const entry = finishing.entryFor(ctx.registryOptions, state.repository_id);
   assert.equal(entry.status, 'done');
-  assert.match(entry.line, /Waiting for you, default-branch protection: change by hand: .*validate.*then run `node ".*toolkit-governance\.cjs" migrate` in your own terminal to check it again\./);
+  // Where on GitHub to change it, then the agent checks again: never a command for the owner.
+  assert.match(entry.line, /Waiting for you, default-branch protection: change by hand: .*validate.*\. Where on GitHub: the repository's Settings, then Rules, then Rulesets[^.]*\. Then say refresh governance, and your agent checks it again\./);
+  assert.doesNotMatch(entry.line, /migrate|own terminal/);
 });
 
 test('on a private repository on GitHub Free, the result never says protection or rulesets are on, and names what GitHub cannot enforce', async t => {
@@ -328,8 +332,10 @@ test('a write GitHub refuses for this account (forbidden) is held with the admin
   assert.equal(await run.run(), 0, run.out.join(''));
   const entry = finishing.entryFor(ctx.registryOptions, state.repository_id);
   assert.equal(entry.status, 'done');
-  assert.match(entry.line, /Waiting for you, the no-force-push ruleset: GitHub refused the write for the account Toolkit used \(forbidden\): run `node ".*toolkit-governance\.cjs" migrate` in your own terminal from an account with admin rights on the repository\./);
-  assert.match(entry.line, /Waiting for you, default-branch protection: GitHub refused the write for the account Toolkit used \(forbidden\)/);
+  // GitHub settings steps for the admin role, then the agent asks again: never a command for the owner.
+  assert.match(entry.line, /Waiting for you, the no-force-push ruleset: GitHub refused the write for the account this computer's GitHub sign-in uses \(forbidden\): that account needs admin rights on [^ ]+\. On GitHub, an admin of the repository gives it the Admin role under Settings, then Collaborators and teams \(Collaborators on a personal account\); then say refresh governance and answer yes again\./);
+  assert.match(entry.line, /Waiting for you, default-branch protection: GitHub refused the write for the account this computer's GitHub sign-in uses \(forbidden\)/);
+  assert.doesNotMatch(entry.line, /migrate|own terminal/);
 });
 
 test('a default branch that merges heads without its latest commit gets the Toolkit ruleset, which requires them up to date', async t => {
@@ -367,4 +373,17 @@ test('a finish mark whose turn-on pull request closed without merging is cleared
   const merged = cli(ctx, [], created, { proposalTransport: { outcome: () => 'merged', list: () => [] } });
   await merged.run();
   assert.deepEqual(created, ['no-force-push'], 'the merged turn-on is finished');
+});
+
+// Owner decision INT-TK421-1398: only the owner's yes to the exact change shown changes a repository's
+// own ruleset. A turn-on's finish was never shown one, so it writes only Toolkit's own.
+test('a turn-on finish never changes the repository\'s own ruleset, even where it allows squash and rebase', async t => {
+  const ctx = governedRepo(t, { workflow: true }), created = [], rulesets = [], own = [];
+  const state = governance.governanceState(ctx.repo, ctx.registryOptions);
+  finishing.markPending(ctx.registryOptions, state.repository_id, { proposal: 1 });
+  const ownRuleset = () => ({ ...unprotected(), rules: [{ type: 'pull_request', ruleset_id: 7, parameters: { allowed_merge_methods: ['merge', 'squash', 'rebase'] } }], rulesets: [{ id: 7, name: 'protect-main', source_type: 'Repository' }] });
+  const run = cli(ctx, rulesets, created, { protectionReader: ownRuleset, protectionWriter: () => ({ ok: true, id: 9 }), ownRulesetWriter: (...args) => { own.push(args); return { ok: true }; }, securityReader: publicSecurity(ctx) });
+  await run.run();
+  assert.match(run.out.join(''), /These governed GitHub repositories need default-branch protection/, 'the finish ran its protection step');
+  assert.deepEqual(own, [], 'the repository\'s own ruleset is not written');
 });

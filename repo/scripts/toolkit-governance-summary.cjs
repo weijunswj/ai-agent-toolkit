@@ -174,7 +174,7 @@ function finishRows(finish, drift, unread = 'GitHub was not read') {
     free = rulesOff.length > 0 && !rulesOn.length && !rulesHeld.length;
     protection = free ? 'Not available on GitHub Free (private)'
       : [rulesOn.length ? `On: ${listed(rulesOn)}` : '', rulesOff.length ? `Not available on GitHub Free: ${listed(rulesOff)}` : '', rulesHeld.length ? `Waiting for you: ${listed(rulesHeld)}` : ''].filter(Boolean).join('. ');
-  } else protection = rulesDrift.length ? `Drift found (${rulesDrift.length}); say toolkit governance migrate` : `Not checked here yet: ${unread}`;
+  } else protection = rulesDrift.length ? `Drift found (${rulesDrift.length}); refresh governance offers the fix once it can read GitHub` : `Not checked here yet: ${unread}`;
   if (finish && (securityOn.length || securityHeld.length)) {
     security = [securityOn.length ? `On: ${listed(securityOn)}` : '', securityHeld.length ? `Waiting for you: ${listed(securityHeld)}` : ''].filter(Boolean).join('. ');
   } else security = securityDrift.length ? `Drift found (${securityDrift.length}); the agent runs toolkit governance security` : `Not checked here yet: ${unread}`;
@@ -202,6 +202,14 @@ const UNREAD_WHY = Object.freeze({
 });
 const unreadWhy = reason => UNREAD_WHY[reason] || String(reason || 'no answer');
 
+// Where on GitHub the owner changes what only they can change: plain settings steps, never a command.
+// The failure this prevents: the result told the owner to run Toolkit's migrate command in their own
+// terminal (SQAG, 28 November 2026).
+const WHERE = Object.freeze({
+  protection: 'Where on GitHub: the repository\'s Settings, then Rules, then Rulesets, for required checks, merge methods and up-to-date branches; Settings, then General, under Pull Requests, for the merge buttons',
+  security: 'Where on GitHub: the repository\'s Settings, then the security settings in its sidebar (Advanced Security, or Code security on some accounts), for scanning and Dependabot; Settings, then General, under Pull Requests, for auto-merge',
+});
+
 // The rows from the live reads (`reads`: conformance.settingsReads's rulesetResult, protectionResult
 // and securityResult, and keepState, the programme state ruleset's verdict where the merged programme
 // file keeps state, else null; branchRead, the default branch's protection read, where the programme
@@ -210,11 +218,12 @@ const unreadWhy = reason => UNREAD_WHY[reason] || String(reason || 'no answer');
 // with why). `fix` lists what one yes changes, the same writes a turn-on's post-merge finish makes
 // (toolkit-governance-migration.cjs finish), or is null when nothing drifted that Toolkit fixes.
 function settingsRows(reads) {
-  const { protectionOffer, protectionNotes } = require('./toolkit-governance-migration.cjs');
+  const { protectionOffer } = require('./toolkit-governance-migration.cjs');
   const rulesets = require('./toolkit-governance-ruleset.cjs');
   const protection = require('./toolkit-governance-protection.cjs');
   const security = require('./toolkit-governance-security.cjs');
   const changes = [];
+  const ownRulesets = [];
   const rules = { on: [], drift: [], free: [], waiting: [], unread: [] };
   const rulesetPart = (result, { on, missing, change }) => {
     if (!result || result.status === 'not-applicable') return;
@@ -249,18 +258,28 @@ function settingsRows(reads) {
     const offer = protectionOffer(branch);
     const settingsDrift = protection.SETTINGS_CHECKS.flatMap(id => (branch.checks[id]?.status === 'drift' ? branch.checks[id].details : []));
     const workflowNotes = ['P3', 'P4'].flatMap(id => (['drift', 'unverified'].includes(branch.checks[id]?.status) ? branch.checks[id].details : []));
+    // The repository's own ruleset changes governance needs (owner decision INT-TK421-1398): in the
+    // same one yes, each with its before and after.
+    const own = !unreadCheck && Array.isArray(branch.own_rulesets) ? branch.own_rulesets : [];
+    for (const entry of own) { changes.push(protection.ownRulesetWords(entry)); ownRulesets.push(entry); }
     if (unreadCheck) rules.unread.push({ name, why: unreadWhy(unreadCheck.details[0]) });
     else if (offer.offered) {
       rules.drift.push(...settingsDrift);
       changes.push(`${branch.toolkit_ruleset ? 'updates' : 'adds'} the "${protection.RULESET_NAME}" ruleset on the default branch (pull requests only, the programme file's required checks pinned to GitHub Actions, branches up to date before merging, merge commits only, nobody can bypass it)`);
-      if (workflowNotes.length) rules.waiting.push(`check the workflows by hand: ${workflowNotes.join('; ')}`);
+      rules.waiting.push(...workflowNotes.map(note => `check the workflow by hand: ${note}`));
     } else {
-      const notes = branch.status === 'drift' ? protectionNotes(branch) : workflowNotes;
-      const why = [
-        offer.fixes && offer.unproduced.length ? `Toolkit's ruleset is not offered while no workflow job produces ${offer.unproduced.map(check => `"${check}"`).join(', ')}` : '',
-        offer.fixes && offer.silent.length ? `Toolkit's ruleset is not offered while ${offer.silent.map(check => `"${check}"`).join(', ')} does not report on every pull request` : '',
-      ].filter(Boolean);
-      rules.waiting.push(`${name}: ${branch.status === 'drift' ? 'change' : 'check'} by hand: ${[...notes, ...why].join('; ') || 'it is not confirmed'}`);
+      // What the own ruleset changes fix is drift the yes fixes; the rest stays the owner's.
+      const after = own.length && branch.own_after ? { ...branch.checks, ...branch.own_after } : branch.checks;
+      const left = protection.SETTINGS_CHECKS.flatMap(id => (after[id]?.status === 'drift' ? after[id].details : []));
+      rules.drift.push(...settingsDrift.filter(detail => !left.includes(detail)));
+      // Each line says one thing: a setting to change by hand, a workflow to check, or why Toolkit's
+      // ruleset is not offered.
+      rules.waiting.push(...left.map(detail => `${name}, change by hand: ${detail}`));
+      rules.waiting.push(...workflowNotes.map(note => `check the workflow by hand: ${note}`));
+      if (offer.fixes && offer.unproduced.length) rules.waiting.push(`${name}: Toolkit's ruleset is not offered while no workflow job produces ${offer.unproduced.map(check => `"${check}"`).join(', ')}`);
+      if (offer.fixes && offer.silent.length) rules.waiting.push(`${name}: Toolkit's ruleset is not offered while ${offer.silent.map(check => `"${check}"`).join(', ')} does not report on every pull request`);
+      if (!left.length && !workflowNotes.length && !own.length && !(offer.fixes && (offer.unproduced.length || offer.silent.length))) rules.waiting.push(`${name}, check by hand: it is not confirmed`);
+      if (left.length) rules.where = WHERE.protection;
     }
   }
   const secure = { on: [], drift: [], free: [], waiting: [], unread: [] };
@@ -278,7 +297,8 @@ function settingsRows(reads) {
       else if (check.status === 'unverified' && check.by_hand === true) byHand.push(...check.details);
       else if (check.status === 'unverified') secure.unread.push({ name: check.details.join('; '), why: null });
     }
-    if (byHand.length) secure.waiting.push(`change by hand: ${byHand.join('; ')}`);
+    secure.waiting.push(...byHand.map(note => `change by hand: ${note}`));
+    if (byHand.length) secure.where = WHERE.security;
     const turnOn = Object.entries(result.fixes).filter(([, wanted]) => wanted).map(([setting]) => security.SETTING_LABELS[setting] || setting);
     if (turnOn.length) changes.push(`turns on ${listed(turnOn)}`);
     const files = [result.files?.dependabot ? security.DEPENDABOT_REL : null, result.files?.workflow ? security.WORKFLOW_REL : null].filter(Boolean);
@@ -286,27 +306,36 @@ function settingsRows(reads) {
     if (!secure.drift.length && !secure.waiting.length && !secure.unread.length) secure.on.push('the free dependency and security settings');
   }
   const free = rules.free.length > 0 && !rules.on.length && !rules.drift.length && !rules.waiting.length && !rules.unread.length;
+  const protectionPart = free ? { state: 'Not available on GitHub Free (private)', items: [] } : partState(rules);
+  const securityPart = partState(secure);
   return {
-    protection: free ? 'Not available on GitHub Free (private)' : partState(rules),
+    protection: protectionPart.state,
     free,
-    security: partState(secure),
-    fix: changes.length ? { changes } : null,
+    security: securityPart.state,
+    details: { protection: protectionPart.items, security: securityPart.items },
+    fix: changes.length ? { changes, ...(ownRulesets.length ? { own_rulesets: ownRulesets } : {}) } : null,
   };
 }
 
-// One row's state from its parts, in a fixed order. Every part unread for the same reason is said once.
-function partState({ on, drift, free, waiting, unread }) {
+// One row's state from its parts: { state, items }. The table cell stays short, each state with its
+// count in a fixed order; the items are the short list shown under the table, one line each, ending
+// with where on GitHub to change what only the owner can (`where`). All on is just On, and every
+// part unread for the same one reason is said once, in the cell.
+// The failure this prevents: SQAG's protection cell held about 12 clauses (owner UAT, 28 November 2026).
+function partState({ on, drift, free, waiting, unread, where = null }) {
   const whys = [...new Set(unread.map(item => item.why))];
-  const unreadText = unread.length && whys.length === 1 && whys[0] && !on.length && !drift.length && !free.length && !waiting.length
-    ? `Not checked here yet: GitHub could not be read (${whys[0]})`
-    : unread.length ? `Not checked here yet: ${unread.map(item => (item.why ? `${item.name} (${item.why})` : item.name)).join('; ')}` : '';
-  return [
-    on.length ? `On: ${listed(on)}` : '',
-    drift.length ? `Drift: ${drift.join('; ')}` : '',
-    free.length ? `Not available on GitHub Free: ${free.join('; ')}` : '',
-    waiting.length ? `Waiting for you: ${waiting.join('; ')}` : '',
-    unreadText,
-  ].filter(Boolean).join('. ') || 'Nothing to check';
+  if (on.length && !drift.length && !free.length && !waiting.length && !unread.length) return { state: 'On', items: [] };
+  if (unread.length && whys.length === 1 && whys[0] && !on.length && !drift.length && !free.length && !waiting.length) return { state: `Not checked here yet: GitHub could not be read (${whys[0]})`, items: [] };
+  const groups = [
+    ['On', on.length, on.length ? [`On: ${listed(on)}`] : []],
+    ['Drift', drift.length, drift.map(item => `Drift: ${item}`)],
+    ['Not available on GitHub Free', free.length, free.map(item => `Not available on GitHub Free: ${item}`)],
+    ['Waiting for you', waiting.length, waiting.map(item => `Waiting for you: ${item}`)],
+    ['Not checked here yet', unread.length, unread.map(item => `Not checked here yet: ${item.why ? `${item.name} (${item.why})` : item.name}`)],
+  ].filter(([, count]) => count > 0);
+  if (!groups.length) return { state: 'Nothing to check', items: [] };
+  const items = [...groups.flatMap(([, , lines]) => lines), ...(where ? [where] : [])];
+  return { state: `${groups.map(([label, count]) => `${label}: ${count} ${count === 1 ? 'item' : 'items'}`).join('; ')}, listed below`, items };
 }
 
 // What the owner's yes did (GovernanceMaintenance.finish's outcome), in plain lines.
@@ -347,11 +376,20 @@ function summaryRows(facts) {
   rows.push(['Required checks', facts.requiredChecks?.length ? `Set: ${facts.requiredChecks.join(', ')}` : 'None listed', DOES.checks]);
   // The programme file update: a pull request already waiting is the step; else the question below.
   const update = facts.update;
-  if (update?.open) steps.push({ part: 'Programme file', text: `An update waits in ${update.open.url}: merge it, then say toolkit governance.` });
+  if (update?.open && update.refresh) {
+    const checks = update.refresh.checks;
+    steps.push({ part: 'Programme file', text: `An update waits in ${update.open.url}, but Toolkit's refresh pull request ${update.refresh.url} adds the ${listed(checks)} ${checks.length === 1 ? 'check' : 'checks'}, which that update does not list. Merge the refresh pull request first, then close the update on GitHub and say toolkit governance: one update then covers ${checks.length === 1 ? 'it' : 'them'} too. Merging the update now means a second one afterwards.` });
+  } else if (update?.open) steps.push({ part: 'Programme file', text: `An update waits in ${update.open.url}: merge it, then say toolkit governance.` });
+  else if (update?.refresh) {
+    const checks = update.refresh.checks;
+    steps.push({ part: 'Programme file', text: `It is behind this Toolkit, and Toolkit's refresh pull request ${update.refresh.url} adds the ${listed(checks)} ${checks.length === 1 ? 'check' : 'checks'}. Once it has merged, say toolkit governance: one pull request then brings the programme file up to date, with ${checks.length === 1 ? 'that check' : 'those checks'} included.` });
+  }
   else if (update?.offer) steps.push({ part: 'Programme file', text: `It is behind this Toolkit: one pull request ${updateWords(update.offer)}.${update.offer.branchUnread ? " The default branch's required checks could not be read, so only Toolkit's own are added." : ''} Answer question 1 below.` });
   const finish = facts.settings || finishRows(facts.finish, facts.drift, facts.unread || undefined);
   rows.push(['Branch protection and rulesets', finish.protection, finish.free ? DOES['protection-free'] : DOES.protection]);
   rows.push(['Security settings', finish.security, DOES.security]);
+  // What the short cells count, listed under the table.
+  const details = [['Branch protection and rulesets', finish.details?.protection || []], ['Security settings', finish.details?.security || []]].filter(([, items]) => items.length);
   // Settings drift Toolkit fixes: asked after the programme file update, when that is asked too.
   if (finish.fix) steps.push({ part: 'GitHub settings', text: `They have drifted from what governance needs, as the table shows. One yes fixes them the way a turn-on sets them up. Answer question ${questionNumbers(facts).fix} below.` });
   const workflows = presenceRow(WORKFLOW_FILES, facts.files, { defaultBranch: facts.defaultBranch });
@@ -392,7 +430,20 @@ function summaryRows(facts) {
       : [pages.length ? `${pages.length} ${pages.length === 1 ? 'page has' : 'pages have'} plain rows (${issues(pages)}); say convert done-when rows` : 'No plain rows to convert',
         ...(missing.length ? [`${missing.length} without rows for the controller to write (${issues(missing)})`] : [])].join('; '), DOES['done-when']]);
   }
-  return { rows, steps };
+  return { rows, steps, details };
+}
+
+// What the summary shows, part by part, for naming what changed when a reply comes after it did
+// (toolkit-governance-bank.cjs shownParts): [[part name, what it showed]], each table row with its
+// listed details and its step, then the programme file and GitHub settings with their step and question.
+function summaryParts(facts) {
+  const { rows, steps, details } = summaryRows(facts);
+  const parts = new Map(rows.map(([part, state]) => [part, { state, listed: (details.find(([name]) => name === part) || [null, []])[1] }]));
+  const add = (part, key, value) => parts.set(part, { ...(parts.get(part) || {}), [key]: value });
+  for (const step of steps) add(step.part, 'step', step.text);
+  add('Programme file', 'question', facts.update?.offer && !facts.update.open ? facts.update.offer : null);
+  add('GitHub settings', 'question', facts.settings?.fix || null);
+  return [...parts];
 }
 
 // The questions the summary asks, numbered in order: the programme file update, then the settings fix.
@@ -405,7 +456,7 @@ function questionNumbers(facts) {
 // The owner-facing summary. `held` is whether governance actions are held until setup is complete
 // (toolkit-governance-ready.cjs: the merged programme file asks for the hold and a part is gone).
 function renderSummary(facts, { held = false } = {}) {
-  const { rows, steps } = summaryRows(facts);
+  const { rows, steps, details } = summaryRows(facts);
   const top = steps.length
     ? `**Governance: on, not ready: ${steps.length} ${steps.length === 1 ? 'step' : 'steps'} left.**${held ? ' Programme records, gate records and task auto-merge are held until then.' : ''}`
     : '**Governance: on and ready.**';
@@ -418,6 +469,7 @@ function renderSummary(facts, { held = false } = {}) {
     '|---|---|---|',
     ...rows.map(([part, state, does]) => `| ${cell(part)} | ${cell(state)} | ${cell(does)} |`),
     '',
+    ...details.flatMap(([part, items]) => [`**${part}:**`, ...items.map(item => `- ${item}`), '']),
     ...(facts.stale ? [`GitHub could not be read just now (${facts.stale}), so the programme file values are the ones this computer last read.`, ''] : []),
     'To change something later, say: turn off governance, task auto-merge on or off, or change store.',
     ...(questionNumbers(facts).update ? [
@@ -461,4 +513,4 @@ function parseChange(text, { copies = false, rows = false, update = false, fix =
   throw new GuidedAnswerError(`This was not read as a change: "${String(text || '').trim()}". Say turn off governance, task auto-merge on or off, or change store${asked}.`);
 }
 
-module.exports = Object.freeze({ DOES, branchRequiredChecks, finishRows, fixResultLines, mergedFiles, mergedOwnChecks, parseChange, programmeUpdate, programmeUpdateText, questionNumbers, renderSummary, settingsRows, summaryRows, updateWords });
+module.exports = Object.freeze({ DOES, WHERE, branchRequiredChecks, summaryParts, finishRows, fixResultLines, mergedFiles, mergedOwnChecks, parseChange, programmeUpdate, programmeUpdateText, questionNumbers, renderSummary, settingsRows, summaryRows, updateWords });

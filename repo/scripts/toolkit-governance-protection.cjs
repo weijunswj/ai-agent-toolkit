@@ -265,8 +265,9 @@ function aggregateProblem(job, workflowContext) {
 //     mapping, explicit key or reserved character) and holds no `: ` or ` #` (a quote inside a
 //     plain value must never stop a comment from starting), a quoted scalar closed on the same
 //     line with no escape or doubled quote (so it reads as its plain text), a one-line flow list
-//     of such scalars, or, only for `run`, `if`, `shell` and `continue-on-error`, a block scalar
-//     header (`|`, `>`, optionally `-` or `+`);
+//     of such scalars, or a block scalar header (`|`, `>`, optionally `-` or `+`) for `run`, `if`,
+//     `shell` and `continue-on-error` (read as text) or for a key whose value the reader never reads
+//     (see readsValue: a service's `options`, a step's `with`), whose text is then skipped;
 //   - every key sits at the indent of the mapping it belongs to, and every list item at the
 //     indent of its list;
 //   - a value never continues on the next line: after `key: value` the next line is not deeper,
@@ -281,6 +282,24 @@ const YAML_NULL = /^(?:~|null|Null|NULL)$/;
 // a job name written this way is not the name GitHub shows (`1.10` is 1.1, `True` is true).
 const YAML_NOT_TEXT = /^(?:true|True|TRUE|false|False|FALSE|[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+|[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$/;
 const BLOCK_KEYS = Object.freeze(['run', 'if', 'shell', 'continue-on-error']);
+// The job and step fields readWorkflow reads (by value, by children or by presence).
+const READ_JOB_FIELDS = Object.freeze(['name', 'needs', 'strategy', 'if', 'steps', 'uses', 'continue-on-error', 'defaults', 'env']);
+const READ_STEP_FIELDS = Object.freeze(['run', 'env', 'if', 'continue-on-error', 'shell', 'working-directory', 'uses']);
+
+// Whether readWorkflow reads the value at `path` (keys from the root; null marks a list item). A block
+// scalar anywhere it reads stays outside the subset (other than BLOCK_KEYS), so block text is never
+// read as structure, a name or a filter; one where it never reads (a service's `options`, a step's
+// `with`, `runs-on`, `permissions`) is skipped. Block text sits deeper than its key, so the
+// reader, which reads only the direct children of what it reads, never meets it.
+function readsValue(path) {
+  const [top, , field, , stepField] = path;
+  if (['on', 'defaults', 'env'].includes(top)) return true;
+  if (top !== 'jobs') return false;
+  if (path.length <= 2) return true;
+  if (!READ_JOB_FIELDS.includes(field)) return false;
+  if (field !== 'steps' || path.length < 5) return true;
+  return READ_STEP_FIELDS.includes(stepField);
+}
 
 function plainValueProblem(value) {
   if (/^[|>][+-]?$/.test(value)) return null;
@@ -314,9 +333,10 @@ function strictSubsetProblem(source) {
   let blankIndent = 0; // the deepest whitespace-only line before that first content line
   let rootOpened = false; // a new root mapping may open only before the first key
   let expectDeeper = null; // the content indent after `key:`, until the next line
+  let expectPath = null; // the path of that `key:`
   let noDeeper = null; // the content indent after a scalar value
   let seenContent = false;
-  const containers = []; // [{ type: 'map' | 'list', indent, keys }]
+  const containers = []; // [{ type: 'map' | 'list', indent, keys, path }]
   for (let index = 0; index < raw.length; index += 1) {
     const line = raw[index];
     const number = index + 1;
@@ -346,7 +366,9 @@ function strictSubsetProblem(source) {
     if (/^(?:---|\.\.\.)(?: |$)/.test(trimmed) || trimmed.startsWith('%')) return `line ${number} starts another document or a directive`;
     if (noDeeper !== null && indent > noDeeper) return `line ${number} continues the value above it`;
     const pending = expectDeeper;
+    const pendingPath = expectPath;
     expectDeeper = null;
+    expectPath = null;
     noDeeper = null;
     let body = stripComment(line).trimEnd().slice(indent);
     if (body === '-') return `line ${number} is a list item with no value`;
@@ -359,7 +381,7 @@ function strictSubsetProblem(source) {
       const top = containers.at(-1);
       if (!(top && top.type === 'list' && top.indent === indent)) {
         if (pending === null || indent < pending) return `line ${number} is a list item at an indent that belongs to no list`;
-        containers.push({ type: 'list', indent });
+        containers.push({ type: 'list', indent, path: pendingPath });
       }
     }
     const contentIndent = item ? indent + 2 : indent;
@@ -374,24 +396,31 @@ function strictSubsetProblem(source) {
     }
     const key = keyMatch[1] || keyMatch[2] || keyMatch[3];
     const value = keyMatch[4] === undefined ? '' : keyMatch[4].trim();
-    if (item) containers.push({ type: 'map', indent: contentIndent, keys: new Set([key]) });
-    else {
+    let path;
+    if (item) {
+      const list = containers.at(-1);
+      containers.push({ type: 'map', indent: contentIndent, keys: new Set([key]), path: [...list.path, null] });
+      path = [...list.path, null, key];
+    } else {
       while (containers.length && (containers.at(-1).indent > indent || (containers.at(-1).type === 'list' && containers.at(-1).indent >= indent))) containers.pop();
       const top = containers.at(-1);
       if (top && top.type === 'map' && top.indent === indent) {
         if (top.keys.has(key)) return `line ${number} repeats the key "${key}"`;
         top.keys.add(key);
+        path = [...top.path, key];
       } else if ((pending !== null && indent > pending) || (containers.length === 0 && !rootOpened)) {
+        const parent = pending !== null && indent > pending ? pendingPath : [];
         rootOpened = true;
-        containers.push({ type: 'map', indent, keys: new Set([key]) });
+        containers.push({ type: 'map', indent, keys: new Set([key]), path: parent });
+        path = [...parent, key];
       }
       else return `line ${number} has a key at an indent that belongs to no mapping`;
     }
-    if (value === '') { expectDeeper = contentIndent; continue; }
+    if (value === '') { expectDeeper = contentIndent; expectPath = path; continue; }
     const problem = plainValueProblem(value);
     if (problem) return `line ${number} has ${problem}`;
     if (/^[|>][+-]?$/.test(value)) {
-      if (!BLOCK_KEYS.includes(key)) return `line ${number} gives "${key}" a block scalar, which this check reads only for ${BLOCK_KEYS.join(', ')}`;
+      if (!BLOCK_KEYS.includes(key) && readsValue(path)) return `line ${number} gives "${key}" a block scalar where this check reads its value, which it reads as a block only for ${BLOCK_KEYS.join(', ')}`;
       block = contentIndent;
       blockContent = null;
       blankIndent = 0;
@@ -700,7 +729,16 @@ function ghProtectionReader(slug, { spawn = childProcess.spawnSync } = {}) {
   }
   const list = ghJson([`repos/${slug}/rulesets?targets=branch&per_page=100`], spawn);
   if (!list.ok) return list;
-  const own = (Array.isArray(list.value) ? list.value : []).find(entry => entry && entry.name === RULESET_NAME && entry.source_type !== 'Organization');
+  const listed = Array.isArray(list.value) ? list.value : [];
+  const own = listed.find(entry => entry && entry.name === RULESET_NAME && entry.source_type !== 'Organization');
+  // The branches each of the repository's own rulesets on this branch covers, so a change to it can
+  // say where it applies; null when that ruleset could not be read (then it is not offered).
+  const onBranch = new Set(rules.value.map(rule => rule && rule.ruleset_id));
+  const branchesOf = entry => {
+    if (entry.source_type !== 'Repository' || entry.name === RULESET_NAME || !onBranch.has(entry.id)) return undefined;
+    const ruleset = ghJson([`repos/${slug}/rulesets/${entry.id}`], spawn);
+    return ruleset.ok ? ownBranches(ruleset.value) : null;
+  };
   return {
     ok: true,
     default_branch: branch,
@@ -708,6 +746,10 @@ function ghProtectionReader(slug, { spawn = childProcess.spawnSync } = {}) {
     rules: rules.value,
     classic,
     toolkit_ruleset: own && Number.isInteger(own.id) ? { id: own.id } : null,
+    rulesets: listed.filter(entry => entry && Number.isInteger(entry.id) && typeof entry.name === 'string').map(entry => {
+      const branches = branchesOf(entry);
+      return { id: entry.id, name: entry.name, source_type: entry.source_type, ...(branches === undefined ? {} : { branches }) };
+    }),
   };
 }
 
@@ -742,6 +784,118 @@ function protectionRulesetBody(requiredChecks) {
       },
     ],
   };
+}
+
+// ---- the repository's own rulesets (owner decision INT-TK421-1398) ------------------------------
+// Refresh governance may change a governed repository's own rulesets on the default branch to what
+// governance needs, only after the owner's yes to the exact change shown, and reads each one back:
+// merge commits only where a ruleset lists other merge methods, branches up to date where its
+// required status checks rule does not ask for it, and the binding's checks it requires pinned to
+// GitHub Actions where every one has exactly one workflow job producing it (`pin`). It never adds or
+// removes a required check there (one no job produces would block every merge), and never touches an
+// organization ruleset or one of Toolkit's own. The failure this prevents: SQAG's own ruleset allowed
+// squash and rebase and did not require up-to-date branches, and Toolkit could only say to change it
+// by hand (28 November 2026).
+
+// A ruleset's branch conditions as { include, exclude } (lists of patterns), or null when unreadable.
+function ownBranches(ruleset) {
+  const refs = ruleset && ruleset.conditions && ruleset.conditions.ref_name;
+  if (!refs || !Array.isArray(refs.include) || !refs.include.every(item => typeof item === 'string')) return null;
+  const exclude = Array.isArray(refs.exclude) ? refs.exclude.filter(item => typeof item === 'string') : [];
+  return { include: [...refs.include], exclude };
+}
+
+const OWN_SETTINGS = Object.freeze({
+  allowed_merge_methods: { rule: 'pull_request', parameter: 'allowed_merge_methods' },
+  strict_required_status_checks_policy: { rule: 'required_status_checks', parameter: 'strict_required_status_checks_policy' },
+  pinned_checks: { rule: 'required_status_checks', parameter: 'required_status_checks' },
+});
+
+// [{ id, name, branches, changes: [{ setting, before, after }] }] for the repository's own rulesets on
+// the default branch, from a protection read (ghProtectionReader); [] when the read failed. A ruleset
+// whose branches could not be read is not offered: the owner must see where a change applies.
+function ownRulesetChanges(read, requiredChecks, { pin = false } = {}) {
+  if (!read || read.ok !== true || !Array.isArray(read.rules)) return [];
+  const toolkitId = read.toolkit_ruleset ? read.toolkit_ruleset.id : null;
+  const names = new Map((read.rulesets || []).filter(entry => entry.source_type === 'Repository' && !/^Toolkit: /.test(entry.name) && entry.branches).map(entry => [entry.id, entry]));
+  const found = new Map();
+  for (const rule of read.rules) {
+    if (!rule || !rule.parameters || !Number.isInteger(rule.ruleset_id) || rule.ruleset_id === toolkitId || !names.has(rule.ruleset_id)) continue;
+    const listedRuleset = names.get(rule.ruleset_id);
+    const entry = found.get(rule.ruleset_id) || { id: rule.ruleset_id, name: listedRuleset.name, branches: listedRuleset.branches, changes: [] };
+    found.set(rule.ruleset_id, entry);
+    const methods = rule.parameters.allowed_merge_methods;
+    if (rule.type === 'pull_request' && Array.isArray(methods) && !(methods.length === 1 && methods[0] === 'merge')) entry.changes.push({ setting: 'allowed_merge_methods', before: [...methods], after: ['merge'] });
+    if (rule.type === 'required_status_checks') {
+      if (rule.parameters.strict_required_status_checks_policy !== true) entry.changes.push({ setting: 'strict_required_status_checks_policy', before: rule.parameters.strict_required_status_checks_policy === undefined ? false : rule.parameters.strict_required_status_checks_policy, after: true });
+      const unpinned = (rule.parameters.required_status_checks || []).filter(item => item && requiredChecks.includes(item.context) && !Number.isInteger(item.integration_id)).map(item => item.context);
+      if (pin && unpinned.length) entry.changes.push({ setting: 'pinned_checks', before: unpinned, after: unpinned.map(context => ({ context, integration_id: GITHUB_ACTIONS_APP_ID })) });
+    }
+  }
+  return [...found.values()].filter(entry => entry.changes.length);
+}
+
+// The rules of a ruleset with `changes` applied, or null when any value differs from the one shown
+// (`before`): the yes covers only the exact change it saw.
+function applyOwnChanges(rules, changes) {
+  const next = JSON.parse(JSON.stringify(Array.isArray(rules) ? rules : []));
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  for (const change of changes) {
+    const where = OWN_SETTINGS[change.setting];
+    const matching = where ? next.filter(rule => rule && rule.type === where.rule && rule.parameters) : [];
+    if (matching.length !== 1) return null;
+    const parameters = matching[0].parameters;
+    if (change.setting === 'pinned_checks') {
+      const unpinned = (parameters.required_status_checks || []).filter(item => item && change.before.includes(item.context) && !Number.isInteger(item.integration_id)).map(item => item.context);
+      if (!same(unpinned, change.before)) return null;
+      parameters.required_status_checks = parameters.required_status_checks.map(item => (change.before.includes(item.context) ? { ...item, integration_id: GITHUB_ACTIONS_APP_ID } : item));
+    } else {
+      const current = parameters[where.parameter] === undefined && change.setting === 'strict_required_status_checks_policy' ? false : parameters[where.parameter];
+      if (!same(current, change.before)) return null;
+      parameters[where.parameter] = change.after;
+    }
+  }
+  return next;
+}
+
+// Writes the shown `entry` ({ id, name, branches, changes }) to the repository's own ruleset: reads it,
+// refuses when it is not that repository ruleset, its branches or a value differ from the ones shown
+// (ruleset-changed), sends only its rules, then reads it back: each change holds, and its name,
+// target, enforcement, branches and bypass list are as they were. { ok: true } or { ok: false, reason }.
+function ghOwnRulesetWriter(slug, entry, { spawn = childProcess.spawnSync } = {}) {
+  const endpoint = `repos/${slug}/rulesets/${entry.id}`;
+  const before = ghJson([endpoint], spawn);
+  if (!before.ok) return before;
+  const ruleset = before.value || {};
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  if (ruleset.id !== entry.id || ruleset.name !== entry.name || ruleset.source_type !== 'Repository' || !same(ownBranches(ruleset), entry.branches)) return { ok: false, reason: 'ruleset-changed' };
+  const rules = applyOwnChanges(ruleset.rules, entry.changes);
+  if (!rules) return { ok: false, reason: 'ruleset-changed' };
+  const written = ghJson(['-X', 'PUT', endpoint, '--input', '-'], spawn, JSON.stringify({ rules }));
+  if (!written.ok) return written;
+  const after = ghJson([endpoint], spawn);
+  if (!after.ok) return { ok: false, reason: 'not-read-back' };
+  const kept = ['name', 'target', 'enforcement', 'conditions', 'bypass_actors'];
+  if (!after.value || kept.some(key => !same(after.value[key], ruleset[key]))) return { ok: false, reason: 'not-read-back' };
+  const back = after.value.rules || [];
+  const holds = entry.changes.every(change => {
+    const rule = back.find(item => item && item.type === OWN_SETTINGS[change.setting].rule && item.parameters);
+    if (!rule) return false;
+    if (change.setting === 'pinned_checks') return change.before.every(context => (rule.parameters.required_status_checks || []).some(item => item.context === context && item.integration_id === GITHUB_ACTIONS_APP_ID));
+    return JSON.stringify(rule.parameters[OWN_SETTINGS[change.setting].parameter]) === JSON.stringify(change.after);
+  });
+  return holds ? { ok: true } : { ok: false, reason: 'not-read-back' };
+}
+
+// One plain line for a shown change: the ruleset, then each setting from before to after.
+function ownRulesetWords(entry) {
+  const words = change => (change.setting === 'allowed_merge_methods' ? `merge methods from ${change.before.join(', ') || 'none'} to merge commits only`
+    : change.setting === 'strict_required_status_checks_policy' ? 'branches up to date before merging from not required to required'
+      : `${change.before.map(context => `"${context}"`).join(', ')} from any source to pinned to GitHub Actions`);
+  const branch = pattern => (pattern === '~DEFAULT_BRANCH' ? 'the default branch' : pattern === '~ALL' ? 'every branch' : String(pattern).replace(/^refs\/heads\//, ''));
+  const list = items => (items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items.at(-1)}` : items[0] || 'no branch');
+  const covers = `it covers ${list(entry.branches.include.map(branch))}${entry.branches.exclude.length ? `, except ${list(entry.branches.exclude.map(branch))}` : ''}`;
+  return `changes the repository's own ruleset "${entry.name}" (${covers}): ${entry.changes.map(words).join('; ')}`;
 }
 
 // Creates the Toolkit ruleset, or updates it when `existingId` names it. { ok, id } or { ok: false, reason }.
@@ -837,7 +991,20 @@ function defaultBranchProtection(root, { requiredChecks = [], commit = null, off
   }
   const statuses = Object.values(checks).map(entry => entry.status);
   const status = statuses.includes('drift') ? 'drift' : statuses.every(item => item === 'ok') ? 'conformant' : 'unverified';
-  return verdict(status, null, checks, read && read.ok ? { toolkit_ruleset: read.toolkit_ruleset, slug } : { slug });
+  if (!read || !read.ok) return verdict(status, null, checks, { slug });
+  // The repository's own ruleset changes governance needs, and the settings checks as they would read
+  // after them (what is still left for Toolkit's ruleset or the owner).
+  const own = ownRulesetChanges(read, requiredChecks, { pin: checks.P3.status === 'ok' });
+  let ownAfter = null;
+  if (own.length) {
+    let rules = read.rules;
+    for (const entry of own) {
+      const applied = applyOwnChanges(rules.filter(rule => rule && rule.ruleset_id === entry.id), entry.changes);
+      if (applied) rules = [...rules.filter(rule => !rule || rule.ruleset_id !== entry.id), ...applied];
+    }
+    ownAfter = settingsVerdict(requiredChecks, { ...read, rules });
+  }
+  return verdict(status, null, checks, { toolkit_ruleset: read.toolkit_ruleset, slug, own_rulesets: own, own_after: ownAfter });
 }
 
 module.exports = Object.freeze({
@@ -850,5 +1017,9 @@ module.exports = Object.freeze({
   protectionRulesetBody,
   ghProtectionReader,
   ghProtectionRulesetWriter,
+  ownRulesetChanges,
+  applyOwnChanges,
+  ghOwnRulesetWriter,
+  ownRulesetWords,
   defaultBranchProtection,
 });
